@@ -1,27 +1,23 @@
-# AI Agent Configuration SOP
+# DFWSC AI Agent Configs
 
-Standard Operating Procedure for AI coding agent tooling and workflows.
-
-## What This Repository Contains
-
-All agent configurations are in [`ai-code-agents/`](ai-code-agents/).
+This directory contains DFWSC configuration and setup material for the AI coding tools used in daily development.
 
 ## Quick Links
 
 | What you need | Where to find it |
 |---------------|------------------|
-| Set up Cline (VS Code) | [`ai-code-agents/cline/README.md`](ai-code-agents/cline/README.md) |
-| Set up OpenCode | [`ai-code-agents/opencode/README.md`](ai-code-agents/opencode/README.md) |
-| Use custom commands | [`ai-code-agents/commands/`](ai-code-agents/commands/) |
-| Available skills | [`ai-code-agents/skills/README.md`](ai-code-agents/skills/README.md) |
+| Cline setup (VS Code) | [`cline/README.md`](cline/README.md) |
+| OpenCode config files | [`opencode/`](opencode/) |
+| Claude config files | [`claude/`](claude/) |
+| Skills reference | [`skills/README.md`](skills/README.md) |
 
 ## Supported Agents
 
 | Tool | What it is | Configuration location |
 |------|------------|------------------------|
-| **Cline** | VS Code extension with local vLLM | `ai-code-agents/cline/` |
-| **OpenCode** | Open-source terminal AI assistant | `ai-code-agents/opencode/` |
-| **Claude Code** | Terminal-based AI agent | Uses `ai-code-agents/commands/` and `ai-code-agents/skills/` |
+| **Cline** | VS Code extension with local vLLM | `cline/` |
+| **OpenCode** | Terminal AI assistant | `opencode/` |
+| **Claude Code** | Terminal AI agent | `claude/` |
 
 ## Quick Setup
 
@@ -34,7 +30,7 @@ curl -fsSL https://opencode.ai/install | bash
 ### 2. Cline (VS Code Extension)
 
 1. Install from VS Code Marketplace
-2. Configure vLLM backend (see [`ai-code-agents/cline/README.md`](ai-code-agents/cline/README.md)):
+2. Configure vLLM backend (see [`cline/README.md`](cline/README.md)):
    - **API Provider**: OpenAI Compatible
    - **Base URL**: `http://192.168.62.138:9000/v1`
    - **API Key**: `EMPTY` (vLLM default)
@@ -72,12 +68,7 @@ Usage: `/qa <file-or-directory>`
 
 ### Available Skills
 
-| Skill | Purpose |
-|-------|---------|
-| `biome-linter` | Lint and format with auto-fix |
-| `codebase-research` | Map unfamiliar codebases |
-| `deep-review-workflow` | Security and bug review |
-| `worktree-hygiene` | Git worktree discipline |
+See [`skills/README.md`](skills/README.md) for skill structure, cross-tool compatibility notes, and setup guidance.
 
 ## Contributing
 
@@ -108,14 +99,14 @@ When adding new agent configurations:
 
 ```
 ai-code-agents/
-├── [cline/](ai-code-agents/cline/)           # Cline VS Code extension setup
-├── [commands/](ai-code-agents/commands/)        # Custom slash commands
-├── [opencode/](ai-code-agents/opencode/)        # OpenCode configuration
-└── [skills/](ai-code-agents/skills/)          # Reusable AI skills and workflows
+├── [claude/](claude/)        # Claude Code local config and assets
+├── [cline/](cline/)          # Cline VS Code extension setup
+├── [opencode/](opencode/)    # OpenCode configuration files
+└── [skills/](skills/)        # Skill authoring and portability reference
 ```
 
 ---
 
-**All configurations are in:** [`ai-code-agents/`](ai-code-agents/)
+**All configurations are in:** [`ai-code-agents/`](.)
 
 **Main SOP:** See [`../README.md`](../README.md) for the AI-Assisted Development Workflow SOP.

@@ -123,13 +123,11 @@ Each tool has its own quirks, permission model, and evolving feature set. This R
 | OpenCode    | <https://opencode.ai/docs/>                               |
 | Agent Skills Standard | <https://agentskills.io>                        |
 
-## Directory Layout
+## Current Directory Layout
 
 ```
 skills/
-  README.md                  # This file
-  biome-linter/              # Lint and format code with Biome, auto-fix common issues
-  codebase-research/         # Map unfamiliar codebases using ast-grep and parallel agents
-  deep-review-workflow/      # Autonomous code review for security, bugs, and smells
-  worktree-hygiene/          # Enforce git worktree discipline to prevent branch contamination
+  README.md                  # This reference guide
 ```
+
+When you add repository-local skills, place them under `skills/<name>/SKILL.md` using the structure described in "The Common Pattern" above.

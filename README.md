@@ -1,38 +1,29 @@
 # Agent Configs
 
-Internal repository for Onix Media AI agent configurations and tooling.
+AI coding agent configurations, engineering principles, and workflows.
 
-## Resources
+## What's Here
 
-- [Context Engineering for AI Coding Agents](https://www.youtube.com/watch?v=IS_y40zY-hc)
+| Directory | Purpose |
+|-----------|---------|
+| **[ai-code-agents/](ai-code-agents/)** | AI agent configurations, custom commands, and skills |
+| **[engineering-principles/](engineering-principles/)** | Engineering SOP, templates, and best practices |
 
-## Overview
+## Quick Links
 
-This repository contains configurations, workflows, and documentation for AI coding agents used by the team. It serves as a central reference for setting up and customizing various AI-assisted development tools.
-
-## Contents
-
-- **cline/** - Configuration for Cline VS Code extension
-- **commands/** - Claude Code custom slash commands
-- **opencode/** - Configuration for OpenCode AI assistant
-- **context-engineer/** - Context engineering workflow configurations
-- **smart-git.md** - Smart git automation documentation
-
-## Quick Install
-
-**OpenCode:**
-```bash
-curl -fsSL https://opencode.ai/install | bash
-```
+- **[SOP](engineering-principles/SOP.md)** — AI-Assisted Development Workflow (4-gate process)
+- **[Work Issue Template](engineering-principles/git/work-issue.md)** — Gate 1 & 2 templates
+- **[Work PR Template](engineering-principles/git/work-pr.md)** — Gate 4 verification template
+- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, and Claude Code setup
 
 ## Getting Started
 
-Each subdirectory contains its own README with specific setup instructions and configuration details.
+1. Read the **[SOP](engineering-principles/SOP.md)** to understand the workflow
+2. Use the **[work issue template](engineering-principles/git/work-issue.md)** when starting new work
+3. Configure your AI agents using **[ai-code-agents/](ai-code-agents/)** guides
 
 ## Contributing
 
-When adding new agent configurations:
-1. Create a dedicated directory for the tool
-2. Include a README with setup instructions
-3. Document any custom configurations or workflows
-# agents.dfwsc.config
+- Place AI agent configs in `ai-code-agents/`
+- Place engineering standards in `engineering-principles/`
+- Follow the 4-gate workflow defined in the SOP

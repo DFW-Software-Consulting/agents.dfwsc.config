@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:opencode.ai)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Skill(gitea-issue-maker)",
+      "Bash(git remote:*)",
+      "Bash(git config:*)",
+      "Bash(git -C /root/bpr-app remote get-url:*)",
+      "Bash(git -C /root/bpr remote get-url:*)",
+      "Bash(git -C /root/production-projects/bpr remote get-url:*)"
+    ]
+  }
+}

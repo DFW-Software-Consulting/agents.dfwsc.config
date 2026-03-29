@@ -1,0 +1,65 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+        "openai": {
+            "npm": "@ai-sdk/openai",
+            "name": "OpenAI",
+            "options": {
+                "apiKey": "{env:OPENAI_API_KEY}"
+            },
+            "models": {
+                "chatgpt-5.4": {
+                    "name": "ChatGPT 5.4",
+                    "limit": {
+                        "context": 128000,
+                        "output": 16384
+                    }
+                }
+            }
+        },
+        "vllm": {
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+                "baseURL": "http://localhost:8000/v1"
+            },
+            "models": {
+                "qwen-coder": {
+                    "id": "Qwen/Qwen2.5-Coder-3B-Instruct",
+                    "maxTokens": 24576
+                }
+            }
+        }
+    },
+    "model": "openai/chatgpt-5.4",
+    "experimental": {
+        "hook": {
+            "file_edited": {
+                ".json": [
+                    {
+                        "command": ["bun", "run", "prettier", "$FILE"]
+                    }
+                ]
+            },
+            "session_completed": [
+                {
+                    "command": ["touch", "./node_modules/foo"]
+                }
+            ]
+        }
+    },
+    "agent": {
+        "review": {
+            "description": "Reviews code for best practices and potential issues"
+        }
+    },
+    "mcp": {
+      "shopify": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "shopify-mcp-server"
+        ]
+      }
+    }
+}

@@ -9,6 +9,8 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | Cline setup (VS Code) | [`cline/README.md`](cline/README.md) |
 | OpenCode config files | [`opencode/`](opencode/) |
 | Claude config files | [`claude/`](claude/) |
+| Gemini config files | [`gemini/`](gemini/) |
+| Qwen config files | [`qwen/`](qwen/) |
 | Skills reference | [`skills/README.md`](skills/README.md) |
 
 ## Supported Agents
@@ -18,6 +20,8 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | **Cline** | VS Code extension with local vLLM | `cline/` |
 | **OpenCode** | Terminal AI assistant | `opencode/` |
 | **Claude Code** | Terminal AI agent | `claude/` |
+| **Gemini CLI** | Terminal AI agent (Google) | `gemini/` |
+| **Qwen** | Terminal AI assistant (via OpenCode) | `qwen/` |
 
 ## Quick Setup
 
@@ -53,6 +57,8 @@ Step-by-step instructions...
 |------|-------------|
 | Claude Code | `.claude/skills/<name>/SKILL.md` |
 | OpenCode | `.opencode/skills/<name>/SKILL.md` |
+| Gemini CLI | `.gemini/skills/<name>/SKILL.md` |
+| Qwen | `.qwen/skills/<name>/SKILL.md` |
 | Codex CLI | `.agents/skills/<name>/SKILL.md` |
 
 ## Workflow Standards
@@ -82,13 +88,13 @@ When adding new agent configurations:
 
 ## Tool Comparison
 
-| Feature | Claude Code | OpenCode | Cline |
-|---------|-------------|----------|-------|
-| Terminal-based | Yes | Yes | No (VS Code) |
-| Local LLM | Yes | Yes | Yes (vLLM) |
-| Custom commands | Yes | Yes | Limited |
-| Skills system | Yes | Yes | No |
-| Plugin ecosystem | Yes | Yes | No |
+| Feature | Claude Code | OpenCode | Cline | Gemini CLI | Qwen |
+||---------|-------------|----------|-------|------------|------|
+| Terminal-based | Yes | Yes | No (VS Code) | Yes | Yes |
+| Local LLM | Yes | Yes | Yes (vLLM) | No | Yes |
+| Custom commands | Yes | Yes | Limited | Yes | Yes |
+| Skills system | Yes | Yes | No | Yes | Yes |
+| Plugin ecosystem | Yes | Yes | No | Yes | No |
 
 ## Additional Resources
 
@@ -101,7 +107,9 @@ When adding new agent configurations:
 ai-code-agents/
 ├── [claude/](claude/)        # Claude Code local config and assets
 ├── [cline/](cline/)          # Cline VS Code extension setup
+├── [gemini/](gemini/)        # Gemini CLI config and assets
 ├── [opencode/](opencode/)    # OpenCode configuration files
+├── [qwen/](qwen/)            # Qwen config and assets
 └── [skills/](skills/)        # Skill authoring and portability reference
 ```
 

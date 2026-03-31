@@ -123,11 +123,16 @@ Each tool has its own quirks, permission model, and evolving feature set. This R
 | OpenCode    | <https://opencode.ai/docs/>                               |
 | Agent Skills Standard | <https://agentskills.io>                        |
 
-## Current Directory Layout
+## Current Skills
 
-```
-skills/
-  README.md                  # This reference guide
-```
+| Skill | Purpose | Tools |
+|-------|---------|-------|
+| `biome-linter` | Lint/format with Biome, apply safe fixes, summarize remaining issues | Claude Code, OpenCode |
+| `codebase-research` | Map codebase structure using structural analysis (ast-grep) | Claude Code, OpenCode |
+| `deep-review-workflow` | Detect and fix security, bug, and code smell issues autonomously | Claude Code, OpenCode |
+| `git-workflow` | Safe commit/push/PR/issue creation with pre-hook enforcement | Claude Code, OpenCode |
+| `worktree-hygiene` | Prevent branch contamination in git worktrees | Claude Code, OpenCode |
+
+Each skill is mirrored in `claude/skills/<name>/SKILL.md` and `opencode/skills/<name>/SKILL.md` (identical content).
 
 When you add repository-local skills, place them under `skills/<name>/SKILL.md` using the structure described in "The Common Pattern" above.

@@ -26,33 +26,60 @@ Use this project to keep AI agent setup and engineering process docs in one plac
 2. Use the **[work issue template](engineering-principles/git/work-issue.md)** when starting new work.
 3. Configure your AI agents using the guides in **[ai-code-agents/](ai-code-agents/)**.
 
-## New Machine Setup (OpenCode)
+## New Machine Setup
 
-1. Clone the repo:
-   ```bash
-   git clone git@github.com:DFW-Software-Consulting/agents.dfwsc.config.git ~/dfwsc/agents.dfwsc.config
-   ```
+Clone the repo first:
+```bash
+git clone git@github.com:DFW-Software-Consulting/agents.dfwsc.config.git ~/dfwsc/agents.dfwsc.config
+```
 
-2. Add your OpenRouter API key to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
-   ```bash
-   export OPENROUTER_API_KEY=your-key-here
-   ```
+Then symlink the configs for whichever tools you use. The symlinks point your local tool config at the repo so changes stay in sync automatically.
 
-3. Symlink the global OpenCode config:
-   ```bash
-   ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
-   ```
+### OpenCode
 
-4. Symlink the Claude global config and settings:
-   ```bash
-   ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/CLAUDE.md ~/.claude/CLAUDE.md
-   ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/settings.json ~/.claude/settings.json
-   ```
+```bash
+# Global config (model, providers, agent model assignments)
+mkdir -p ~/.config/opencode
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
+```
 
-5. Reload your shell:
-   ```bash
-   source ~/.bashrc  # or ~/.zshrc
-   ```
+Add your API keys to your shell profile (`~/.bashrc` or `~/.zshrc`):
+```bash
+export OPENROUTER_API_KEY=your-key-here
+# If using OpenCode Zen, connect via /connect inside OpenCode
+```
+
+### Claude Code
+
+```bash
+# Global instructions and settings
+mkdir -p ~/.claude/agents
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/CLAUDE.md ~/.claude/CLAUDE.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/settings.json ~/.claude/settings.json
+
+# Global subagents (available in all projects)
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-locator.md ~/.claude/agents/codebase-locator.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-analyzer.md ~/.claude/agents/codebase-analyzer.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/context-synthesis.md ~/.claude/agents/context-synthesis.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/antipattern-sniffer.md ~/.claude/agents/antipattern-sniffer.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/typecheck.md ~/.claude/agents/typecheck.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/test-runner.md ~/.claude/agents/test-runner.md
+```
+
+Specialist agents (backend-architect, cloud-architect, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
+
+### Gemini CLI
+
+```bash
+mkdir -p ~/.gemini/agents
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/GEMINI.md ~/.gemini/GEMINI.md
+```
+
+### Reload shell
+
+```bash
+source ~/.bashrc  # or ~/.zshrc
+```
 
 ## Contributing
 

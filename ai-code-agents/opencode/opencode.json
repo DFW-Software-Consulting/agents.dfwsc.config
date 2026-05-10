@@ -30,7 +30,7 @@
             }
         }
     },
-    "model": "openai/chatgpt-5.4",
+    "model": "opencode/minimax-m2.5-free",
     "experimental": {
         "hook": {
             "file_edited": {
@@ -50,7 +50,20 @@
     "agent": {
         "review": {
             "description": "Reviews code for best practices and potential issues"
-        }
+        },
+        "codebase-locator": { "model": "opencode/minimax-m2.7" },
+        "codebase-analyzer": { "model": "opencode/minimax-m2.7" },
+        "antipattern-sniffer": { "model": "opencode/minimax-m2.7" },
+        "context-synthesis": { "model": "opencode/minimax-m2.7" },
+        "backend-architect": { "model": "opencode/gpt-5.3-codex" },
+        "cloud-architect": { "model": "opencode/gpt-5.3-codex" },
+        "database-optimizer": { "model": "opencode/gpt-5.3-codex" },
+        "deployment-engineer": { "model": "opencode/gpt-5.3-codex" },
+        "test-automator": { "model": "opencode/gpt-5.3-codex" },
+        "frontend-developer": { "model": "opencode/gpt-5.3-codex" },
+        "devops-troubleshooter": { "model": "opencode/gpt-5.3-codex" },
+        "mobile-developer": { "model": "opencode/gpt-5.3-codex" },
+        "performance-engineer": { "model": "opencode/gpt-5.3-codex" }
     },
     "mcp": {
       "shopify": {

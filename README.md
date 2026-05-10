@@ -49,6 +49,11 @@ export OPENROUTER_API_KEY=your-key-here
 # If using OpenCode Zen, connect via /connect inside OpenCode
 ```
 
+Install the plannotator binary (for plan review UI):
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
 ### Claude Code
 
 ```bash

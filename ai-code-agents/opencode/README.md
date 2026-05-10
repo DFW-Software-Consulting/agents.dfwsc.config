@@ -40,7 +40,11 @@ export OPENROUTER_API_KEY=your-key-here
 
 See [agents/README.md](agents/README.md) for the full list and when to use each one.
 
-## Commands
+## Additional Resources
+
+- [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) — curated list of OpenCode plugins, skills, agents, and community resources
+- [plannotator](https://plannotator.ai) — visual plan review UI (already configured as a plugin)
+- [OpenCode docs](https://opencode.ai/docs)
 
 | Command | What it does |
 |---|---|

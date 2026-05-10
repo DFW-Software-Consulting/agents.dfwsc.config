@@ -43,7 +43,13 @@ Use this project to keep AI agent setup and engineering process docs in one plac
    ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
    ```
 
-4. Reload your shell:
+4. Symlink the Claude global config and settings:
+   ```bash
+   ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/CLAUDE.md ~/.claude/CLAUDE.md
+   ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/settings.json ~/.claude/settings.json
+   ```
+
+5. Reload your shell:
    ```bash
    source ~/.bashrc  # or ~/.zshrc
    ```

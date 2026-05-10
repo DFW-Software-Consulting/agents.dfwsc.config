@@ -8,6 +8,7 @@ This directory contains DFWSC configuration and setup material for the AI coding
 |---------------|------------------|
 | Cline setup (VS Code) | [`cline/README.md`](cline/README.md) |
 | OpenCode config files | [`opencode/`](opencode/) |
+| OpenCode subagents | [`opencode/agents/README.md`](opencode/agents/README.md) |
 | Claude config files | [`claude/`](claude/) |
 | Gemini config files | [`gemini/`](gemini/) |
 | Qwen config files | [`qwen/`](qwen/) |

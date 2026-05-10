@@ -1,0 +1,65 @@
+# OpenCode Config
+
+Configuration for [OpenCode](https://opencode.ai) — terminal AI assistant.
+
+## Setup (New Machine)
+
+```bash
+mkdir -p ~/.config/opencode
+
+# Global config (model, providers, agent model assignments)
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
+```
+
+Add your API keys to your shell profile:
+```bash
+export OPENROUTER_API_KEY=your-key-here
+# For OpenCode Zen models, run /connect inside OpenCode
+```
+
+## What's Included
+
+| Directory/File | Purpose |
+|---|---|
+| `agents/` | Subagents with per-agent model assignments |
+| `commands/` | Slash commands (`/qa`, `/smart-git`, `/smallwins`, etc.) |
+| `skills/` | Reusable instruction sets |
+| `global.opencode.json` | Global config — symlink to `~/.config/opencode/opencode.json` |
+| `opencode.json` | Project-level config with agent model assignments |
+
+## Model Strategy
+
+| Agent group | Model |
+|---|---|
+| Default (main) | `opencode/minimax-m2.5-free` (Zen free) |
+| Research agents (read-only) | `opencode/minimax-m2.7` |
+| Specialist agents | `opencode/gpt-5.3-codex` |
+| typecheck / test-runner | `opencode/minimax-m2.5-free` |
+
+## Agents
+
+See [agents/README.md](agents/README.md) for the full list and when to use each one.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
+| `/smart-git` | Safe add → commit → push with branch health checks |
+| `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
+| `/ce/pn` | Generate implementation plan from research doc |
+| `/ce/ex` | Execute a plan with gated checks and atomic commits |
+| `/ce/slop` | Remove AI-generated bloat from diff against main |
+| `/ce/cm` | Context compact — summarize state before token limit |
+| `/ce/kb-log` | Create a knowledge base entry |
+
+## Skills
+
+| Skill | What it does |
+|---|---|
+| `git-workflow` | Safe commit/push/PR lifecycle with pre-hook enforcement |
+| `worktree-hygiene` | Git worktree management scripts |
+| `codebase-research` | Structure map, symbol index, AST scan scripts |
+| `deep-review-workflow` | Autonomous code review + fix workflow |
+| `biome-autofix` | Run Biome linter and auto-fix issues |
+| `new-skill` | Scaffold a new skill across all tools |

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "openrouter": {
+      "npm": "@openrouter/ai-sdk-provider",
+      "options": {
+        "apiKey": "{env:OPENROUTER_API_KEY}"
+      },
+      "models": {
+        "sonnet": {
+          "id": "anthropic/claude-sonnet-4-5"
+        },
+        "gpt-4o": {
+          "id": "openai/gpt-4o"
+        },
+        "gemini-flash": {
+          "id": "google/gemini-2.0-flash-001"
+        },
+        "qwen3-coder": {
+          "id": "qwen/qwen3-coder:free"
+        },
+        "minimax-m2": {
+          "id": "minimax/minimax-m2.5:free"
+        },
+        "qwen3-next": {
+          "id": "qwen/qwen3-next-80b-a3b-instruct:free"
+        }
+      }
+    }
+  },
+  "model": "openrouter/minimax-m2"
+}

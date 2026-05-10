@@ -51,7 +51,8 @@
         "review": {
             "description": "Reviews code for best practices and potential issues"
         },
-        "codebase-locator": { "model": "opencode/minimax-m2.7" },
+        "typecheck": { "model": "opencode/minimax-m2.5-free" },
+        "test-runner": { "model": "opencode/minimax-m2.5-free" },
         "codebase-analyzer": { "model": "opencode/minimax-m2.7" },
         "antipattern-sniffer": { "model": "opencode/minimax-m2.7" },
         "context-synthesis": { "model": "opencode/minimax-m2.7" },

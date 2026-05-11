@@ -29,5 +29,13 @@
     }
   },
   "model": "opencode/minimax-m2.5-free",
+  "agent": {
+    "typecheck": {
+      "model": "opencode/minimax-m2.5-free"
+    },
+    "test-runner": {
+      "model": "opencode/minimax-m2.5-free"
+    }
+  },
   "plugin": ["@plannotator/opencode@latest"]
 }

@@ -1,23 +1,28 @@
 ---
-allowed-tools: Edit, View, Bash(git:*), Bash(python:*), Bash(pytest:*), Bash(mypy:*), Bash(black:*), Bash(coverage:*), Bash(mutmut:*), Bash(docker:*), Bash(trivy:*), Bash(hadolint:*), Bash(dive:*), Bash(npm:*), Bash(kubectl:*), Bash(helm:*), Bash(lighthouse:*), Bash(jq:*), Bash(curl:*), Bash(gh:*)
-description: Safely stage all changes, commit with diff stats + truncated inline diff, and push only after branch status/rebase checks with a command-by-command mini summary.
+allowed-tools: Task(subagent:general), Bash(git:status), Bash(git:branch), Bash(git:fetch)
+description: Delegate git operations to a subagent using MiniMax M2.5 free model to save context.
 ---
 
-# Smart Git Commit & Push (Safe + Rebase-Aware)
+# Smart Git - Context-Free Delegate
 
-Use best-practice Git flow: inspect branch health first, avoid destructive commands, rebase cleanly when needed, then continue the user’s request.
+Launch a subagent to handle git operations using the MiniMax M2.5 free model, freeing your main context.
 
-If the user explicitly requests it, you may skip pre-commit hooks with `git commit -n`.
+## Delegation
+
+Use the Task tool to launch a `general` subagent with:
+
+**prompt:**
+```
+You are executing smart-git workflow for the user.
 
 ## Safety Rules (MUST follow)
-
 - Start with branch status checks before staging, committing, or pushing.
 - Never run destructive commands unless the user explicitly asks:
   - `git reset --hard`
   - `git clean -fd` / `git clean -fdx`
   - `git push --force` / `git push --force-with-lease`
   - `git checkout -- <path>`
-- Prefer rebase-based synchronization over merge commits for pull/update flow.
+- Prefer rebase-based synchronization over merge commits.
 - If rebase has conflicts, stop and report conflict files; do not auto-resolve silently.
 
 ## Context Gathering (Do this first)
@@ -29,13 +34,13 @@ If the user explicitly requests it, you may skip pre-commit hooks with `git comm
 
 ## Implementation Steps
 
-### Step 1: Branch Health Check (before anything else)
+### Step 1: Branch Health Check
 
 1. Enable strict shell behavior.
-2. Get current branch.
+2. Get current branch (`git branch --show-current`).
 3. Run branch status (`git status -sb`).
 4. Detect upstream (`@{u}`) if it exists.
-5. Fetch latest remote refs for this branch (do not fail if upstream is missing).
+5. Fetch latest remote refs for this branch.
 6. Compute ahead/behind against upstream when available.
 7. Decide rebase plan:
    - If behind and working tree is clean: rebase now.
@@ -55,8 +60,8 @@ If the user explicitly requests it, you may skip pre-commit hooks with `git comm
 
 1. Build commit message with:
    - Branch name
-   - “Changes Summary:” section (diff stats)
-   - “Detailed Diffs” section (truncated unified diff)
+   - "Changes Summary:" section (diff stats)
+   - "Detailed Diffs" section (truncated unified diff)
 2. Commit staged changes.
 3. If nothing to commit after staging, exit cleanly.
 
@@ -76,7 +81,7 @@ If the user explicitly requests it, you may skip pre-commit hooks with `git comm
   - `Detailed Diffs`
 - Branch is synchronized with upstream or a clear conflict/error reason is reported.
 
-## Final Response Format (MUST include)
+## Final Response Format
 
 Provide a short learning-oriented mini summary with:
 
@@ -91,3 +96,14 @@ Provide a short learning-oriented mini summary with:
 - ✓ Rebase handled cleanly when required (or conflict surfaced clearly)
 - ✓ Commit message includes stats + truncated diff
 - ✓ User receives mini command explainer summary
+```
+
+**subagent_type:** general
+
+**description:** Smart Git Operations
+
+## Execution
+
+1. Launch the subagent with the prompt above.
+2. Wait for completion.
+3. Report the subagent's summary to the user.

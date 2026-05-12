@@ -40,7 +40,10 @@ Then symlink the configs for whichever tools you use. The symlinks point your lo
 ```bash
 # Global config (model, providers, agent model assignments)
 mkdir -p ~/.config/opencode
+mkdir -p ~/.config/opencode/tools
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.config/opencode/tools/db-readonly.mjs
+npm install --prefix ~/.config/opencode better-sqlite3 pg mysql2 mssql
 ```
 
 Add your API keys to your shell profile (`~/.bashrc` or `~/.zshrc`):

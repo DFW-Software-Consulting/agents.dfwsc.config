@@ -6,9 +6,14 @@ Configuration for [OpenCode](https://opencode.ai) — terminal AI assistant.
 
 ```bash
 mkdir -p ~/.config/opencode
+mkdir -p ~/.config/opencode/tools
 
 # Global config (model, providers, agent model assignments)
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
+
+# Read-only DB wrapper for working mode
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.config/opencode/tools/db-readonly.mjs
+npm install --prefix ~/.config/opencode better-sqlite3 pg mysql2 mssql
 ```
 
 Add your API keys to your shell profile:
@@ -24,6 +29,7 @@ export OPENROUTER_API_KEY=your-key-here
 | `agents/` | Subagents with per-agent model assignments |
 | `commands/` | Slash commands (`/qa`, `/smart-git`, `/smallwins`, etc.) |
 | `skills/` | Reusable instruction sets |
+| `tools/` | Local utility scripts, including the read-only DB wrapper |
 | `global.opencode.json` | Global config — symlink to `~/.config/opencode/opencode.json` |
 | `opencode.json` | Project-level config with agent model assignments |
 

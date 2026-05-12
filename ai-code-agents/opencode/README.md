@@ -10,6 +10,9 @@ mkdir -p ~/.config/opencode/tools
 
 # Global config (model, providers, agent model assignments)
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/agents ~/.config/opencode/agents
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/commands ~/.config/opencode/commands
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/skills ~/.config/opencode/skills
 
 # Read-only DB wrapper for working mode
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.config/opencode/tools/db-readonly.mjs

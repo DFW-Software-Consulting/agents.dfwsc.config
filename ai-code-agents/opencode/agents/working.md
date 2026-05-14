@@ -7,6 +7,12 @@ permission:
     "*": deny
     "node ~/.config/opencode/tools/db-readonly.mjs*": allow
     "node $HOME/.config/opencode/tools/db-readonly.mjs*": allow
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
+    "git branch*": allow
+    "git remote*": allow
   todowrite: deny
   task: deny
   read: allow

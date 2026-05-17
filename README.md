@@ -33,7 +33,23 @@ Clone the repo first:
 git clone git@github.com:DFW-Software-Consulting/agents.dfwsc.config.git ~/dfwsc/agents.dfwsc.config
 ```
 
-Then symlink the configs for whichever tools you use. The symlinks point your local tool config at the repo so changes stay in sync automatically.
+Then symlink the configs for whichever tools you use: Claude Code, OpenCode, or both. The symlinks point your local tool config at the repo so changes stay in sync automatically.
+
+```bash
+cd ~/dfwsc/agents.dfwsc.config
+
+# Link Claude Code and OpenCode configs, and install Plannotator
+./setup-agent-configs.sh all
+
+# Or set up one piece
+./setup-agent-configs.sh claude
+./setup-agent-configs.sh opencode
+./setup-agent-configs.sh plannotator
+```
+
+The manual commands below do the same thing if you prefer to see each symlink.
+
+Install Claude Code and/or OpenCode separately before launching them. This repo links their config and installs helper dependencies, but it does not install the AI tools themselves.
 
 ### OpenCode
 
@@ -55,9 +71,9 @@ export OPENROUTER_API_KEY=your-key-here
 # If using OpenCode Zen, connect via /connect inside OpenCode
 ```
 
-Install the plannotator binary (for plan review UI):
+If you did not run `./setup-agent-configs.sh all`, install the plannotator binary separately for the plan review UI:
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+./setup-agent-configs.sh plannotator
 ```
 
 ### Claude Code
@@ -75,9 +91,12 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/context-synthesi
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/antipattern-sniffer.md ~/.claude/agents/antipattern-sniffer.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/typecheck.md ~/.claude/agents/typecheck.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/test-runner.md ~/.claude/agents/test-runner.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/database-optimizer.md ~/.claude/agents/database-optimizer.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/devops-troubleshooter.md ~/.claude/agents/devops-troubleshooter.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engineer.md ~/.claude/agents/performance-engineer.md
 ```
 
-Specialist agents (backend-architect, cloud-architect, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
+Broad implementation/design agents (backend-architect, cloud-architect, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
 
 ### Gemini CLI
 

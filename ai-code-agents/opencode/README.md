@@ -4,6 +4,17 @@ Configuration for [OpenCode](https://opencode.ai) — terminal AI assistant.
 
 ## Setup (New Machine)
 
+From the repo root, link OpenCode config into `~/.config/opencode/`:
+
+```bash
+./setup-agent-configs.sh opencode
+
+# Optional: install the Plannotator CLI used by the configured plugin/commands
+./setup-agent-configs.sh plannotator
+```
+
+Manual equivalent:
+
 ```bash
 mkdir -p ~/.config/opencode
 mkdir -p ~/.config/opencode/tools

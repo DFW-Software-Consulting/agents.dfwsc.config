@@ -26,13 +26,35 @@ This directory contains DFWSC configuration and setup material for the AI coding
 
 ## Quick Setup
 
+Clone this repo, then run the setup script from the repo root to symlink local tool config back to the checked-out files:
+
+```bash
+# Claude Code + OpenCode config, OpenCode helper deps, and Plannotator CLI
+./setup-agent-configs.sh all
+
+# Or set up one piece at a time
+./setup-agent-configs.sh claude
+./setup-agent-configs.sh opencode
+./setup-agent-configs.sh plannotator
+```
+
+The script does not install Claude Code or OpenCode themselves. Install the tools you use first, then run the setup script.
+
 ### 1. OpenCode Installation
 
 ```bash
 curl -fsSL https://opencode.ai/install | bash
 ```
 
-### 2. Cline (VS Code Extension)
+### 2. Claude Code Installation
+
+Install Claude Code separately, then run:
+
+```bash
+./setup-agent-configs.sh claude
+```
+
+### 3. Cline (VS Code Extension)
 
 1. Install from VS Code Marketplace
 2. Configure vLLM backend (see [`cline/README.md`](cline/README.md)):
@@ -41,7 +63,7 @@ curl -fsSL https://opencode.ai/install | bash
    - **API Key**: `EMPTY` (vLLM default)
    - **Model ID**: `mistralai/Devstral-Small-2-24B-Instruct-2512`
 
-### 3. Skills Setup
+### 4. Skills Setup
 
 All agents use the [Agent Skills](https://agentskills.io) standard:
 

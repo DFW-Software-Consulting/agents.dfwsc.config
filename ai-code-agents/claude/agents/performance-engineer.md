@@ -1,5 +1,6 @@
 ---
 name: performance-engineer
+model: haiku
 description: Use for application profiling, identifying CPU/memory/I/O bottlenecks, and optimizing hot paths. Invoke when asked to profile, benchmark, or speed up code.
 ---
 

@@ -13,6 +13,8 @@ link_claude() {
 
   ln -sf "$repo_root/ai-code-agents/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
   ln -sf "$repo_root/ai-code-agents/claude/settings.json" "$HOME/.claude/settings.json"
+  ln -sfn "$repo_root/ai-code-agents/claude/commands" "$HOME/.claude/commands"
+  ln -sfn "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude/skills"
 
   for agent in \
     codebase-locator \

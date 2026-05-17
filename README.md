@@ -83,6 +83,8 @@ If you did not run `./setup-agent-configs.sh all`, install the plannotator binar
 mkdir -p ~/.claude/agents
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/CLAUDE.md ~/.claude/CLAUDE.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/settings.json ~/.claude/settings.json
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/commands ~/.claude/commands
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/skills ~/.claude/skills
 
 # Global subagents (available in all projects)
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-locator.md ~/.claude/agents/codebase-locator.md

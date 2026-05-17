@@ -21,6 +21,8 @@ mkdir -p ~/.claude/agents
 # Global instructions and settings
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/CLAUDE.md ~/.claude/CLAUDE.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/settings.json ~/.claude/settings.json
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/commands ~/.claude/commands
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/skills ~/.claude/skills
 
 # Global subagents
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-locator.md ~/.claude/agents/codebase-locator.md
@@ -41,7 +43,7 @@ Broad implementation/design agents (`backend-architect`, `cloud-architect`, etc.
 | Directory | Purpose |
 |---|---|
 | `agents/` | Subagents — delegated tasks that run in isolated context |
-| `commands/` | Slash commands (`/qa`, `/smart-git`, `/smallwins`, etc.) |
+| `commands/` | Slash commands (`/qa`, `/git`, `/smallwins`, etc.) |
 | `skills/` | Reusable instruction sets loaded into agent context |
 | `CLAUDE.md` | Global instructions loaded into every Claude session |
 | `settings.json` | Global settings (effort level, small model, theme) |
@@ -69,7 +71,7 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 | Command | What it does |
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
-| `/smart-git` | Safe add → commit → push with branch health checks |
+| `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

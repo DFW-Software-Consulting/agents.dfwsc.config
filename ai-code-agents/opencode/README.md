@@ -41,7 +41,7 @@ export OPENROUTER_API_KEY=your-key-here
 | Directory/File | Purpose |
 |---|---|
 | `agents/` | Subagents with per-agent model assignments |
-| `commands/` | Slash commands (`/qa`, `/smart-git`, `/smallwins`, etc.) |
+| `commands/` | Slash commands (`/qa`, `/git`, `/smallwins`, etc.) |
 | `skills/` | Reusable instruction sets |
 | `tools/` | Local utility scripts, including the read-only DB wrapper |
 | `global.opencode.json` | Global config — symlink to `~/.config/opencode/opencode.json` |
@@ -69,7 +69,7 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 | Command | What it does |
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
-| `/smart-git` | Safe add → commit → push with branch health checks |
+| `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

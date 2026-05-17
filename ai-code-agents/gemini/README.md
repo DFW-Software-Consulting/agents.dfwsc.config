@@ -16,7 +16,7 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/GEMINI.md ~/.gemini/GEM
 | Directory | Purpose |
 |---|---|
 | `agents/` | Local agents with tool definitions |
-| `commands/` | Slash commands (`/qa`, `/smart-git`, `/smallwins`, etc.) |
+| `commands/` | Slash commands (`/qa`, `/git`, `/smallwins`, etc.) |
 | `skills/` | Reusable instruction sets |
 | `GEMINI.md` | Global instructions loaded into every Gemini session |
 
@@ -35,7 +35,7 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/GEMINI.md ~/.gemini/GEM
 | Command | What it does |
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
-| `/smart-git` | Safe add → commit → push with branch health checks |
+| `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

@@ -21,9 +21,23 @@ Complementary to `deep-review-workflow` (which handles autonomous code fixing). 
 ## When to Use
 
 - The user asks to commit, push, create a PR, or create a GitHub issue.
+- The user runs `/git commit`, `/git push`, `/git pr`, or `/git issue`.
 - The user wants to verify their branch is ready before pushing.
 - The user is starting new work and needs an issue drafted (Gate 1).
 - The user needs a PR body filled from the project template.
+
+## Slash Command Contract
+
+`/git` is the user-facing command for this skill. The command should delegate to a subagent so git status, diffs, hooks, and CLI output stay out of the main conversation context.
+
+Supported forms:
+
+- `/git commit ...` — inspect changes, propose commit grouping and messages, ask for approval, then commit only approved groups.
+- `/git push ...` — run the pre-push safety gate and push lifecycle.
+- `/git pr ...` — run the full push + PR lifecycle using project templates and `gh pr create`.
+- `/git issue ...` — create a GitHub issue from project templates or the SOP issue template.
+
+For `/git pr`, always use the PR workflow in this skill. Do not use a separate git command flow.
 
 ## Prerequisites Check
 
@@ -129,7 +143,33 @@ fi
 - Phase: `pre-commit`
 - Stop all further action
 
-#### 2b. Validate Commit Message
+#### 2b. Propose Commit Groups and Messages
+
+Before staging anything, inspect the working tree and diff to decide whether the changes belong in one commit or multiple commits.
+
+Rules:
+- Group files by coherent purpose, not by file type.
+- Keep unrelated docs/config/code changes in separate commits when practical.
+- Never include unreviewed unrelated files.
+- If the user's wording clearly scopes the commit, honor that scope.
+- If uncertain whether a file belongs, ask before staging it.
+
+Present the proposed grouping and exact commit message before committing:
+
+```text
+Proposed commit 1:
+Message: chore: add agent config setup installer
+Files:
+- setup-agent-configs.sh
+- README.md
+- ai-code-agents/README.md
+
+Use this commit message and file group? Reply yes, or tell me what to change.
+```
+
+If the user asks for changes, revise the grouping/message and ask again. Repeat until the user approves. Do not commit until the user approves the exact group and message.
+
+#### 2c. Validate Commit Message
 
 If `commitlint` is configured, validate the message format before committing:
 
@@ -148,10 +188,11 @@ type(scope): description
 # Description: imperative mood, lowercase, no period, <=72 chars
 ```
 
-#### 2c. Commit
+#### 2d. Commit
 
 ```bash
-git add -A  # or stage specific files if user specified
+# Stage only the approved files for the current commit group
+git add -- <approved-files>
 git commit -m "$COMMIT_MSG"
 # Verify exit code 0
 ```

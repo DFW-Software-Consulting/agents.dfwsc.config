@@ -51,6 +51,7 @@
         "review": {
             "description": "Reviews code for best practices and potential issues"
         },
+        "git-runner": { "mode": "subagent", "model": "opencode/minimax-m2.5-free" },
         "typecheck": { "model": "opencode/minimax-m2.5-free" },
         "test-runner": { "model": "opencode/minimax-m2.5-free" },
         "codebase-analyzer": { "model": "opencode/minimax-m2.7" },

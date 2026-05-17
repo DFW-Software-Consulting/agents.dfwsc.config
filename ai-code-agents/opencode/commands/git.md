@@ -1,13 +1,13 @@
 ---
-allowed-tools: Task(subagent:general)
-description: Delegate git commit, push, PR, and issue workflows to a subagent using the git-workflow skill.
+allowed-tools: Task(subagent:git-runner)
+description: Delegate git commit, push, PR, and issue workflows to a MiniMax git subagent using the git-workflow skill.
 ---
 
 # Git Workflow Delegate
 
 Use the `git-workflow` skill for the user's request: `$ARGUMENTS`.
 
-Launch a `general` subagent to handle the git workflow in isolated context.
+Launch the `git-runner` subagent to handle the git workflow in isolated context. OpenCode config pins `git-runner` to `opencode/minimax-m2.5-free`.
 
 ## Supported Requests
 
@@ -24,6 +24,7 @@ You are executing the git-workflow skill for this user request:
 $ARGUMENTS
 
 Use the repository's git-workflow rules as the source of truth.
+Use the configured `git-runner` subagent model: `opencode/minimax-m2.5-free`.
 
 For commit requests:
 - Inspect the current branch and working tree before staging anything.

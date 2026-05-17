@@ -54,7 +54,7 @@ export OPENROUTER_API_KEY=your-key-here
 | Default (main) | `opencode/minimax-m2.5-free` (Zen free) |
 | Research agents (read-only) | `opencode/minimax-m2.7` |
 | Specialist agents | `opencode/gpt-5.3-codex` |
-| typecheck / test-runner | `opencode/minimax-m2.5-free` |
+| `/git` git-runner / typecheck / test-runner | `opencode/minimax-m2.5-free` |
 
 ## Agents
 

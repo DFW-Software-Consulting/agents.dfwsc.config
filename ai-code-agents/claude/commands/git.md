@@ -7,7 +7,7 @@ description: Delegate git commit, push, PR, and issue workflows to a subagent us
 
 Use the `git-workflow` skill for the user's request: `$ARGUMENTS`.
 
-Launch a `general` subagent to handle the git workflow in isolated context.
+Launch a `general` subagent to handle the git workflow in isolated context. It should inherit the parent session model.
 
 ## Supported Requests
 
@@ -24,6 +24,7 @@ You are executing the git-workflow skill for this user request:
 $ARGUMENTS
 
 Use the repository's git-workflow rules as the source of truth.
+Use the parent session model for this subagent invocation.
 
 For commit requests:
 - Inspect the current branch and working tree before staging anything.

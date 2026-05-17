@@ -8,13 +8,24 @@ usage() {
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target="${1:-all}"
 
+link_path() {
+  local source="$1"
+  local target_path="$2"
+
+  if [ -e "$target_path" ] && [ "$source" -ef "$target_path" ]; then
+    return
+  fi
+
+  ln -sfn "$source" "$target_path"
+}
+
 link_claude() {
   mkdir -p "$HOME/.claude/agents"
 
-  ln -sf "$repo_root/ai-code-agents/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
-  ln -sf "$repo_root/ai-code-agents/claude/settings.json" "$HOME/.claude/settings.json"
-  ln -sfn "$repo_root/ai-code-agents/claude/commands" "$HOME/.claude/commands"
-  ln -sfn "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude/skills"
+  link_path "$repo_root/ai-code-agents/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+  link_path "$repo_root/ai-code-agents/claude/settings.json" "$HOME/.claude/settings.json"
+  link_path "$repo_root/ai-code-agents/claude/commands" "$HOME/.claude/commands"
+  link_path "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude/skills"
 
   for agent in \
     codebase-locator \
@@ -26,18 +37,18 @@ link_claude() {
     database-optimizer \
     devops-troubleshooter \
     performance-engineer; do
-    ln -sf "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude/agents/$agent.md"
+    link_path "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude/agents/$agent.md"
   done
 }
 
 link_opencode() {
   mkdir -p "$HOME/.config/opencode/tools"
 
-  ln -sf "$repo_root/ai-code-agents/opencode/global.opencode.json" "$HOME/.config/opencode/opencode.json"
-  ln -sfn "$repo_root/ai-code-agents/opencode/agents" "$HOME/.config/opencode/agents"
-  ln -sfn "$repo_root/ai-code-agents/opencode/commands" "$HOME/.config/opencode/commands"
-  ln -sfn "$repo_root/ai-code-agents/opencode/skills" "$HOME/.config/opencode/skills"
-  ln -sf "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.config/opencode/tools/db-readonly.mjs"
+  link_path "$repo_root/ai-code-agents/opencode/global.opencode.json" "$HOME/.config/opencode/opencode.json"
+  link_path "$repo_root/ai-code-agents/opencode/agents" "$HOME/.config/opencode/agents"
+  link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.config/opencode/commands"
+  link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.config/opencode/skills"
+  link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.config/opencode/tools/db-readonly.mjs"
 
   if command -v npm >/dev/null 2>&1; then
     npm install --prefix "$HOME/.config/opencode" better-sqlite3 pg mysql2 mssql

@@ -30,7 +30,7 @@
             }
         }
     },
-    "model": "opencode/minimax-m2.5-free",
+    "model": "opencode/deepseek-v4-flash-free",
     "experimental": {
         "hook": {
             "file_edited": {
@@ -51,9 +51,10 @@
         "review": {
             "description": "Reviews code for best practices and potential issues"
         },
-        "git-runner": { "mode": "subagent", "model": "opencode/minimax-m2.5-free" },
-        "typecheck": { "model": "opencode/minimax-m2.5-free" },
-        "test-runner": { "model": "opencode/minimax-m2.5-free" },
+        "git-runner": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
+        "typecheck": { "model": "opencode/deepseek-v4-flash-free" },
+        "test-runner": { "model": "opencode/deepseek-v4-flash-free" },
+        "lint": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
         "codebase-analyzer": { "model": "opencode/minimax-m2.7" },
         "antipattern-sniffer": { "model": "opencode/minimax-m2.7" },
         "context-synthesis": { "model": "opencode/minimax-m2.7" },

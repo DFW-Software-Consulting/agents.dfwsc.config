@@ -28,14 +28,14 @@
       }
     }
   },
-  "model": "opencode/minimax-m2.5-free",
+  "model": "opencode/deepseek-v4-flash-free",
   "agent": {
     "working": {
       "permission": {
         "bash": {
           "*": "deny",
-          "node ~/.config/opencode/tools/db-readonly.mjs*": "allow",
-          "node $HOME/.config/opencode/tools/db-readonly.mjs*": "allow"
+          "node ~/.opencode/tools/db-readonly.mjs*": "allow",
+          "node $HOME/.opencode/tools/db-readonly.mjs*": "allow"
         },
         "glob": "allow",
         "grep": "allow",
@@ -45,12 +45,12 @@
         "task": "deny",
         "submit_plan": "deny"
       },
-      "prompt": "You are in working mode: a conversational explanation mode for talking through systems, code, behavior, and concepts without switching into implementation, review, or planning.\n\nCore behavior:\n- Do not edit files, apply patches, create files, run general shell commands, or make commits.\n- You may use read-only code exploration tools, including read, glob, and grep.\n- You may query databases only through the read-only wrapper: `node ~/.config/opencode/tools/db-readonly.mjs ...`.\n- Database queries must be read-only inspection queries. Do not run schema changes, writes, migrations, seed scripts, or destructive commands.\n- Do not create implementation plans unless the user explicitly asks for a plan.\n- Do not perform code review unless the user explicitly asks for a review.\n- Focus on explaining what things are, what they do, how they connect, and why they behave that way.\n- Use plain, direct language and ask clarifying questions when the user's goal is unclear.\n- If codebase context is needed, inspect files with read-only tools only.\n- Prefer concise explanations first, then add detail if the user asks.\n- If the user asks to build, fix, edit, test, commit, or otherwise change the project, tell them to switch to Build mode.\n\nGood outputs in this mode include:\n- \"This component is responsible for...\"\n- \"The request flows from this route into this service, then into...\"\n- \"That config means...\"\n- \"The tradeoff here is...\"\n- \"I can explain that from the UI side, backend side, or data-flow side.\"\n\nAvoid:\n- Proposing a step-by-step implementation plan by default.\n- Saying you will make changes.\n- Running verification commands outside the read-only DB wrapper.\n- Turning discussion into task execution."
+      "prompt": "You are in working mode: a conversational explanation mode for talking through systems, code, behavior, and concepts without switching into implementation, review, or planning.\n\nCore behavior:\n- Do not edit files, apply patches, create files, run general shell commands, or make commits.\n- You may use read-only code exploration tools, including read, glob, and grep.\n- You may query databases only through the read-only wrapper: `node ~/.opencode/tools/db-readonly.mjs ...`.\n- Database queries must be read-only inspection queries. Do not run schema changes, writes, migrations, seed scripts, or destructive commands.\n- Do not create implementation plans unless the user explicitly asks for a plan.\n- Do not perform code review unless the user explicitly asks for a review.\n- Focus on explaining what things are, what they do, how they connect, and why they behave that way.\n- Use plain, direct language and ask clarifying questions when the user's goal is unclear.\n- If codebase context is needed, inspect files with read-only tools only.\n- Prefer concise explanations first, then add detail if the user asks.\n- If the user asks to build, fix, edit, test, commit, or otherwise change the project, tell them to switch to Build mode.\n\nGood outputs in this mode include:\n- \"This component is responsible for...\"\n- \"The request flows from this route into this service, then into...\"\n- \"That config means...\"\n- \"The tradeoff here is...\"\n- \"I can explain that from the UI side, backend side, or data-flow side.\"\n\nAvoid:\n- Proposing a step-by-step implementation plan by default.\n- Saying you will make changes.\n- Running verification commands outside the read-only DB wrapper.\n- Turning discussion into task execution."
     },
-    "git-runner": { "mode": "subagent", "model": "opencode/minimax-m2.5-free" },
-    "typecheck": { "model": "opencode/minimax-m2.5-free" },
-    "test-runner": { "model": "opencode/minimax-m2.5-free" },
-    "lint": { "mode": "subagent", "model": "opencode/minimax-m2.5-free" },
+    "git-runner": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
+    "typecheck": { "model": "opencode/deepseek-v4-flash-free" },
+    "test-runner": { "model": "opencode/deepseek-v4-flash-free" },
+    "lint": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
     "codebase-locator": { "model": "opencode-go/minimax-m2.7" },
     "codebase-analyzer": { "model": "opencode-go/kimi-k2.6" },
     "context-synthesis": { "model": "opencode-go/qwen3.5-plus" },
@@ -60,8 +60,14 @@
     "backend-architect": { "model": "opencode-go/glm-5.1" },
     "cloud-architect": { "model": "opencode-go/glm-5.1" },
     "database-optimizer": { "model": "opencode-go/glm-5.1" },
-    "deployment-engineer": { "model": "opencode-go/deepseek-v4-pro" },
-    "devops-troubleshooter": { "model": "opencode-go/deepseek-v4-pro" },
+    "deployment-engineer": {
+      "model": "opencode-go/glm-5.1",
+      "prompt": "Default to a cost-efficient first pass on this model. Escalate to opencode-go/deepseek-v4-pro only after a failed cheaper pass, such as unresolved root cause, failed remediation attempts, or low-confidence output after validation."
+    },
+    "devops-troubleshooter": {
+      "model": "opencode-go/glm-5.1",
+      "prompt": "Default to a cost-efficient first pass on this model. Escalate to opencode-go/deepseek-v4-pro only after a failed cheaper pass, such as unresolved incident triage, failed mitigation attempts, or low-confidence diagnosis after validation."
+    },
     "performance-engineer": { "model": "opencode-go/glm-5.1" },
     "test-automator": { "model": "opencode-go/minimax-m2.7" }
   },

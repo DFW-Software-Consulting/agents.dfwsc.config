@@ -15,6 +15,7 @@
   - Delegate to the `antipattern-sniffer` subagent for comprehensive or high-risk reviews
 - For ANY typecheck run → delegate to the `typecheck` subagent
 - For ANY lint run → delegate to the `lint` subagent
+- For ANY route audit or route domain review → use the `route-audit` skill
 - For ANY test run → delegate to the `test-runner` subagent
 - Do NOT read large files or run verbose commands in the main conversation. Delegate when context will be large, noisy, or cross-cutting.
 - Prefer `effort: low` for straightforward tasks; only use high effort when reasoning is genuinely needed

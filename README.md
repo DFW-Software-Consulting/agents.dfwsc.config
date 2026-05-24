@@ -55,14 +55,13 @@ Install Claude Code and/or OpenCode separately before launching them. This repo 
 
 ```bash
 # Global config (model, providers, agent model assignments)
-mkdir -p ~/.config/opencode
-mkdir -p ~/.config/opencode/tools
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
-ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/agents ~/.config/opencode/agents
-ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/commands ~/.config/opencode/commands
-ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/skills ~/.config/opencode/skills
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.config/opencode/tools/db-readonly.mjs
-npm install --prefix ~/.config/opencode better-sqlite3 pg mysql2 mssql
+mkdir -p ~/.opencode/tools
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.opencode/opencode.json
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/agents ~/.opencode/agents
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/commands ~/.opencode/commands
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/skills ~/.opencode/skills
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.opencode/tools/db-readonly.mjs
+npm install --prefix ~/.opencode better-sqlite3 pg mysql2 mssql
 ```
 
 Add your API keys to your shell profile (`~/.bashrc` or `~/.zshrc`):

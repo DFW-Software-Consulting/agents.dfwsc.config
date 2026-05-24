@@ -42,16 +42,16 @@ link_claude() {
 }
 
 link_opencode() {
-  mkdir -p "$HOME/.config/opencode/tools"
+  mkdir -p "$HOME/.opencode/tools"
 
-  link_path "$repo_root/ai-code-agents/opencode/global.opencode.json" "$HOME/.config/opencode/opencode.json"
-  link_path "$repo_root/ai-code-agents/opencode/agents" "$HOME/.config/opencode/agents"
-  link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.config/opencode/commands"
-  link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.config/opencode/skills"
-  link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.config/opencode/tools/db-readonly.mjs"
+  link_path "$repo_root/ai-code-agents/opencode/global.opencode.json" "$HOME/.opencode/opencode.json"
+  link_path "$repo_root/ai-code-agents/opencode/agents" "$HOME/.opencode/agents"
+  link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.opencode/commands"
+  link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.opencode/skills"
+  link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.opencode/tools/db-readonly.mjs"
 
   if command -v npm >/dev/null 2>&1; then
-    npm install --prefix "$HOME/.config/opencode" better-sqlite3 pg mysql2 mssql
+    npm install --prefix "$HOME/.opencode" better-sqlite3 pg mysql2 mssql
   else
     printf 'npm not found; skipping OpenCode DB wrapper dependencies.\n' >&2
   fi

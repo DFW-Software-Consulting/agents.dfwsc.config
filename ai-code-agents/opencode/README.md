@@ -54,7 +54,7 @@ export OPENROUTER_API_KEY=your-key-here
 | Default (main) | `opencode/minimax-m2.5-free` (Zen free) |
 | Research agents (read-only) | `opencode/minimax-m2.7` |
 | Specialist agents | `opencode/gpt-5.3-codex` |
-| `/git` git-runner / typecheck / test-runner | `opencode/minimax-m2.5-free` |
+| `/git` git-runner / lint / typecheck / test-runner | `opencode/minimax-m2.5-free` |
 
 ## Agents
 
@@ -70,6 +70,7 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
 | `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
+| `/lint` | Run lint in the MiniMax lint subagent and summarize issues |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

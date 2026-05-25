@@ -85,7 +85,7 @@ Key differences:
 - Plugin system with full lifecycle hooks
 - Reads `CLAUDE.md` as fallback (disable with `OPENCODE_DISABLE_CLAUDE_CODE=1`)
 
-Read the docs: <https://opencode.ai/docs/rules/>
+Read the docs: <https://opencode.ai/docs/skills/>
 
 ## Quick Comparison
 
@@ -131,8 +131,9 @@ Each tool has its own quirks, permission model, and evolving feature set. This R
 | `codebase-research` | Map codebase structure using structural analysis (ast-grep) | Claude Code, OpenCode |
 | `deep-review-workflow` | Detect and fix security, bug, and code smell issues autonomously | Claude Code, OpenCode |
 | `git-workflow` | Safe commit/push/PR/issue creation with pre-hook enforcement | Claude Code, OpenCode |
+| `new-skill` | Scaffold reusable skills and mirror them across agent tools | OpenCode |
 | `worktree-hygiene` | Prevent branch contamination in git worktrees | Claude Code, OpenCode |
 
-Each skill is mirrored in `claude/skills/<name>/SKILL.md` and `opencode/skills/<name>/SKILL.md` (identical content).
+Shared skills are mirrored in `claude/skills/<name>/SKILL.md` and `opencode/skills/<name>/SKILL.md` when both tools are listed in the table.
 
 When you add repository-local skills, place them under `skills/<name>/SKILL.md` using the structure described in "The Common Pattern" above.

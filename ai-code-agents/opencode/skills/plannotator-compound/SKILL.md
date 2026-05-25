@@ -1,8 +1,7 @@
 ---
 name: plannotator-compound
-disable-model-invocation: true
 description: >
-  Analyze a user's Plannotator plan archive to extract denial patterns, feedback
+  Use when analyzing a user's Plannotator plan archive to extract denial patterns, feedback
   taxonomy, evolution over time, and actionable prompt improvements — then produce
   a polished HTML dashboard report. Falls back to Claude Code ExitPlanMode denial
   reasons when Plannotator data is unavailable.
@@ -161,29 +160,28 @@ for analysis is in one file.
 
 ### Batching Strategy
 
-All extraction agents should use `model: "haiku"` — they're doing straightforward
-file reading and structured extraction, not reasoning. Haiku is faster and cheaper
-for this work.
+All extraction agents should use the fastest lightweight model available because
+they're doing straightforward file reading and structured extraction, not reasoning.
 
 The approach depends on dataset size:
 
 **Tiny datasets (≤ 10 total files):** Read all files directly in the main agent —
 no need for sub-agents. Just read them sequentially and proceed to Phase 3.
 
-**Small datasets (11-30 files):** Launch 2-3 parallel Haiku agents, splitting
+**Small datasets (11-30 files):** Launch 2-3 parallel lightweight agents, splitting
 files roughly evenly.
 
-**Medium datasets (31-80 files):** Launch 4-6 parallel Haiku agents (~10-15 files
+**Medium datasets (31-80 files):** Launch 4-6 parallel lightweight agents (~10-15 files
 each). Split by file type and/or time period.
 
-**Large datasets (80+ files):** Launch as many parallel Haiku agents as needed to
+**Large datasets (80+ files):** Launch as many parallel lightweight agents as needed to
 keep each batch around 10-15 files. Split by the natural time boundaries in the
 data (months, quarters, or whatever groupings produce balanced batches). If one
 time period dominates (e.g., the most recent month has 3x the files), split that
 period into multiple batches.
 
-Launch all extraction agents in parallel using the Agent tool with
-`run_in_background: true` and `model: "haiku"`.
+Launch all extraction agents in parallel using the platform's agent tool, preferably
+in the background when supported.
 
 ### Output Files
 
@@ -259,24 +257,24 @@ file to see how far it got before timing out.
 ## Phase 3: Reduce — Pattern Analysis
 
 Once ALL extraction agents have completed (or all files have been read for tiny
-datasets), proceed with the reduction. Reduction agents should use `model: "sonnet"`
-— this phase requires real analytical reasoning, not just file reading.
+datasets), proceed with the reduction. Reduction agents should use a stronger
+reasoning model because this phase requires analysis, not just file reading.
 
 ### Reduction Strategy
 
 The approach depends on how many extraction files were produced:
 
-**Standard (≤ 20 extraction files):** Launch a single Sonnet agent to read all
+**Standard (≤ 20 extraction files):** Launch a single reasoning-focused agent to read all
 extraction files and produce the full analysis. This covers most datasets.
 
 **Large (21+ extraction files):** Use a two-stage reduce:
 
 1. **Stage 1 — Partial reduces:** Split the extraction files into groups of 4-6.
-   Launch parallel Sonnet agents, each reading one group and producing a partial
+   Launch parallel reasoning-focused agents, each reading one group and producing a partial
    analysis with the same sections listed below. Each writes to
    `/tmp/compound-planning/partial-reduce-{N}.md`.
 
-2. **Stage 2 — Final reduce:** A single Sonnet agent reads all partial reduce
+2. **Stage 2 — Final reduce:** A single reasoning-focused agent reads all partial reduce
    files and synthesizes them into the final comprehensive analysis. This agent
    merges taxonomies, combines counts, deduplicates patterns, and reconciles any
    conflicting categorizations across partials.

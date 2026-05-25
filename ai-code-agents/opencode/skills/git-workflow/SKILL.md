@@ -5,7 +5,7 @@ description: Use when committing, pushing, creating PRs, or creating GitHub issu
 
 # Git Workflow
 
-Safe commit, push, PR, and issue creation with full pre-hook enforcement. This skill wraps the git lifecycle — it runs every available check before touching the remote and never bypasss failures.
+Safe commit, push, PR, and issue creation with full pre-hook enforcement. This skill wraps the git lifecycle — it runs every available check before touching the remote and never bypasses failures.
 
 Complementary to `deep-review-workflow` (which handles autonomous code fixing). This skill handles the safe lifecycle: commit → push → PR/issue creation.
 

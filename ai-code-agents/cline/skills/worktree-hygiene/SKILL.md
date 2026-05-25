@@ -1,6 +1,6 @@
 ---
 name: worktree-hygiene
-description: This skill should be used when working with git worktrees to prevent branch contamination. Use when creating worktrees, before committing, or when managing multiple worktrees. Enforces fresh branches only, verification before commits, and one worktree per issue. Now with offline mode, auto-detection, and cross-platform support.
+description: Use when creating, checking, committing from, cleaning up, or managing git worktrees to prevent branch contamination.
 ---
 
 # Worktree Hygiene

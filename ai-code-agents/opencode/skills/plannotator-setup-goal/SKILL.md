@@ -1,6 +1,6 @@
 ---
 name: plannotator-setup-goal
-description: Turn an idea or objective into a goal package for /goal. Interviews the user, builds a reviewed fact sheet via Plannotator, then explores the codebase to produce an execution plan.
+description: Use when turning an idea or objective into a /goal package by interviewing the user, building a Plannotator-reviewed fact sheet, and exploring the codebase for an execution plan.
 ---
 
 # Setup Goal

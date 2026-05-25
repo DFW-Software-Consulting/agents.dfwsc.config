@@ -1,6 +1,6 @@
 ---
 name: deep-review-workflow
-description: Use this skill when reviewing code for critical issues including security vulnerabilities, bugs, code smells, and architectural problems. Claude will autonomously detect AND fix issues following best practices, working on a feature branch with proper commits.
+description: Use when explicitly asked to autonomously review and remediate critical code issues, including security vulnerabilities, bugs, code smells, and architectural problems, on a feature branch with proper commits.
 license: mit
 ---
 
@@ -11,6 +11,8 @@ This skill provides a complete workflow for detecting AND fixing security vulner
 ## Autonomous Operation Mode
 
 **You have been tasked to fix issues autonomously.** The user trusts you to:
+
+Only create branches, commits, pushes, or PRs when the user explicitly requested autonomous remediation or approved those side effects. Otherwise, report findings and wait for confirmation before modifying git state.
 
 1. **Work independently** - The user may be away and unavailable for questions
 2. **Follow this workflow in order** - Each phase builds on the previous

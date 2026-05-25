@@ -1,6 +1,6 @@
 ---
 name: codebase-research
-description: This skill should be used when mapping or researching a codebase to understand its structure, patterns, and architecture. Use when the user asks to "map the codebase", "research how X works", "find all Y patterns", or needs to understand code organization. Produces factual structural maps—no suggestions, no recommendations, just what exists. Uses ast-grep for structural pattern matching.
+description: Use when mapping or researching a codebase to understand its structure, patterns, and architecture. Produces factual structural maps with ast-grep: no suggestions, recommendations, or opinions.
 ---
 
 # Codebase Research
@@ -9,7 +9,7 @@ Map and document codebase structure using structural analysis. This skill produc
 
 ## Core Principle
 
-**Map, don't suggest.** The output is a structural map that another developer (or Claude instance) can use to navigate the codebase. Include:
+**Map, don't suggest.** The output is a structural map that another developer or agent instance can use to navigate the codebase. Include:
 - File paths with line numbers
 - Pattern locations
 - Dependency relationships
@@ -86,7 +86,7 @@ scripts/dependency-graph.sh ./ --file src/core/auth.ts
 
 ### Step 1: Deploy 3 Subagents in Parallel
 
-**CRITICAL: Always spawn exactly 3 Task subagents in parallel for comprehensive coverage.**
+**CRITICAL: Always spawn exactly 3 subagents in parallel for comprehensive coverage.**
 
 Deploy these agents simultaneously in a single message:
 

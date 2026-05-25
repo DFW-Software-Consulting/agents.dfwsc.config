@@ -1,8 +1,6 @@
 ---
 name: biome-autofix
-description: Use Biome to lint/format code and apply safe fixes (optional unsafe), then summarize remaining issues with file:line:rule.
----
-
+description: Use when linting or formatting with Biome, applying safe fixes by default, optionally applying unsafe fixes on request, and summarizing remaining file:line:rule diagnostics.
 ---
 
 # Biome Autofix Linter
@@ -24,7 +22,7 @@ Run Biome to lint, format, and organize imports. Apply **safe fixes** by default
 - `dry_run` (bool; default `false`): report only, do not write.
 - `allow_unsafe` (bool; default `false`): permit unsafe fixes.
 
-## Instructions for Claude
+## Instructions
 
 - Ensure Biome is available in the environment; if not, request install guidance or exit with a helpful note.
 - Work within `root`; if `paths` provided, operate on those, else `"."`.

@@ -1,6 +1,6 @@
 ---
 name: codebase-research
-description: This skill should be used when mapping or researching a codebase to understand its structure, patterns, and architecture. Use when the user asks to "map the codebase", "research how X works", "find all Y patterns", or needs to understand code organization. Produces factual structural maps—no suggestions, no recommendations, just what exists. Uses ast-grep for structural pattern matching.
+description: Use when mapping or researching a codebase's structure, patterns, architecture, symbols, or dependency relationships.
 ---
 
 # Codebase Research
@@ -9,7 +9,7 @@ Map and document codebase structure using structural analysis. This skill produc
 
 ## Core Principle
 
-**Map, don't suggest.** The output is a structural map that another developer (or Claude instance) can use to navigate the codebase. Include:
+**Map, don't suggest.** The output is a structural map that another developer or agent can use to navigate the codebase. Include:
 - File paths with line numbers
 - Pattern locations
 - Dependency relationships
@@ -84,11 +84,11 @@ scripts/dependency-graph.sh ./ --file src/core/auth.ts
 
 ## Research Workflow
 
-### Step 1: Deploy 3 Subagents in Parallel
+### Step 1: Run Parallel Research Where Supported
 
-**CRITICAL: Always spawn exactly 3 Task subagents in parallel for comprehensive coverage.**
+Use parallel research agents or equivalent searches where the host tool supports them.
 
-Deploy these agents simultaneously in a single message:
+Cover these three research angles:
 
 1. **codebase-locator** - Find WHERE files and components live
    - Prompt: "Locate all files related to [topic]. Find directory structure, entry points, and related modules."
@@ -99,10 +99,7 @@ Deploy these agents simultaneously in a single message:
 3. **context-synthesis** - Connect findings across components
    - Prompt: "Find connections between [area A] and [area B]. Trace dependencies and shared patterns."
 
-```
-YOU MUST DEPLOY ALL 3 AGENTS IN A SINGLE MESSAGE
-DO NOT DEPLOY SEQUENTIALLY - USE PARALLEL TASK CALLS
-```
+If parallel agents are unavailable, perform the same three passes directly.
 
 ### Step 2: Run Scripts for Structural Analysis
 

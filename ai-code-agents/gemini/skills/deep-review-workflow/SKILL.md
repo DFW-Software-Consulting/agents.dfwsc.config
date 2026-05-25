@@ -1,7 +1,6 @@
 ---
 name: deep-review-workflow
-description: Use this skill when reviewing code for critical issues including security vulnerabilities, bugs, code smells, and architectural problems. Claude will autonomously detect AND fix issues following best practices, working on a feature branch with proper commits.
-license: mit
+description: Use when reviewing and remediating critical code issues including security vulnerabilities, bugs, code smells, and architectural problems.
 ---
 
 # Deep Review Workflow
@@ -16,11 +15,11 @@ This skill provides a complete workflow for detecting AND fixing security vulner
 2. **Follow this workflow in order** - Each phase builds on the previous
 3. **Create a feature branch** - Never commit directly to main/master
 4. **Fix issues with best practices** - Apply clean code principles
-5. **Research when uncertain** - Use Exa MCP (`mcp__exa__web_search_exa` or `mcp__exa__get_code_context_exa`) for documentation, best practices, or unfamiliar patterns
+5. **Research when uncertain** - Use available documentation, web search, or code context tools for best practices or unfamiliar patterns
 6. **Try your best** - The user trusts your judgment; make reasonable decisions
 
 **If you are uncertain about something:**
-- Search for documentation or examples using Exa MCP
+- Search for documentation or examples using available research tools
 - Follow existing patterns in the codebase
 - Choose the simpler, safer option
 - Document your reasoning in commit messages
@@ -182,8 +181,8 @@ Detect architectural issues:
 
 Before making any fixes, set up proper git workflow:
 
-1. **Check current state** - `git status` to verify clean working directory
-2. **Create feature branch** - Branch from main/master
+1. **Check current state** - Inspect `git status`, `git diff`, and recent history; do not overwrite unrelated work
+2. **Create feature branch** - Branch from main/master unless the user already provided the correct branch
    ```bash
    git checkout -b fix/deep-review-$(date +%Y%m%d)
    ```
@@ -194,10 +193,10 @@ Before making any fixes, set up proper git workflow:
 Work through findings by priority (P0 first, then P1):
 
 1. **Fix one issue at a time** - Don't batch unrelated fixes
-2. **Use TodoWrite** - Track each fix as a todo item
-3. **Research if needed** - Use Exa MCP for unfamiliar patterns
+2. **Track progress** - Track each fix as a todo item using available planning tools or a local checklist
+3. **Research if needed** - Use available research tools for unfamiliar patterns
 4. **Follow existing patterns** - Match codebase style
-5. **Commit after each fix** - Small, atomic commits with clear messages
+5. **Commit only when requested** - If commits are requested, use small, atomic commits with clear messages
    ```bash
    git add <files>
    git commit -m "fix(security): sanitize user input in auth handler"

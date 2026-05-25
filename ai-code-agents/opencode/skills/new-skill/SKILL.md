@@ -1,76 +1,158 @@
 ---
 name: new-skill
-description: Use when asked to create a new skill, add a skill, or scaffold a skill for any agent tool. Takes a skill name and description as input.
+description: Use when creating, scaffolding, or mirroring reusable agent skills across OpenCode, Claude Code, and Agent Skills-compatible locations.
 ---
 
 # New Skill Scaffold
 
-Create a new reusable skill and mirror it across all configured agent tools.
+Create a reusable agent skill with valid portable frontmatter, concise instructions, and tool-specific extensions only when they are needed.
 
-## Input
+## Inputs
 
-- `$ARGUMENTS` — skill name and a short description of what it does
-  - Example: `code-review Reviews code for security and performance issues`
+- Expected `$ARGUMENTS` format: `<skill-name> <description>`
+- Example: `code-review Use when reviewing code for security, correctness, and maintainability issues.`
+- The first token is the skill name. All remaining text is the skill description.
+- If the user provides separate fields, use `name` as the skill name and `description` as the skill description.
 
-## Steps
+## Name Rules
 
-### 1. Parse Input
+Validate before writing files:
 
-- First word of `$ARGUMENTS` = skill name (kebab-case)
-- Remaining words = description
+- Must match `^[a-z0-9]+(-[a-z0-9]+)*$`.
+- Must be 1-64 characters.
+- Use lowercase alphanumeric words separated by single hyphens.
+- No leading hyphen, trailing hyphen, consecutive hyphens, spaces, underscores, or uppercase letters.
+- Directory name must exactly match the frontmatter `name`.
 
-### 2. Ask Clarifying Questions (if not obvious)
+## Clarifying Questions
 
-- Which tools to target? (default: opencode, claude, gemini — all three)
-- Should it be read-only or can it make edits?
-- Does it need any supporting scripts?
+Ask only when the input is ambiguous or would cause an invalid or unsafe scaffold.
 
-### 3. Create the Skill Directory and SKILL.md
+- Ask for a valid name if the name is missing or fails validation.
+- Ask for a specific trigger condition if the description is missing, vague, or not written as a usage condition.
+- Ask which target locations to create only when the user's scope is unclear. Otherwise mirror to the repository paths that exist for the requested tool family.
+- Ask before adding side-effect automation for deploy, publish, commit, push, destructive file operations, external service changes, or credential use.
 
-For each target tool, create:
+## Target Paths
+
+Create or update `SKILL.md` in the requested tool locations.
+
+Project-local runtime paths:
+
+```text
+.opencode/skills/<skill-name>/SKILL.md
+.claude/skills/<skill-name>/SKILL.md
+.agents/skills/<skill-name>/SKILL.md
+```
+
+Global or personal runtime paths:
+
+```text
+~/.config/opencode/skills/<skill-name>/SKILL.md
+~/.claude/skills/<skill-name>/SKILL.md
+~/.agents/skills/<skill-name>/SKILL.md
+```
+
+Repository mirror paths in this config repo:
 
 ```
 ai-code-agents/<tool>/skills/<skill-name>/SKILL.md
 ```
 
-The `SKILL.md` must follow this structure:
+Use the repository mirror path when maintaining checked-in skill templates. Example tool names include `opencode`, `claude`, and any Agent Skills-compatible tool directory already present in the repo.
+
+## Portable Template
+
+Use only `name` and `description` in frontmatter unless a target tool requires more. This is the most portable baseline across OpenCode, Claude Code, and Agent Skills-compatible consumers.
 
 ```markdown
 ---
 name: <skill-name>
-description: <one-line trigger condition — write it like "Use when..." not a marketing blurb>
+description: Use when <specific trigger condition and task outcome>.
 ---
 
 # <Skill Title>
 
-<Brief explanation of what this skill does and when to use it.>
+<One short paragraph explaining what this skill does and when to use it.>
+
+## Inputs
+
+- `<input-name>`: <expected format, defaults, and constraints>
 
 ## Steps
 
-1. <Step one>
-2. <Step two>
-...
+1. <Concrete action>
+2. <Concrete action>
+3. <Concrete action>
+
+## Supporting Files
+
+- Put long references in `references/`.
+- Put examples in `examples/`.
+- Put executable helpers in `scripts/`.
 
 ## Output
 
-<What the skill produces — a report, files, a commit, etc.>
+<What the skill produces: files changed, report, command output, PR, issue, etc.>
 
 ## Rules
 
-- <Any hard constraints — e.g. "never edit files", "always confirm before deleting">
+- <Hard constraints, safety rules, and confirmation requirements>
 ```
 
-### 4. Update the Skills Table
+## Tool-Specific Frontmatter
 
-Add a row to `ai-code-agents/skills/README.md` in the "Current Skills" table:
+OpenCode recognizes `name`, `description`, `license`, `compatibility`, and `metadata`. Keep OpenCode skill frontmatter to `name` and `description` unless there is a concrete need for the optional fields.
+
+Claude Code supports additional frontmatter such as `disable-model-invocation`, `user-invocable`, `argument-hint`, `arguments`, `allowed-tools`, `model`, `effort`, and `context`. Use Claude-only fields only in Claude-specific skill files or when portability is not required.
+
+For side-effect workflows such as deploy, release, publish, commit, push, destructive cleanup, data migration, or external service mutation, prefer manual invocation controls where supported. For Claude Code, add:
+
+```yaml
+disable-model-invocation: true
+```
+
+Also document required confirmation steps in the skill body.
+
+## Supporting Files
+
+Keep `SKILL.md` concise. Move material that is long, reusable, or tool-like into files next to `SKILL.md`:
+
+- `references/`: detailed docs, checklists, policies, schemas, long explanations.
+- `examples/`: sample inputs, outputs, fixtures, before/after snippets.
+- `scripts/`: executable helpers used by the skill. Document required runtime, arguments, and safety constraints.
+
+Reference supporting files by relative path from the skill directory.
+
+## Repository README
+
+When adding a repository-maintained skill, update `ai-code-agents/skills/README.md` if the Current Skills table is missing the new skill:
 
 ```
-| `<skill-name>` | <description> | <tools> |
+| `<skill-name>` | <purpose> | <tools> |
 ```
 
-### 5. Summary
+Keep the row consistent with the existing table style.
+
+## Verification Checklist
+
+- `SKILL.md` exists at each intended target path.
+- Directory name and frontmatter `name` match exactly.
+- Name passes `^[a-z0-9]+(-[a-z0-9]+)*$` and is 1-64 characters.
+- Description is 1-1024 characters, starts with `Use when`, and states a specific trigger condition.
+- Portable skills use only `name` and `description` frontmatter.
+- Tool-specific frontmatter is isolated to tool-specific mirrors and documented in the skill body.
+- Supporting files are referenced correctly and kept next to `SKILL.md`.
+- Side-effect workflows require manual invocation or explicit confirmation where appropriate.
+- README table is updated when this repo gains a maintained skill.
+
+## Final Report
 
 Report:
+
 - Files created (with paths)
-- Which tools the skill was added to
-- How to invoke it
+- Files changed (with paths)
+- Target tools and runtime locations covered
+- Supporting files added, if any
+- Any tool-specific frontmatter used and why
+- Verification performed

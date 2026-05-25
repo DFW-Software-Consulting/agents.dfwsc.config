@@ -77,5 +77,6 @@
           "shopify-mcp-server"
         ]
       }
-    }
+    },
+    "plugin": [["@plannotator/opencode@latest", { "workflow": "plan-agent", "planningAgents": ["plan"] }]]
 }

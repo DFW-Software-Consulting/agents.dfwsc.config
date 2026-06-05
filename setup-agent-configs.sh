@@ -19,6 +19,62 @@ link_path() {
   ln -sfn "$source" "$target_path"
 }
 
+install_codex_only_toggle() {
+  local script="$repo_root/ai-code-agents/opencode/tools/codex-only.sh"
+  local state_file="$HOME/.config/opencode/codex-only.env"
+  local bin_dir="$HOME/.local/bin"
+  local zshrc="$HOME/.zshrc"
+  local begin_marker="# >>> agents.dfwsc.config codex-only >>>"
+  local end_marker="# <<< agents.dfwsc.config codex-only <<<"
+  local block
+
+  chmod +x "$script"
+  mkdir -p "$HOME/.config/opencode" "$bin_dir"
+  link_path "$script" "$bin_dir/codex-only"
+
+  if [ ! -f "$state_file" ]; then
+    printf 'export OPENCODE_CODEX_ONLY=0\n' > "$state_file"
+  fi
+
+  block=$(cat <<EOF
+$begin_marker
+_OC_CODEX_ONLY="$script"
+if [ -x "\$_OC_CODEX_ONLY" ]; then
+  eval "\$("\$_OC_CODEX_ONLY" exports)"
+fi
+codex-only() {
+  if [ -x "\$_OC_CODEX_ONLY" ]; then
+    "\$_OC_CODEX_ONLY" "\$@"
+    eval "\$("\$_OC_CODEX_ONLY" exports)"
+  else
+    echo "codex-only script not found: \$_OC_CODEX_ONLY" >&2
+    return 1
+  fi
+}
+$end_marker
+EOF
+)
+
+  touch "$zshrc"
+  if grep -Fq "$begin_marker" "$zshrc"; then
+    python3 - "$zshrc" "$begin_marker" "$end_marker" "$block" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+begin = sys.argv[2]
+end = sys.argv[3]
+block = sys.argv[4]
+text = path.read_text()
+start = text.index(begin)
+finish = text.index(end, start) + len(end)
+path.write_text(text[:start] + block + text[finish:])
+PY
+  else
+    printf '\n%s\n' "$block" >> "$zshrc"
+  fi
+}
+
 link_claude() {
   mkdir -p "$HOME/.claude/agents"
 
@@ -49,6 +105,7 @@ link_opencode() {
   link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.opencode/commands"
   link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.opencode/skills"
   link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.opencode/tools/db-readonly.mjs"
+  install_codex_only_toggle
 
   if command -v npm >/dev/null 2>&1; then
     npm install --prefix "$HOME/.opencode" better-sqlite3 pg mysql2 mssql

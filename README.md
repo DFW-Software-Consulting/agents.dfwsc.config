@@ -18,7 +18,7 @@ Use this project to keep AI agent setup and engineering process docs in one plac
 - **[SOP](engineering-principles/SOP.md)** — AI-assisted development workflow (4-gate process)
 - **[Work Issue Template](engineering-principles/git/work-issue.md)** — Gate 1 and 2 templates
 - **[Work PR Template](engineering-principles/git/work-pr.md)** — Gate 4 verification template
-- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, Claude Code, Codex, Gemini, and Qwen setup guides
+- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, Claude Code, Codex, and Gemini setup guides
 
 ## Getting Started
 

@@ -1,6 +1,6 @@
 ---
 name: agent-prompt-builder
-description: Design, review, and rewrite AI agent prompts and subagent definitions. Use when creating or improving OpenCode, Codex, Claude, Cline, Gemini, Qwen, or other coding-agent prompts; when choosing agent responsibilities, tools, permissions, model tier, trigger description, output contract, or frontmatter; or when converting one agent concept across platforms.
+description: Design, review, and rewrite AI agent prompts and subagent definitions. Use when creating or improving OpenCode, Codex, Claude, Cline, Gemini, or other coding-agent prompts; when choosing agent responsibilities, tools, permissions, model tier, trigger description, output contract, or frontmatter; or when converting one agent concept across platforms.
 ---
 
 # Agent Prompt Builder
@@ -84,7 +84,7 @@ Before finalizing an agent prompt, check:
 
 ## Platform Conversion
 
-When adapting an agent across OpenCode, Claude, Codex, Cline, Gemini, or Qwen:
+When adapting an agent across OpenCode, Claude, Codex, Cline, or Gemini:
 
 - Preserve the agent's role, trigger, workflow, permissions intent, and output contract.
 - Convert only platform-specific metadata and tool syntax.

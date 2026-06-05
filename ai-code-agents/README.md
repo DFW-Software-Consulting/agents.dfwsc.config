@@ -12,7 +12,6 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | Claude config files | [`claude/`](claude/) |
 | Codex config files | [`codex/`](codex/) |
 | Gemini config files | [`gemini/`](gemini/) |
-| Qwen config files | [`qwen/`](qwen/) |
 | Skills reference | [`skills/README.md`](skills/README.md) |
 
 ## Supported Agents
@@ -24,7 +23,6 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | **Claude Code** | Terminal AI agent | `claude/` |
 | **Codex** | Terminal, IDE, and app coding agent | `codex/` |
 | **Gemini CLI** | Terminal AI agent (Google) | `gemini/` |
-| **Qwen** | Terminal AI assistant (via OpenCode) | `qwen/` |
 
 ## Quick Setup
 
@@ -94,7 +92,6 @@ Step-by-step instructions...
 | Claude Code | `.claude/skills/<name>/SKILL.md` |
 | OpenCode | `.opencode/skills/<name>/SKILL.md` |
 | Gemini CLI | `.gemini/skills/<name>/SKILL.md` |
-| Qwen | `.qwen/skills/<name>/SKILL.md` |
 | Codex CLI | `.agents/skills/<name>/SKILL.md` |
 
 ## Workflow Standards
@@ -124,13 +121,13 @@ When adding new agent configurations:
 
 ## Tool Comparison
 
-| Feature | Claude Code | OpenCode | Cline | Gemini CLI | Qwen |
-||---------|-------------|----------|-------|------------|------|
-| Terminal-based | Yes | Yes | No (VS Code) | Yes | Yes |
-| Local LLM | Yes | Yes | Yes (vLLM) | No | Yes |
-| Custom commands | Yes | Yes | Limited | Yes | Yes |
-| Skills system | Yes | Yes | No | Yes | Yes |
-| Plugin ecosystem | Yes | Yes | No | Yes | No |
+| Feature | Claude Code | OpenCode | Cline | Gemini CLI |
+|---------|-------------|----------|-------|------------|
+| Terminal-based | Yes | Yes | No (VS Code) | Yes |
+| Local LLM | Yes | Yes | Yes (vLLM) | No |
+| Custom commands | Yes | Yes | Limited | Yes |
+| Skills system | Yes | Yes | No | Yes |
+| Plugin ecosystem | Yes | Yes | No | Yes |
 
 ## Additional Resources
 
@@ -146,7 +143,6 @@ ai-code-agents/
 ├── [codex/](codex/)          # Codex config, agents, prompts, and skills
 ├── [gemini/](gemini/)        # Gemini CLI config and assets
 ├── [opencode/](opencode/)    # OpenCode configuration files
-├── [qwen/](qwen/)            # Qwen config and assets
 └── [skills/](skills/)        # Skill authoring and portability reference
 ```
 

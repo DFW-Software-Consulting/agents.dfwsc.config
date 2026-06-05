@@ -10,6 +10,7 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | OpenCode config files | [`opencode/`](opencode/) |
 | OpenCode subagents | [`opencode/agents/README.md`](opencode/agents/README.md) |
 | Claude config files | [`claude/`](claude/) |
+| Codex config files | [`codex/`](codex/) |
 | Gemini config files | [`gemini/`](gemini/) |
 | Qwen config files | [`qwen/`](qwen/) |
 | Skills reference | [`skills/README.md`](skills/README.md) |
@@ -21,6 +22,7 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | **Cline** | VS Code extension with local vLLM | `cline/` |
 | **OpenCode** | Terminal AI assistant | `opencode/` |
 | **Claude Code** | Terminal AI agent | `claude/` |
+| **Codex** | Terminal, IDE, and app coding agent | `codex/` |
 | **Gemini CLI** | Terminal AI agent (Google) | `gemini/` |
 | **Qwen** | Terminal AI assistant (via OpenCode) | `qwen/` |
 
@@ -29,12 +31,13 @@ This directory contains DFWSC configuration and setup material for the AI coding
 Clone this repo, then run the setup script from the repo root to symlink local tool config back to the checked-out files:
 
 ```bash
-# Claude Code + OpenCode config, OpenCode helper deps, and Plannotator CLI
+# Claude Code + OpenCode + Codex config, OpenCode helper deps, and Plannotator CLI
 ./setup-agent-configs.sh all
 
 # Or set up one piece at a time
 ./setup-agent-configs.sh claude
 ./setup-agent-configs.sh opencode
+./setup-agent-configs.sh codex
 ./setup-agent-configs.sh plannotator
 ```
 
@@ -63,7 +66,17 @@ Install Claude Code separately, then run:
    - **API Key**: `EMPTY` (vLLM default)
    - **Model ID**: `mistralai/Devstral-Small-2-24B-Instruct-2512`
 
-### 4. Skills Setup
+### 4. Codex
+
+Install Codex separately, then run:
+
+```bash
+./setup-agent-configs.sh codex
+```
+
+This links global instructions, config defaults, custom subagents, custom prompts, and shared skills.
+
+### 5. Skills Setup
 
 All agents use the [Agent Skills](https://agentskills.io) standard:
 
@@ -130,6 +143,7 @@ When adding new agent configurations:
 ai-code-agents/
 ├── [claude/](claude/)        # Claude Code local config and assets
 ├── [cline/](cline/)          # Cline VS Code extension setup
+├── [codex/](codex/)          # Codex config, agents, prompts, and skills
 ├── [gemini/](gemini/)        # Gemini CLI config and assets
 ├── [opencode/](opencode/)    # OpenCode configuration files
 ├── [qwen/](qwen/)            # Qwen config and assets

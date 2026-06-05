@@ -30,7 +30,7 @@
             }
         }
     },
-    "model": "opencode/deepseek-v4-flash-free",
+    "model": "{env:OPENCODE_FAST_MODEL}",
     "experimental": {
         "hook": {
             "file_edited": {
@@ -51,22 +51,24 @@
         "review": {
             "description": "Reviews code for best practices and potential issues"
         },
-        "git-runner": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
-        "typecheck": { "model": "opencode/deepseek-v4-flash-free" },
-        "test-runner": { "model": "opencode/deepseek-v4-flash-free" },
-        "lint": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
-        "codebase-analyzer": { "model": "opencode/minimax-m2.7" },
-        "antipattern-sniffer": { "model": "opencode/minimax-m2.7" },
-        "context-synthesis": { "model": "opencode/minimax-m2.7" },
-        "backend-architect": { "model": "opencode/gpt-5.3-codex" },
-        "cloud-architect": { "model": "opencode/gpt-5.3-codex" },
-        "database-optimizer": { "model": "opencode/gpt-5.3-codex" },
-        "deployment-engineer": { "model": "opencode/gpt-5.3-codex" },
-        "test-automator": { "model": "opencode/gpt-5.3-codex" },
-        "frontend-developer": { "model": "opencode/gpt-5.3-codex" },
-        "devops-troubleshooter": { "model": "opencode/gpt-5.3-codex" },
-        "mobile-developer": { "model": "opencode/gpt-5.3-codex" },
-        "performance-engineer": { "model": "opencode/gpt-5.3-codex" }
+        "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
+        "typecheck": { "model": "{env:OPENCODE_FAST_MODEL}" },
+        "test-runner": { "model": "{env:OPENCODE_FAST_MODEL}" },
+        "lint": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
+        "prettier": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
+        "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}" },
+        "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}" },
+        "context-synthesis": { "model": "{env:OPENCODE_CONTEXT_MODEL}" },
+        "antipattern-sniffer": { "model": "{env:OPENCODE_SNIFFER_MODEL}" },
+        "frontend-developer": { "model": "{env:OPENCODE_FRONTEND_MODEL}" },
+        "mobile-developer": { "model": "{env:OPENCODE_MOBILE_MODEL}" },
+        "backend-architect": { "model": "{env:OPENCODE_BACKEND_MODEL}" },
+        "cloud-architect": { "model": "{env:OPENCODE_CLOUD_MODEL}" },
+        "database-optimizer": { "model": "{env:OPENCODE_DB_MODEL}" },
+        "deployment-engineer": { "model": "{env:OPENCODE_DEPLOY_MODEL}" },
+        "devops-troubleshooter": { "model": "{env:OPENCODE_DEVOPS_MODEL}" },
+        "performance-engineer": { "model": "{env:OPENCODE_PERF_MODEL}" },
+        "test-automator": { "model": "{env:OPENCODE_TEST_MODEL}" }
     },
     "mcp": {
       "shopify": {
@@ -75,8 +77,9 @@
           "npx",
           "-y",
           "shopify-mcp-server"
-        ]
+        ],
+        "enabled": true
       }
     },
-    "plugin": [["@plannotator/opencode@latest", { "workflow": "plan-agent", "planningAgents": ["plan"] }]]
+    "plugin": [["@plannotator/opencode@latest", { "workflow": "manual" }]]
 }

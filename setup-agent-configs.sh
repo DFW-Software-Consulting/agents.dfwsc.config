@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [claude|opencode|plannotator|all]\n' "${0##*/}"
+  printf 'Usage: %s [claude|opencode|codex|plannotator|all]\n' "${0##*/}"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,6 +57,16 @@ link_opencode() {
   fi
 }
 
+link_codex() {
+  mkdir -p "$HOME/.codex/agents" "$HOME/.codex/prompts" "$HOME/.agents"
+
+  link_path "$repo_root/ai-code-agents/codex/AGENTS.md" "$HOME/.codex/AGENTS.md"
+  link_path "$repo_root/ai-code-agents/codex/config.toml" "$HOME/.codex/config.toml"
+  link_path "$repo_root/ai-code-agents/codex/agents" "$HOME/.codex/agents"
+  link_path "$repo_root/ai-code-agents/codex/prompts" "$HOME/.codex/prompts"
+  link_path "$repo_root/ai-code-agents/codex/skills" "$HOME/.agents/skills"
+}
+
 install_plannotator() {
   if command -v plannotator >/dev/null 2>&1; then
     printf 'Plannotator already installed: %s\n' "$(command -v plannotator)"
@@ -73,12 +83,16 @@ case "$target" in
   opencode)
     link_opencode
     ;;
+  codex)
+    link_codex
+    ;;
   plannotator)
     install_plannotator
     ;;
   all)
     link_claude
     link_opencode
+    link_codex
     install_plannotator
     ;;
   -h|--help|help)
@@ -92,4 +106,4 @@ case "$target" in
 esac
 
 printf 'Set up %s from %s\n' "$target" "$repo_root"
-printf 'Restart Claude Code/OpenCode after changing linked config files.\n'
+printf 'Restart Claude Code/OpenCode/Codex after changing linked config files.\n'

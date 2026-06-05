@@ -1,6 +1,6 @@
 ---
 name: plannotator-review
-description: Use when opening Plannotator's browser-based code review UI for the current worktree or a pull request URL, then acting on returned feedback.
+description: Open Plannotator's browser-based code review UI for the current worktree or a pull request URL, then act on the feedback that comes back.
 ---
 
 # Plannotator Review

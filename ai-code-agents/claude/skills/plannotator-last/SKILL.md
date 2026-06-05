@@ -1,6 +1,6 @@
 ---
 name: plannotator-last
-description: Use when opening Plannotator on the latest rendered assistant message and using returned annotations to revise that message or continue.
+description: Open Plannotator on the latest rendered assistant message and use the returned annotations to revise that message or continue.
 ---
 
 # Plannotator Last

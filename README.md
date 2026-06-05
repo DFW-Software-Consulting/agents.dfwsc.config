@@ -18,7 +18,7 @@ Use this project to keep AI agent setup and engineering process docs in one plac
 - **[SOP](engineering-principles/SOP.md)** — AI-assisted development workflow (4-gate process)
 - **[Work Issue Template](engineering-principles/git/work-issue.md)** — Gate 1 and 2 templates
 - **[Work PR Template](engineering-principles/git/work-pr.md)** — Gate 4 verification template
-- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, and Claude Code setup guides
+- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, Claude Code, Codex, Gemini, and Qwen setup guides
 
 ## Getting Started
 
@@ -33,23 +33,24 @@ Clone the repo first:
 git clone git@github.com:DFW-Software-Consulting/agents.dfwsc.config.git ~/dfwsc/agents.dfwsc.config
 ```
 
-Then symlink the configs for whichever tools you use: Claude Code, OpenCode, or both. The symlinks point your local tool config at the repo so changes stay in sync automatically.
+Then symlink the configs for whichever tools you use. The symlinks point your local tool config at the repo so changes stay in sync automatically.
 
 ```bash
 cd ~/dfwsc/agents.dfwsc.config
 
-# Link Claude Code and OpenCode configs, and install Plannotator
+# Link Claude Code, OpenCode, and Codex configs, and install Plannotator
 ./setup-agent-configs.sh all
 
 # Or set up one piece
 ./setup-agent-configs.sh claude
 ./setup-agent-configs.sh opencode
+./setup-agent-configs.sh codex
 ./setup-agent-configs.sh plannotator
 ```
 
 The manual commands below do the same thing if you prefer to see each symlink.
 
-Install Claude Code and/or OpenCode separately before launching them. This repo links their config and installs helper dependencies, but it does not install the AI tools themselves.
+Install Claude Code, OpenCode, and/or Codex separately before launching them. This repo links their config and installs helper dependencies, but it does not install the AI tools themselves.
 
 ### OpenCode
 
@@ -98,6 +99,20 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engi
 ```
 
 Broad implementation/design agents (backend-architect, cloud-architect, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
+
+### Codex
+
+```bash
+# Global instructions, defaults, subagents, prompts, and shared skills
+mkdir -p ~/.codex ~/.agents
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/AGENTS.md ~/.codex/AGENTS.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/config.toml ~/.codex/config.toml
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/agents ~/.codex/agents
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/prompts ~/.codex/prompts
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/skills ~/.agents/skills
+```
+
+Codex custom commands live in `~/.codex/prompts` and appear as `/prompts:<name>`, for example `/prompts:qa` or `/prompts:ce-pn`.
 
 ### Gemini CLI
 

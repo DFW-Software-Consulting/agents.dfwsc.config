@@ -1,6 +1,6 @@
 ---
 name: plannotator-annotate
-description: Use when opening Plannotator's annotation UI for a markdown file, converted HTML file, URL, or folder, then responding to the returned annotations.
+description: Open Plannotator's annotation UI for a markdown file, converted HTML file, URL, or folder and then respond to the returned annotations.
 ---
 
 # Plannotator Annotate

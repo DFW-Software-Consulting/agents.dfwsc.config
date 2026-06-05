@@ -1,0 +1,42 @@
+# Global Codex defaults for DFWSC.
+#
+# Provider, authentication, data residency, and personal model choices should
+# stay in a user's own ~/.codex/config.toml or profile files when they differ.
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "medium"
+project_doc_fallback_filenames = ["CLAUDE.md", "GEMINI.md", "QWEN.md", ".agents.md"]
+project_doc_max_bytes = 65536
+
+[agents]
+max_threads = 6
+max_depth = 1
+job_max_runtime_seconds = 1800
+
+[sandbox_workspace_write]
+network_access = false
+
+[projects."/home/messyginger0804/dfwsc/agents.dfwsc.config"]
+trust_level = "trusted"
+
+[projects."/home/messyginger0804/dfwsc/emmut-properties-management"]
+trust_level = "trusted"
+
+[projects."/home/messyginger0804/byjc"]
+trust_level = "trusted"
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+
+[hooks.state]
+
+[hooks.state."/home/messyginger0804/.codex/hooks.json:stop:0:0"]
+trusted_hash = "sha256:a76f053c577194b8a54bad8df59d9553c312137a669621a4bc5ae3ef36975de3"
+
+[features]
+terminal_resize_reflow = true
+memories = true
+network_proxy = true
+external_migration = true
+prevent_idle_sleep = true

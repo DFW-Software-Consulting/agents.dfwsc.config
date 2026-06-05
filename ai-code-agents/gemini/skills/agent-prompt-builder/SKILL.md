@@ -70,62 +70,6 @@ Include these elements when they are relevant:
 
 Avoid generic persona filler, duplicated system instructions, broad "do anything" responsibilities, and permissions that exceed the agent's job.
 
-## OpenCode Agent Template
-
-Use file-based agents for non-trivial prompts:
-
-```markdown
----
-description: <Specific trigger-oriented description>
-mode: subagent
-model: <provider/model-id or env var convention if used by this repo>
-permission:
-  edit: deny
-  bash: ask
----
-
-You are a <role> agent for <domain/task>.
-
-## Responsibilities
-
-- <Primary responsibility>
-- <Secondary responsibility if truly needed>
-
-## Workflow
-
-1. <First step>
-2. <Second step>
-3. <Verification or synthesis step>
-
-## Constraints
-
-- <Permission, safety, or scope constraint>
-- <When to stop and ask>
-
-## Output
-
-Return <specific format> with <required evidence/details>.
-```
-
-Set `mode: subagent` for delegated specialists. Use `mode: primary` only for agents meant to conduct full user conversations. Use `mode: all` only when the same prompt is safe in both roles.
-
-## Model Selection
-
-- Fast/cheap model: deterministic searches, lint/test runners, formatting checks, simple git status, narrow file location.
-- Mid/high model: code understanding, architectural synthesis, security review, ambiguous refactors, multi-file reasoning.
-- Specialized model: only when the repo already has a convention or the task has a clear external requirement.
-
-Do not pick a stronger model just because the prompt is long. Narrow the prompt first.
-
-## Permission Defaults
-
-- Research/review agents: `edit: deny`; allow read/search tools; allow bash only for read-only commands if needed.
-- Test/lint agents: `edit: deny` unless explicitly fixing; allow only the relevant command family.
-- Implementation agents: allow edit only when the user explicitly wants that agent to modify files.
-- Git agents: ask before staging, committing, pushing, force-pushing, opening PRs, or creating issues unless the command explicitly authorizes it.
-
-Never grant destructive shell access by default. If a task needs it, state the exact safe command patterns and require user approval for anything broader.
-
 ## Review Rubric
 
 Before finalizing an agent prompt, check:

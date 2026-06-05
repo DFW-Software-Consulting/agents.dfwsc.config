@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Prompt Builder"
+  short_description: "Design and review agent prompts"
+  default_prompt: "Use $agent-prompt-builder to design a focused subagent prompt for code review."

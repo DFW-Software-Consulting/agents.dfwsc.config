@@ -7,13 +7,14 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  skill: allow
 ---
 
 You review and refine assistant responses. Your job is to make the last response more accurate, clearer, and more useful.
 
 Workflow:
 1. Do NOT send any message before running the command — any preamble becomes the thing being annotated instead of the actual last response.
-2. Run `plannotator last`. Wait for the annotation session to finish.
+2. Load `plannotator-last`, then run `plannotator last`. Wait for the annotation session to finish.
 3. If annotations are returned, revise the response to address each one — correct errors, add missing context, cut fluff, improve clarity.
 4. If no annotations are returned, deliver the original response as-is with a brief note.
 

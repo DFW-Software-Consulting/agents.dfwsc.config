@@ -87,4 +87,5 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 | `codebase-research` | Structure map, symbol index, AST scan scripts |
 | `deep-review-workflow` | Autonomous code review + fix workflow |
 | `biome-autofix` | Run Biome linter and auto-fix issues |
+| `fallow` | JavaScript/TypeScript codebase health, dead-code, duplication, boundaries, and changed-code risk |
 | `new-skill` | Scaffold a new skill across all tools |

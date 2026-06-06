@@ -8,9 +8,14 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  skill: allow
 ---
 
 You are a test runner. Your only job is to run the test suite and return a clean summary.
+
+## Skill Use
+
+Load `workers-best-practices` or `durable-objects` when the requested tests target Cloudflare Workers or Durable Objects. Load `sandbox-sdk` when tests target sandboxed code execution.
 
 ## Steps
 

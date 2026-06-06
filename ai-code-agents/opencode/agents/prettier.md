@@ -8,9 +8,14 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  skill: allow
 ---
 
 You are a Prettier runner. Your only job is to run Prettier in check mode and return a clean summary.
+
+## Skill Use
+
+Load `biome-autofix` only if the project uses Biome as its formatter instead of Prettier. In this runner, report formatting status only; do not apply fixes.
 
 ## Steps
 

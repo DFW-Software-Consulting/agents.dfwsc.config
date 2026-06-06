@@ -1,34 +1,24 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "openrouter": {
-      "npm": "@openrouter/ai-sdk-provider",
+    "openai": {
+      "npm": "@ai-sdk/openai",
+      "name": "OpenAI",
       "options": {
-        "apiKey": "{env:OPENROUTER_API_KEY}"
+        "apiKey": "{env:OPENAI_API_KEY}"
       },
       "models": {
-        "sonnet": {
-          "id": "anthropic/claude-sonnet-4-5"
-        },
-        "gpt-4o": {
-          "id": "openai/gpt-4o"
-        },
-        "gemini-flash": {
-          "id": "google/gemini-2.0-flash-001"
-        },
-        "qwen3-coder": {
-          "id": "qwen/qwen3-coder:free"
-        },
-        "minimax-m2": {
-          "id": "minimax/minimax-m2.5:free"
-        },
-        "qwen3-next": {
-          "id": "qwen/qwen3-next-80b-a3b-instruct:free"
+        "gpt-5.4": {
+          "name": "GPT 5.4",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          }
         }
       }
     }
   },
-  "model": "{env:OPENCODE_FAST_MODEL}",
+  "model": "opencode/deepseek-v4-flash-free",
   "agent": {
     "working": {
       "permission": {
@@ -46,11 +36,11 @@
       },
       "prompt": "You are in working mode: a conversational explanation mode for talking through systems, code, behavior, and concepts without switching into implementation, review, or planning.\n\nCore behavior:\n- Do not edit files, apply patches, create files, run general shell commands, or make commits.\n- You may use read-only code exploration tools, including read, glob, and grep.\n- You may query databases only through the read-only wrapper: `node ~/.opencode/tools/db-readonly.mjs ...`.\n- Database queries must be read-only inspection queries. Do not run schema changes, writes, migrations, seed scripts, or destructive commands.\n- Do not create implementation plans unless the user explicitly asks for a plan.\n- Do not perform code review unless the user explicitly asks for a review.\n- Focus on explaining what things are, what they do, how they connect, and why they behave that way.\n- Use plain, direct language and ask clarifying questions when the user's goal is unclear.\n- If codebase context is needed, inspect files with read-only tools only.\n- Prefer concise explanations first, then add detail if the user asks.\n- If the user asks to build, fix, edit, test, commit, or otherwise change the project, tell them to switch to Build mode.\n\nGood outputs in this mode include:\n- \"This component is responsible for...\"\n- \"The request flows from this route into this service, then into...\"\n- \"That config means...\"\n- \"The tradeoff here is...\"\n- \"I can explain that from the UI side, backend side, or data-flow side.\"\n\nAvoid:\n- Proposing a step-by-step implementation plan by default.\n- Saying you will make changes.\n- Running verification commands outside the read-only DB wrapper.\n- Turning discussion into task execution."
     },
-    "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-    "typecheck": { "model": "{env:OPENCODE_FAST_MODEL}" },
-    "test-runner": { "model": "{env:OPENCODE_FAST_MODEL}" },
-    "lint": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-    "prettier": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
+    "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}" },
+    "typecheck": { "model": "opencode/deepseek-v4-flash-free" },
+    "test-runner": { "model": "{env:OPENCODE_TEST_MODEL}" },
+    "lint": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
+    "prettier": { "mode": "subagent", "model": "opencode/deepseek-v4-flash-free" },
     "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}" },
     "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}" },
     "context-synthesis": { "model": "{env:OPENCODE_CONTEXT_MODEL}" },
@@ -62,11 +52,11 @@
     "database-optimizer": { "model": "{env:OPENCODE_DB_MODEL}" },
     "deployment-engineer": {
       "model": "{env:OPENCODE_DEPLOY_MODEL}",
-      "prompt": "Default to a cost-efficient first pass on this model. Escalate to opencode-go/deepseek-v4-pro only after a failed cheaper pass, such as unresolved root cause, failed remediation attempts, or low-confidence output after validation."
+      "prompt": "Default to a cost-efficient first pass on this model. Escalate to openai/gpt-5.4 only after a failed cheaper pass, such as unresolved root cause, failed remediation attempts, or low-confidence output after validation."
     },
     "devops-troubleshooter": {
       "model": "{env:OPENCODE_DEVOPS_MODEL}",
-      "prompt": "Default to a cost-efficient first pass on this model. Escalate to opencode-go/deepseek-v4-pro only after a failed cheaper pass, such as unresolved incident triage, failed mitigation attempts, or low-confidence diagnosis after validation."
+      "prompt": "Default to a cost-efficient first pass on this model. Escalate to openai/gpt-5.4 only after a failed cheaper pass, such as unresolved incident triage, failed mitigation attempts, or low-confidence diagnosis after validation."
     },
     "performance-engineer": { "model": "{env:OPENCODE_PERF_MODEL}" },
     "test-automator": { "model": "{env:OPENCODE_TEST_MODEL}" }
@@ -85,14 +75,17 @@
     },
     "dfwsc": {
       "type": "local",
-      "enabled": false,
+      "enabled": true,
       "command": ["node", "/home/messyginger0804/dfwsc/dfwsc-mcp/src/index.js"],
       "environment": {
         "COOLIFY_URL": "{env:COOLIFY_URL}",
         "COOLIFY_TOKEN": "{env:COOLIFY_TOKEN}",
         "NEXTCLOUD_URL": "{env:NEXTCLOUD_URL}",
         "NEXTCLOUD_USER": "{env:NEXTCLOUD_USER}",
-        "NEXTCLOUD_PASSWORD": "{env:NEXTCLOUD_PASSWORD}"
+        "NEXTCLOUD_PASSWORD": "{env:NEXTCLOUD_PASSWORD}",
+        "GITHUB_TOKEN": "{env:GITHUB_TOKEN}",
+        "GITHUB_OWNER": "{env:GITHUB_OWNER}",
+        "GITHUB_REPO": "{env:GITHUB_REPO}"
       }
     },
     "nextcloud": {

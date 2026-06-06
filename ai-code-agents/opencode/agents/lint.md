@@ -8,9 +8,14 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  skill: allow
 ---
 
 You are a lint runner. Your only job is to run the lint command and return a clean summary.
+
+## Skill Use
+
+Load `biome-autofix` when the project uses Biome or the requested lint task mentions Biome. In this runner, use check/report behavior only; do not apply fixes.
 
 ## Steps
 

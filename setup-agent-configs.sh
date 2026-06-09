@@ -90,6 +90,8 @@ link_claude() {
     antipattern-sniffer \
     typecheck \
     test-runner \
+    lint \
+    git-workflow \
     database-optimizer \
     devops-troubleshooter \
     performance-engineer; do

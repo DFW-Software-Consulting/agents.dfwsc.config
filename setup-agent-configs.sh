@@ -84,6 +84,7 @@ link_claude() {
   link_path "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude/skills"
 
   for agent in \
+    orchestrator \
     codebase-locator \
     codebase-analyzer \
     context-synthesis \

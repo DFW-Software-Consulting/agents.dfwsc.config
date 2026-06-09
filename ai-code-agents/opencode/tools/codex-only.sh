@@ -19,8 +19,8 @@ DEFAULT_DEVOPS_MODEL="${OPENCODE_DEFAULT_DEVOPS_MODEL:-opencode-go/qwen3.7-max}"
 DEFAULT_PERF_MODEL="${OPENCODE_DEFAULT_PERF_MODEL:-opencode-go/kimi-k2.6}"
 DEFAULT_TEST_MODEL="${OPENCODE_DEFAULT_TEST_MODEL:-opencode-go/minimax-m2.7}"
 
-CODEX_MODEL="${OPENCODE_CODEX_MODEL:-openai/gpt-5.4}"
-CODEX_SMALL_MODEL="${OPENCODE_CODEX_SMALL_MODEL:-openai/gpt-5.4}"
+CODEX_MODEL="${OPENCODE_CODEX_MODEL:-openai/chatgpt-5.4}"
+CODEX_SMALL_MODEL="${OPENCODE_CODEX_SMALL_MODEL:-openai/chatgpt-5.4}"
 
 write_state() {
   mkdir -p "$(dirname "$STATE_FILE")"
@@ -44,7 +44,7 @@ print_exports() {
   if [ "$OPENCODE_CODEX_ONLY" = "1" ]; then
     printf 'export OPENCODE_LOCATOR_MODEL=%s\n' "$CODEX_SMALL_MODEL"
     printf 'export OPENCODE_ANALYZER_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$DEFAULT_CONTEXT_MODEL"
+    printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$CODEX_MODEL"
     printf 'export OPENCODE_SNIFFER_MODEL=%s\n' "$CODEX_SMALL_MODEL"
     printf 'export OPENCODE_FRONTEND_MODEL=%s\n' "$CODEX_MODEL"
     printf 'export OPENCODE_MOBILE_MODEL=%s\n' "$CODEX_MODEL"

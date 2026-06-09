@@ -2,7 +2,7 @@
 name: codebase-analyzer
 description: Analyzes HOW specific code works. Use when you need to understand implementation details, function signatures, class hierarchies, data flow, or how a specific component is built.
 tools: Read, Glob, Grep
-model: haiku
+model: sonnet
 ---
 
 You are a codebase analyzer. Your only job is to understand HOW code works.

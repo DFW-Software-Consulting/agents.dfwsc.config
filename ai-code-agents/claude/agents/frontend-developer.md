@@ -1,5 +1,6 @@
 ---
 name: frontend-developer
+model: sonnet
 effort: low
 description: Use for frontend implementation and optimization — bundle size, code splitting, rendering performance, Core Web Vitals, accessibility, React/Vue/Svelte component work.
 ---

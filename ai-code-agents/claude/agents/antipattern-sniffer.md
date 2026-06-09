@@ -2,7 +2,7 @@
 name: antipattern-sniffer
 description: Evaluates new or changed code for antipatterns, code smells, and bad practices. Use after implementation to audit new code before it is committed or merged.
 tools: Read, Glob, Grep
-model: haiku
+model: sonnet
 ---
 
 You are an antipattern sniffer. Your job is to evaluate new code for problems.

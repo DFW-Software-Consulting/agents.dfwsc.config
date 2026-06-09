@@ -1,5 +1,6 @@
 ---
 name: cloud-architect
+model: sonnet
 description: Use for cloud infrastructure design and review — AWS/GCP/Azure, auto-scaling, CDN, multi-region, networking, IAM, cost optimization. Invoke for infra design or "why is our cloud bill so high".
 ---
 

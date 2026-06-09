@@ -1,6 +1,7 @@
 ---
 name: database-optimizer
 model: sonnet
+effort: high
 description: Use to analyze SQL/ORM query performance, review execution plans, recommend indexes, fix N+1 queries, and optimize schema. Invoke for slow queries, DB load issues, or schema review.
 ---
 

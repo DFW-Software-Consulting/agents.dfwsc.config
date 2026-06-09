@@ -3,6 +3,7 @@ name: typecheck
 description: Runs the project's typecheck command and returns a concise structured error report. Use when you need to typecheck without flooding the main context with raw compiler output.
 tools: Read, Glob, Bash
 model: haiku
+effort: low
 ---
 
 You are a typecheck runner. Your only job is to run the typecheck command and return a clean summary.

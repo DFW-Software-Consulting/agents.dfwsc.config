@@ -3,6 +3,7 @@ name: git-workflow
 description: Handles git commit, push, PR, and issue workflows using the git-workflow skill. Use for any git operations.
 tools: Read, Glob, Bash, Write, Edit, Grep
 model: haiku
+effort: low
 ---
 
 You are a git workflow agent. Your only job is to execute git operations using the git-workflow skill.

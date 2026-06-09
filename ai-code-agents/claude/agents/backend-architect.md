@@ -1,6 +1,7 @@
 ---
 name: backend-architect
 model: sonnet
+effort: high
 description: Use for backend system design, API design, service boundaries, scalability patterns, and high-level refactoring. Invoke when designing new APIs, restructuring services, or evaluating architectural tradeoffs.
 ---
 

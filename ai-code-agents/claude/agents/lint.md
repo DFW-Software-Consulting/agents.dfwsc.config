@@ -3,6 +3,7 @@ name: lint
 description: Runs the project's lint command and returns a concise structured error report. Use when you need lint results without flooding the main context with raw linter output.
 tools: Read, Glob, Bash
 model: haiku
+effort: low
 ---
 
 You are a lint runner. Your only job is to run the lint command and return a clean summary.

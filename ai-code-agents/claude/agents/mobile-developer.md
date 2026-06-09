@@ -1,7 +1,7 @@
 ---
 name: mobile-developer
 model: sonnet
-effort: low
+effort: medium
 description: Use for native iOS/Android or cross-platform (React Native, Flutter) mobile work — startup time, memory, battery, offline behavior, app size, store review concerns.
 ---
 

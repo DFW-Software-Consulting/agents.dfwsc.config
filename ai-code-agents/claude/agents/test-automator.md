@@ -1,7 +1,7 @@
 ---
 name: test-automator
 model: sonnet
-effort: low
+effort: medium
 description: Use to design and implement test suites — unit, integration, E2E, load, performance regression, contract tests. Invoke when adding test coverage or building a test strategy.
 ---
 

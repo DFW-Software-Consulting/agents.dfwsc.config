@@ -1,7 +1,7 @@
 ---
 name: deployment-engineer
 model: sonnet
-effort: low
+effort: medium
 description: Use for CI/CD pipelines, build optimization, container images, release strategies (blue-green, canary, rolling), and deployment automation.
 ---
 

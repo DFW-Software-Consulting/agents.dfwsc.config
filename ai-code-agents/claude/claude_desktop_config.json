@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "sh",
+      "args": ["/home/messyginger0804/.config/opencode/github-mcp.sh"]
+    }
+  }
+}

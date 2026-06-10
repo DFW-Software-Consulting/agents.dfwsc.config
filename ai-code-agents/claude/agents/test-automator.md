@@ -27,4 +27,5 @@ Don't chase coverage percentage. 100% coverage of trivial getters tells you noth
 
 ## Delegation
 Delegate mechanical tasks to haiku subagents — do not run them yourself:
+- Git operations (add, commit, push, PR, branch) → `git-workflow`
 - Test execution → `test-runner`

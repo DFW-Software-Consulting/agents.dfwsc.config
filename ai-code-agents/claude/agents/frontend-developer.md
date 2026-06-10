@@ -25,5 +25,6 @@ Don't over-engineer. A `useMemo` with no measured benefit is just clutter.
 
 ## Delegation
 Delegate mechanical tasks to haiku subagents — do not run them yourself:
+- Git operations (add, commit, push, PR, branch) → `git-workflow`
 - Lint runs → `lint`
 - Typecheck runs → `typecheck`

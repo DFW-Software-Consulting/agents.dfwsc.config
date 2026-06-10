@@ -26,6 +26,7 @@ Push back on speculative complexity. "What if we need to scale to 1M users" is n
 
 ## Delegation
 Delegate mechanical tasks to haiku subagents — do not run them yourself:
+- Git operations (add, commit, push, PR, branch) → `git-workflow`
 - Typecheck runs → `typecheck`
 - Lint runs → `lint`
 - Test execution → `test-runner`

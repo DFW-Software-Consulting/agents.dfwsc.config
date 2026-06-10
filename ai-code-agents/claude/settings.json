@@ -2,5 +2,11 @@
   "model": "opus",
   "effortLevel": "medium",
   "theme": "dark-ansi",
-  "smallModel": "claude-haiku-4-5"
+  "smallModel": "claude-haiku-4-5",
+  "mcpServers": {
+    "github": {
+      "command": "sh",
+      "args": ["/home/messyginger0804/.config/opencode/github-mcp.sh"]
+    }
+  }
 }

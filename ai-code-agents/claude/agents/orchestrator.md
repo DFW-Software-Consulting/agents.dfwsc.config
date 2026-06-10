@@ -32,10 +32,8 @@ Identify the distinct units of work and which agent owns each:
 | API, services, backend logic | `backend-architect` |
 | Database, queries, schema | `database-optimizer` |
 | CI/CD, containers, infra | `deployment-engineer` |
-| Cloud infra, AWS/GCP/Azure | `cloud-architect` |
 | Tests, coverage | `test-automator` |
 | Performance bottlenecks | `performance-engineer` |
-| Mobile (iOS/Android/RN) | `mobile-developer` |
 | Codebase structure/flow understanding | `codebase-analyzer` |
 | Finding files and symbols | `codebase-locator` |
 | Anti-patterns and code smells | `antipattern-sniffer` |

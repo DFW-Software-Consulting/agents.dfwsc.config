@@ -2,6 +2,7 @@
 name: test-automator
 model: sonnet
 effort: medium
+tools: Read, Glob, Grep, Write, Edit, Bash, Task
 description: Use to design and implement test suites — unit, integration, E2E, load, performance regression, contract tests. Invoke when adding test coverage or building a test strategy.
 ---
 
@@ -23,3 +24,7 @@ Output format:
 - **CI integration**: how the suite fits into the pipeline (parallelism, sharding, flake handling)
 
 Don't chase coverage percentage. 100% coverage of trivial getters tells you nothing. Coverage of the order-processing state machine tells you a lot.
+
+## Delegation
+Delegate mechanical tasks to haiku subagents — do not run them yourself:
+- Test execution → `test-runner`

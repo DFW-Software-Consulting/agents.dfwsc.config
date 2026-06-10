@@ -1,12 +1,65 @@
 {
   "model": "opus",
-  "effortLevel": "medium",
+  "effortLevel": "high",
+  "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
   "smallModel": "claude-haiku-4-5",
   "mcpServers": {
     "github": {
       "command": "sh",
-      "args": ["/home/messyginger0804/.config/opencode/github-mcp.sh"]
+      "args": [
+        "/home/messyginger0804/.config/opencode/github-mcp.sh"
+      ]
     }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(git remote:*)",
+      "Bash(git stash list:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(which:*)",
+      "Bash(jq:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run test:*)",
+      "Bash(npm run test:run:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx biome:*)",
+      "Bash(make lint:*)",
+      "Bash(make test:*)",
+      "Bash(make fmt:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); printf '%s' \"$cmd\" | grep -iqE 'git[[:space:]]+commit' || { printf '{}'; exit 0; }; printf '%s' \"$cmd\" | grep -iqE 'claude|anthropic' && { printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Commit message mentions a forbidden term (Claude/Anthropic). Per the user standing rule, commit and PR messages must not reference coding agents. Rewrite the message without those terms.\"}}'; exit 0; }; printf '{}'",
+            "statusMessage": "Checking commit message for forbidden terms"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -98,7 +98,7 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/devops-troublesh
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engineer.md ~/.claude/agents/performance-engineer.md
 ```
 
-Broad implementation/design agents (backend-architect, cloud-architect, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
+Broad implementation/design agents (backend-architect, deployment-engineer, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
 
 GitHub MCP is configured via `~/.claude/settings.json` in this setup. Before launching Claude, either export `GITHUB_TOKEN` (or equivalent) in your shell or authenticate `gh` so `github-mcp.sh` can fall back to `gh auth token`.
 

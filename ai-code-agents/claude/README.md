@@ -36,7 +36,7 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/devops-troublesh
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engineer.md ~/.claude/agents/performance-engineer.md
 ```
 
-Broad implementation/design agents (`backend-architect`, `cloud-architect`, etc.) are best copied per-project into `.claude/agents/` rather than linked globally.
+Broad implementation/design agents (`backend-architect`, `deployment-engineer`, etc.) are best copied per-project into `.claude/agents/` rather than linked globally.
 
 ## GitHub MCP
 
@@ -75,7 +75,7 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 - `performance-engineer` — profiles bottlenecks and optimization targets (haiku)
 
 **Broad specialists** (copy per-project into `.claude/agents/`):
-- `backend-architect`, `frontend-developer`, `cloud-architect`, `test-automator`, `deployment-engineer`, `mobile-developer`
+- `backend-architect`, `frontend-developer`, `test-automator`, `deployment-engineer`
 
 ## Commands
 

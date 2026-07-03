@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: deny git commits whose message mentions coding agents.
+"""PreToolUse hook: deny git commits that CREDIT a coding agent.
 
-Closes the gaps in the old inline one-liner:
+Blocks attribution to the agent (the footers Claude Code auto-appends and
+hand-written equivalents) while deliberately allowing legitimate references —
+`.claude/` paths, the Claude API, and `@anthropic-ai/*` or `claude-*`/`anthropic-*`
+package and model names — since those are normal in this user's work.
+
+Flag parsing closes the gaps in the old inline one-liner:
 - clustered short flags (git commit -am "msg")
 - attached values (-m"msg", -am"msg")
 - -F/--file: checks the file CONTENTS; denies if unreadable (e.g. written
@@ -12,12 +17,22 @@ import re
 import shlex
 import sys
 
-FORBIDDEN = re.compile(r"claude|anthropic", re.I)
+# Attribution — not every mention of the word "claude"/"anthropic".
+_AGENT = r"(?:claude|anthropic)"
+ATTRIBUTION = [re.compile(p, re.I) for p in (
+    rf"co-?authored-by:[^\n]*\b{_AGENT}\b",                       # git trailer
+    rf"generated\s+(?:with|by|using)\b[^\n]*\b{_AGENT}\b",        # "Generated with Claude Code"
+    rf"\b(?:written|created|authored|made|built|coded|committed|"
+    rf"implemented|refactored|generated)\s+(?:with|by|using|via)\s+"
+    rf"{_AGENT}\b",                                               # hand-written attribution
+    r"\bclaude[\s-]*code\b",                                      # the product/tool name
+)]
 
 DENY_MENTION = (
-    "Commit message references a forbidden term. Commit/PR messages must not "
-    "mention coding agents per your standing rule. Rewrite the message "
-    "without those terms."
+    "Commit message credits a coding agent (e.g. a 'Co-Authored-By: Claude' or "
+    "'Generated with Claude Code' line). Per your standing rule, remove the "
+    "attribution. Note: a .claude/ path, the Claude API, or a claude-*/"
+    "anthropic-* package or model name is fine — only agent attribution is blocked."
 )
 DENY_FILE = (
     "Cannot verify the commit-message file '{}' at hook time. Use git commit "
@@ -77,7 +92,7 @@ def main():
             msgs.append(re.sub(r"^-[a-zA-Z]*m", "", t, count=1))
         i += 1
 
-    if any(FORBIDDEN.search(m or "") for m in msgs):
+    if any(pat.search(m or "") for m in msgs for pat in ATTRIBUTION):
         deny(DENY_MENTION)
     allow()
 

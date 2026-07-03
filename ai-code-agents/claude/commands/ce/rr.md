@@ -16,13 +16,15 @@ You are tasked with conducting comprehensive research across the codebase to ans
 
 ## Initial Setup:
 
-When this command is invoked, respond with:
+When this command is invoked:
+- If `$ARGUMENTS` is non-empty, proceed immediately using it as the research query.
+- If `$ARGUMENTS` is empty, respond with:
 
 ```
 I'm ready to research the codebase. Please provide your research question or area of interest, and I'll analyze it thoroughly by exploring relevant components and connections.
 ```
 
-Then wait for the user's research query.
+  Then wait for the user's research query.
 
 ## Steps to follow after receiving the research query:
 
@@ -40,34 +42,24 @@ Then wait for the user's research query.
    - Consider which directories, files, or architectural patterns are relevant
 
 3. **Spawn parallel sub-agent tasks for comprehensive research:**
-   - Strictly limit to a maximum of 3 Task agents per research query. You may not spawn more than two sub-agents for any research query, regardless of the number of aspects or subtasks. This is a hard limit.
+   - Spawn exactly 3 subagents — codebase-locator, codebase-analyzer, and context-synthesis — in parallel, in a single message.
    - Only reference files and resources that are part of the current codebase or workspace. Do not reference or include any files, tickets, or resources that are external or not present in this workspace.
-
-   YOU MUST DEPLOY THESE 3 IN PARELLEL
-   YOU WILL BE PUNISHED FOR NOT DEPLOYING SUBAGENTS IN PARELLEL
 
    **For codebase research:**
    - Use the **codebase-locator** agent to find WHERE files and components live
    - Use the **codebase-analyzer** agent to understand HOW specific code works
    - Use the **context-synthesis** agent to find context as needed
 
-   one of these 3 agents can use the gemini mcp
-
    The key is to use these agents intelligently:
-   - Start with locator agents to find what exists
-   - Then use analyzer and synthesis agents on the most promising findings
-   - Run agents in parallel only if they are searching for different things, and never exceed two concurrent sub-agents.
    - Each agent knows its job - just tell it what you're looking for
    - Don't write detailed prompts about HOW to search - the agents already know
 
 4. **Wait for all sub-agents to complete and synthesize findings:**
    - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
-   - Compile all sub-agent results (both codebase and thoughts findings)
+   - Compile all sub-agent results
    - Prioritize live codebase findings as primary source of truth
-   - Use thoughts/ findings as supplementary historical context
    - Connect findings across different components
    - Include specific file paths and line numbers for reference
-   - Verify all thoughts/ paths are correct (e.g., thoughts/allison/ not thoughts/shared/ for personal files)
    - Highlight patterns, connections, and architectural decisions
    - Answer the user's specific questions with concrete evidence
 
@@ -131,7 +123,6 @@ Then wait for the user's research query.
 
 - Always use parallel Task agents to maximize efficiency and minimize context usage
 - Always run fresh codebase research - never rely solely on existing research documents
-- The thoughts/ directory provides historical context to supplement live findings
 - Focus on finding concrete file paths and line numbers for developer reference
 - Research documents should be self-contained with all necessary context
 - Each sub-agent prompt should be specific and focused on read-only operations
@@ -140,19 +131,12 @@ Then wait for the user's research query.
 - Link to GitHub when possible for permanent references
 - Keep the main agent focused on synthesis, not deep file reading
 - Encourage sub-agents to find examples and usage patterns, not just definitions
-- Explore all of thoughts/ directory, not just research subdirectory
 - **File reading**: Always read mentioned files FULLY (no limit/offset) before spawning sub-tasks
 - **Critical ordering**: Follow the numbered steps exactly
   - ALWAYS read mentioned files first before spawning sub-tasks (step 1)
   - ALWAYS wait for all sub-agents to complete before synthesizing (step 4)
   - ALWAYS gather metadata before writing the document (step 5 before step 6)
   - NEVER write the research document with placeholder values
-- **Path handling**: The thoughts/searchable/ directory contains hard links for searching
-  - Always document paths by removing ONLY "searchable/" - preserve all other subdirectories
-
-  - NEVER change allison/ to shared/ or vice versa - preserve the exact directory structure
-  - This ensures paths are correct for editing and navigation
-
 - **Frontmatter consistency**:
   - Always include frontmatter at the beginning of research documents
   - Keep frontmatter fields consistent across all research documents
@@ -160,6 +144,5 @@ Then wait for the user's research query.
   - Use snake_case for multi-word field names (e.g., `last_updated`, `git_commit`)
   - Tags should be relevant to the research topic and components studied
 
-  DO NOT CODE YOU WILL BE PUNISHED FOR CODING
-
-  SAVE THE DOCUMENT YOU MUST SAVE IN THE CORRECT FORMAT FOR THE NEXT DEV
+- Do not write or modify source code as part of this command.
+- Save the research document in the correct format for the next developer.

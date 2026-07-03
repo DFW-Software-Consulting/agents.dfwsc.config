@@ -1,17 +1,4 @@
 {
-  "model": "opus",
-  "effortLevel": "high",
-  "skipWorkflowUsageWarning": true,
-  "theme": "dark-ansi",
-  "smallModel": "claude-haiku-4-5",
-  "mcpServers": {
-    "github": {
-      "command": "sh",
-      "args": [
-        "/home/messyginger0804/.config/opencode/github-mcp.sh"
-      ]
-    }
-  },
   "permissions": {
     "allow": [
       "Bash(git status:*)",
@@ -47,6 +34,7 @@
       "Bash(docker compose logs:*)"
     ]
   },
+  "model": "opus[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -54,12 +42,35 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git commit*)",
-            "command": "python3 -c 'import json,sys,shlex,re\nd=json.load(sys.stdin)\nc=d.get(\"tool_input\",{}).get(\"command\",\"\")\ntry:\n t=shlex.split(c) if (\"git\" in c and \"commit\" in c) else []\nexcept Exception:\n t=[]\nm=[t[i+1] for i in range(len(t)-1) if t[i] in (\"-m\",\"--message\",\"-F\",\"--file\")]\nm+=[x.split(\"=\",1)[1] for x in t if x.startswith((\"--message=\",\"--file=\"))]\nm+=[x[2:] for x in t if x.startswith(\"-m\") and len(x)>2 and not x.startswith(\"--\")]\nj=\" \".join(m)\nok=bool(t) and bool(re.search(\"claude|anthropic\",j,re.I))\nprint(json.dumps({\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Commit message references a forbidden term. Commit/PR messages must not mention coding agents per your standing rule. Rewrite the message without those terms.\"}}) if ok else \"{}\")'",
+            "command": "python3 /home/messyginger0804/.claude/hooks/no-agent-mention.py",
             "statusMessage": "Checking commit message for forbidden terms"
           }
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "warp@claude-code-warp": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-warp": {
+      "source": {
+        "source": "github",
+        "repo": "warpdotdev/claude-code-warp"
+      }
+    }
+  },
+  "effortLevel": "xhigh",
+  "tui": "fullscreen",
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark-ansi",
+  "smallModel": "claude-haiku-4-5",
+  "mcpServers": {
+    "github": {
+      "command": "sh",
+      "args": [
+        "/home/messyginger0804/.config/opencode/github-mcp.sh"
+      ]
+    }
   }
 }

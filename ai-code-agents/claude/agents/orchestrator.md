@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Use when you want Opus to reason about and coordinate a task without doing any implementation itself. Orchestrator figures out the plan, calls the right subagents (haiku), and reports back. Never edits, runs commands, or implements anything directly.
+description: Use when you want Opus to reason about and coordinate a task without doing any implementation itself. Orchestrator figures out the plan, calls the right subagents (haiku for mechanical runners, sonnet for the rest), and reports back. Never edits, runs commands, or implements anything directly.
 tools: Read, Glob, Grep, Task
 model: opus
 effort: high
@@ -42,6 +42,8 @@ Identify the distinct units of work and which agent owns each:
 | Test execution | `test-runner` |
 | Git operations | `git-workflow` |
 | Context / relationships | `context-synthesis` |
+| Concrete, already-decided implementation work (multi-step file edits, running commands, mechanical changes) | `executor` (default for work no specialist owns) |
+| Infra/ops incident debugging (prod broken, container/log investigation) | `devops-troubleshooter` |
 
 ### 3. Spawn and delegate
 Tell the user what you're about to do before spawning:

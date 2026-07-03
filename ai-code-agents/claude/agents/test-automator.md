@@ -26,6 +26,6 @@ Output format:
 Don't chase coverage percentage. 100% coverage of trivial getters tells you nothing. Coverage of the order-processing state machine tells you a lot.
 
 ## Delegation
-Delegate mechanical tasks to haiku subagents — do not run them yourself:
-- Git operations (add, commit, push, PR, branch) → `git-workflow`
-- Test execution → `test-runner`
+Delegate mechanical tasks to cheap subagents — do not run them yourself:
+- Git operations (add, commit, push, PR, branch) → `git-workflow` (sonnet)
+- Test execution → `test-runner` (haiku)

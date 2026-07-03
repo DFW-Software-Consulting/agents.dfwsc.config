@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: Use when committing, pushing, creating PRs, or creating GitHub issues. Enforces pre-commit/pre-push checks, reads project .github/ templates, and creates issues/PRs via gh CLI. Never commits or pushes if hooks fail.
+description: Git commit/push/PR/issue lifecycle with pre-commit/pre-push hook enforcement and .github template awareness. Do not load this directly from the main conversation — delegate via the git-workflow agent or /git. Load this skill only when you are the git-workflow subagent executing the workflow.
 ---
 
 # Git Workflow

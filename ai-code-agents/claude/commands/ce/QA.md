@@ -19,6 +19,8 @@ Run a post-execution QA review for: $ARGUMENTS  (topic OR path to plan/report)
 ## Strict Ordering
 1) Locate artifacts → 2) Build change set (commit range & diff) → 3) Code-logic review (primary) → 4) Tests & contracts review → 5) Secondary scans (optional, read-only) → 6) Synthesize findings → 7) Save QA report
 
+> Heavy reads (full plans, per-file diffs) should be delegated to a read-only subagent rather than read in the main conversation.
+
 ## Step 1 — Locate Inputs
 - Resolve target by $ARGUMENTS:
   - If path given: use it.
@@ -104,3 +106,12 @@ scope: "Changed code only (logic-first), plus impacted contracts/tests"
 ### Critical
 - [CR-1] <title> — Evidence: `<file>#Lx-Ly` (commit `<sha>`), Impact: …, Likelihood: …
 ### High
+- [HI-1] <title> — Evidence: `<file>#Lx-Ly` (commit `<sha>`), Impact: …, Likelihood: …
+### Medium
+- [MD-1] <title> — Evidence: `<file>#Lx-Ly` (commit `<sha>`), Impact: …, Likelihood: …
+### Low
+- [LO-1] <title> — Evidence: `<file>#Lx-Ly` (commit `<sha>`), Impact: …, Likelihood: …
+
+## 3. Verdict
+- Overall: ✅ Accept | ⚠️ Accept w/ Conditions | ❌ Reject
+- Rationale (2–4 bullets tied to the findings above)

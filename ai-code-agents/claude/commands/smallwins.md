@@ -1,7 +1,7 @@
 ---
-allowed-tools: Edit, View, Bash(git:*), Bash(python:*), Bash(pytest:*), Bash(mypy:*), Bash(black:*), Bash(coverage:*), Bash(mutmut:*), Bash(docker:*), Bash(trivy:*), Bash(hadolint:*), Bash(dive:*), Bash(npm:*), Bash(kubectl:*), Bash(helm:*), Bash(lighthouse:*), Bash(jq:*), Bash(curl:*), Bash(gh:*)
-description: Generates a concrete implementation plan from a research doc, with milestones, tasks, gates
-writes-to: memory-bank/qa/
+allowed-tools: View, Bash(git:*), Bash(python:*), Bash(pytest:*), Bash(mypy:*), Bash(black:*), Bash(coverage:*), Bash(mutmut:*), Bash(docker:*), Bash(trivy:*), Bash(hadolint:*), Bash(dive:*), Bash(npm:*), Bash(kubectl:*), Bash(helm:*), Bash(lighthouse:*), Bash(jq:*), Bash(curl:*), Bash(gh:*)
+description: Read-only audit that finds small, low-risk cleanup wins and writes a report to reports/SMALL_WINS_AUDIT.md
+writes-to: AUDIT_SMALL_WINS_PLAN.md, reports/SMALL_WINS_AUDIT.md
 ---
 
 
@@ -81,8 +81,7 @@ Create `reports/SMALL_WINS_AUDIT.md` with sections:
 * ≤1 hour to implement first batch of wins.
 * No modifications performed by this command.
 
-YOU MUST DEPLOY THESE 3 IN PARELLEL
-YOU WILL BE PUNISHED FOR NOT DEPLOYING SUBAGENT
+Run codebase-locator, codebase-analyzer, and context-synthesis subagents in parallel, in a single message.
 **For codebase research:**
 - Use the **codebase-locator** agent to find WHERE files and components live
 - Use the **codebase-analyzer** agent to understand HOW specific code works

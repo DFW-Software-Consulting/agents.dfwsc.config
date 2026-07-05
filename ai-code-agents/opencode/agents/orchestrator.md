@@ -49,12 +49,17 @@ Identify the distinct units of work and which agent owns each:
 | Type errors | `typecheck` |
 | Lint issues | `lint` |
 | Test execution | `test-runner` |
+| **Fallback** — only if nothing above fits | `executor` |
+
+**Always prefer a specialized agent.** `executor` is a last resort for work that genuinely doesn't fit any domain above (e.g., config file edits, simple renames across many files, non-code tasks). If the work is even tangentially frontend, backend, database, or infra — use the specialist.
 
 ### 3. Spawn and delegate
 Tell the user what you're about to do before spawning:
 > "Delegating to `<agent>` for: <what it's doing>"
 
-Spawn independent units of work in parallel. Spawn sequential units in order, passing outputs from earlier agents as context to later ones.
+Spawn independent units of work in batches — dispatch at most **1-2 subagents concurrently**. Wait for each batch to complete before spawning the next. This avoids hitting API rate limits on opencode-go models. You may increase concurrency only when you know the target models have no rate restrictions.
+
+Spawn sequential units in order, passing outputs from earlier agents as context to later ones.
 
 Give each subagent:
 - A precise task description

@@ -14,6 +14,13 @@
             "context": 1050000,
             "output": 128000
           }
+        },
+        "chatgpt-5.4": {
+          "name": "GPT 5.4",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          }
         }
       }
     }
@@ -60,7 +67,8 @@
       "prompt": "Default to a cost-efficient first pass on this model. Escalate to openai/gpt-5.4 only after a failed cheaper pass, such as unresolved incident triage, failed mitigation attempts, or low-confidence diagnosis after validation."
     },
     "performance-engineer": { "model": "{env:OPENCODE_PERF_MODEL}" },
-    "test-automator": { "model": "{env:OPENCODE_TEST_MODEL}" }
+    "test-automator": { "model": "{env:OPENCODE_TEST_MODEL}" },
+    "executor": { "model": "{env:OPENCODE_EXECUTOR_MODEL}" }
   },
   "plugin": [["@plannotator/opencode@latest", { "workflow": "manual" }]],
   "mcp": {
@@ -97,6 +105,14 @@
         "NEXTCLOUD_HOST": "{env:NEXTCLOUD_URL}",
         "NEXTCLOUD_USERNAME": "{env:NEXTCLOUD_USER}",
         "NEXTCLOUD_PASSWORD": "{env:NEXTCLOUD_PASSWORD}"
+      }
+    },
+    "stripe": {
+      "type": "local",
+      "command": ["npx", "-y", "@stripe/mcp"],
+      "enabled": true,
+      "env": {
+        "STRIPE_SECRET_KEY": "{env:STRIPE_SECRET_KEY}"
       }
     }
   }

@@ -19,6 +19,7 @@ DEFAULT_DEPLOY_MODEL="${OPENCODE_DEFAULT_DEPLOY_MODEL:-opencode-go/kimi-k2.7-cod
 DEFAULT_DEVOPS_MODEL="${OPENCODE_DEFAULT_DEVOPS_MODEL:-opencode-go/glm-5.1}"
 DEFAULT_PERF_MODEL="${OPENCODE_DEFAULT_PERF_MODEL:-opencode-go/minimax-m3}"
 DEFAULT_TEST_MODEL="${OPENCODE_DEFAULT_TEST_MODEL:-opencode-go/qwen3.7-plus}"
+DEFAULT_EXECUTOR_MODEL="${OPENCODE_DEFAULT_EXECUTOR_MODEL:-opencode-go/kimi-k2.7-code}"
 
 CODEX_MODEL="${OPENCODE_CODEX_MODEL:-openai/gpt-5.5}"
 CODEX_SMALL_MODEL="${OPENCODE_CODEX_SMALL_MODEL:-openai/gpt-5.5-fast}"
@@ -44,6 +45,7 @@ print_exports() {
   printf 'export OPENCODE_ORCHESTRATOR_MODEL=%s\n' "$DEFAULT_ORCHESTRATOR_MODEL"
 
   if [ "$OPENCODE_CODEX_ONLY" = "1" ]; then
+    printf 'export OPENCODE_MAX_CONCURRENT=10\n'
     printf 'export OPENCODE_LOCATOR_MODEL=%s\n' "$CODEX_SMALL_MODEL"
     printf 'export OPENCODE_ANALYZER_MODEL=%s\n' "$CODEX_MODEL"
     printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$CODEX_MODEL"
@@ -57,7 +59,9 @@ print_exports() {
     printf 'export OPENCODE_DEVOPS_MODEL=%s\n' "$CODEX_MODEL"
     printf 'export OPENCODE_PERF_MODEL=%s\n' "$CODEX_MODEL"
     printf 'export OPENCODE_TEST_MODEL=%s\n' "$CODEX_SMALL_MODEL"
+    printf 'export OPENCODE_EXECUTOR_MODEL=%s\n' "$CODEX_MODEL"
   else
+    printf 'export OPENCODE_MAX_CONCURRENT=2\n'
     printf 'export OPENCODE_LOCATOR_MODEL=%s\n' "$DEFAULT_LOCATOR_MODEL"
     printf 'export OPENCODE_ANALYZER_MODEL=%s\n' "$DEFAULT_ANALYZER_MODEL"
     printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$DEFAULT_CONTEXT_MODEL"
@@ -71,6 +75,7 @@ print_exports() {
     printf 'export OPENCODE_DEVOPS_MODEL=%s\n' "$DEFAULT_DEVOPS_MODEL"
     printf 'export OPENCODE_PERF_MODEL=%s\n' "$DEFAULT_PERF_MODEL"
     printf 'export OPENCODE_TEST_MODEL=%s\n' "$DEFAULT_TEST_MODEL"
+    printf 'export OPENCODE_EXECUTOR_MODEL=%s\n' "$DEFAULT_EXECUTOR_MODEL"
   fi
 }
 

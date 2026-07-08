@@ -43,6 +43,7 @@ cd ~/dfwsc/agents.dfwsc.config
 
 # Or set up one piece
 ./setup-agent-configs.sh claude
+./setup-agent-configs.sh claude-personal
 ./setup-agent-configs.sh opencode
 ./setup-agent-configs.sh codex
 ./setup-agent-configs.sh plannotator
@@ -56,13 +57,13 @@ Install Claude Code, OpenCode, and/or Codex separately before launching them. Th
 
 ```bash
 # Global config (model, providers, agent model assignments)
-mkdir -p ~/.opencode/tools
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.opencode/opencode.json
-ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/agents ~/.opencode/agents
-ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/commands ~/.opencode/commands
-ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/skills ~/.opencode/skills
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.opencode/tools/db-readonly.mjs
-npm install --prefix ~/.opencode better-sqlite3 pg mysql2 mssql
+mkdir -p ~/.config/opencode/tools
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/global.opencode.json ~/.config/opencode/opencode.json
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/agents ~/.config/opencode/agents
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/commands ~/.config/opencode/commands
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/skills ~/.config/opencode/skills
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/tools/db-readonly.mjs ~/.config/opencode/tools/db-readonly.mjs
+npm install --prefix ~/.config/opencode better-sqlite3 pg mysql2 mssql
 ```
 
 Add your API keys to your shell profile (`~/.bashrc` or `~/.zshrc`):
@@ -101,6 +102,8 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engi
 Broad implementation/design agents (backend-architect, deployment-engineer, etc.) are best copied per-project into `.claude/agents/` as needed rather than linked globally.
 
 GitHub MCP is configured via `~/.claude/settings.json` in this setup. Before launching Claude, either export `GITHUB_TOKEN` (or equivalent) in your shell or authenticate `gh` so `github-mcp.sh` can fall back to `gh auth token`.
+
+If you use the `personal` shell alias (`CLAUDE_CONFIG_DIR=~/.claude-personal claude`), run `./setup-agent-configs.sh claude-personal` to link the shared commands, skills, and core subagents into the personal config without replacing personal `settings.json`, credentials, sessions, or history.
 
 ### Codex
 

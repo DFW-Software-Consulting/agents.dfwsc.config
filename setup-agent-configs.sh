@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [claude|opencode|codex|plannotator|all]\n' "${0##*/}"
+  printf 'Usage: %s [claude|claude-personal|opencode|codex|plannotator|all]\n' "${0##*/}"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,6 +92,7 @@ link_claude() {
     typecheck \
     test-runner \
     lint \
+    prettier \
     git-workflow \
     database-optimizer \
     devops-troubleshooter \
@@ -100,18 +101,42 @@ link_claude() {
   done
 }
 
-link_opencode() {
-  mkdir -p "$HOME/.opencode/tools"
+link_claude_personal() {
+  mkdir -p "$HOME/.claude-personal/agents"
 
-  link_path "$repo_root/ai-code-agents/opencode/global.opencode.json" "$HOME/.opencode/opencode.json"
-  link_path "$repo_root/ai-code-agents/opencode/agents" "$HOME/.opencode/agents"
-  link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.opencode/commands"
-  link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.opencode/skills"
-  link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.opencode/tools/db-readonly.mjs"
+  link_path "$repo_root/ai-code-agents/claude/commands" "$HOME/.claude-personal/commands"
+  link_path "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude-personal/skills"
+
+  for agent in \
+    orchestrator \
+    codebase-locator \
+    codebase-analyzer \
+    context-synthesis \
+    antipattern-sniffer \
+    typecheck \
+    test-runner \
+    lint \
+    prettier \
+    git-workflow \
+    database-optimizer \
+    devops-troubleshooter \
+    performance-engineer; do
+    link_path "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude-personal/agents/$agent.md"
+  done
+}
+
+link_opencode() {
+  mkdir -p "$HOME/.config/opencode/tools"
+
+  link_path "$repo_root/ai-code-agents/opencode/global.opencode.json" "$HOME/.config/opencode/opencode.json"
+  link_path "$repo_root/ai-code-agents/opencode/agents" "$HOME/.config/opencode/agents"
+  link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.config/opencode/commands"
+  link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.config/opencode/skills"
+  link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.config/opencode/tools/db-readonly.mjs"
   install_codex_only_toggle
 
   if command -v npm >/dev/null 2>&1; then
-    npm install --prefix "$HOME/.opencode" better-sqlite3 pg mysql2 mssql
+    npm install --prefix "$HOME/.config/opencode" better-sqlite3 pg mysql2 mssql
   else
     printf 'npm not found; skipping OpenCode DB wrapper dependencies.\n' >&2
   fi
@@ -140,6 +165,9 @@ case "$target" in
   claude)
     link_claude
     ;;
+  claude-personal)
+    link_claude_personal
+    ;;
   opencode)
     link_opencode
     ;;
@@ -151,6 +179,7 @@ case "$target" in
     ;;
   all)
     link_claude
+    link_claude_personal
     link_opencode
     link_codex
     install_plannotator

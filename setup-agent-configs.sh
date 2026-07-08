@@ -96,7 +96,10 @@ link_claude() {
     git-workflow \
     database-optimizer \
     devops-troubleshooter \
-    performance-engineer; do
+    performance-engineer \
+    Explore \
+    general-purpose \
+    Plan; do
     link_path "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude/agents/$agent.md"
   done
 }
@@ -120,7 +123,10 @@ link_claude_personal() {
     git-workflow \
     database-optimizer \
     devops-troubleshooter \
-    performance-engineer; do
+    performance-engineer \
+    Explore \
+    general-purpose \
+    Plan; do
     link_path "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude-personal/agents/$agent.md"
   done
 }

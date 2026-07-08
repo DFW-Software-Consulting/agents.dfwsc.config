@@ -67,16 +67,26 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 
 **Global agents** (link to `~/.claude/agents/`) — available in every project:
 - `codebase-locator` — finds files/dirs (haiku)
-- `codebase-analyzer` — explains how code works (haiku)
-- `context-synthesis` — maps relationships between components (haiku)
-- `antipattern-sniffer` — audits code for smells and bad patterns (haiku)
+- `codebase-analyzer` — explains how code works (sonnet)
+- `context-synthesis` — maps relationships between components (sonnet)
+- `antipattern-sniffer` — audits code for smells and bad patterns (sonnet)
 - `typecheck` — runs typecheck and returns structured error report (haiku)
 - `test-runner` — runs tests and returns structured result report (haiku)
 - `lint` — runs lint and returns structured issue report (haiku)
 - `prettier` — runs Prettier check mode and returns formatting report (haiku)
-- `database-optimizer` — analyzes query plans, indexes, and ORM performance (haiku)
-- `devops-troubleshooter` — investigates incidents and observability gaps (haiku)
-- `performance-engineer` — profiles bottlenecks and optimization targets (haiku)
+- `database-optimizer` — analyzes query plans, indexes, and ORM performance (sonnet)
+- `devops-troubleshooter` — investigates incidents and observability gaps (sonnet)
+- `performance-engineer` — profiles bottlenecks and optimization targets (sonnet)
+
+**Built-in shadows** — same-named definitions that override Claude Code's
+built-in agents solely to pin their model. Without these, built-ins inherit
+the main session model (expensive). Frontmatter `model:` always wins over
+built-ins' defaults, so every agent's tier stays explicit. Do NOT set
+`CLAUDE_CODE_SUBAGENT_MODEL` in settings.json — it overrides frontmatter on
+*all* agents and flattens the tiers.
+- `Explore` — read-only fan-out search (sonnet)
+- `general-purpose` — research and multi-step catch-all (sonnet)
+- `Plan` — implementation planning, read-only (sonnet)
 
 **Broad specialists** (copy per-project into `.claude/agents/`):
 - `backend-architect`, `frontend-developer`, `test-automator`, `deployment-engineer`

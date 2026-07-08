@@ -31,6 +31,8 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/context-synthesi
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/antipattern-sniffer.md ~/.claude/agents/antipattern-sniffer.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/typecheck.md ~/.claude/agents/typecheck.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/test-runner.md ~/.claude/agents/test-runner.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/lint.md ~/.claude/agents/lint.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/prettier.md ~/.claude/agents/prettier.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/database-optimizer.md ~/.claude/agents/database-optimizer.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/devops-troubleshooter.md ~/.claude/agents/devops-troubleshooter.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engineer.md ~/.claude/agents/performance-engineer.md
@@ -70,6 +72,8 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 - `antipattern-sniffer` — audits code for smells and bad patterns (haiku)
 - `typecheck` — runs typecheck and returns structured error report (haiku)
 - `test-runner` — runs tests and returns structured result report (haiku)
+- `lint` — runs lint and returns structured issue report (haiku)
+- `prettier` — runs Prettier check mode and returns formatting report (haiku)
 - `database-optimizer` — analyzes query plans, indexes, and ORM performance (haiku)
 - `devops-troubleshooter` — investigates incidents and observability gaps (haiku)
 - `performance-engineer` — profiles bottlenecks and optimization targets (haiku)
@@ -83,6 +87,8 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
 | `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
+| `/lint` | Run lint in the lint subagent and summarize issues |
+| `/prettier` | Run Prettier check mode in the prettier subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

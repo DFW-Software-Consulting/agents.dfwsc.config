@@ -1,5 +1,4 @@
 ---
-allowed-tools: Edit, View, Bash(git:*), Bash(python:*), Bash(pytest:*), Bash(mypy:*), Bash(black:*), Bash(coverage:*), Bash(mutmut:*), Bash(docker:*), Bash(trivy:*), Bash(hadolint:*), Bash(dive:*), Bash(npm:*), Bash(kubectl:*), Bash(helm:*), Bash(lighthouse:*), Bash(jq:*), Bash(curl:*), Bash(gh:*)
 description: Generates a concrete implementation plan from a research doc, with milestones, tasks, gates
 writes-to: memory-bank/qa/
 ---
@@ -94,4 +93,3 @@ YOU WILL BE PUNISHED FOR NOT DEPLOYING SUBAGENT
 * Keep all tool invocations read‑only; accept non‑zero exits.
 * Prefer deletion over addition in later PRs, but **this command documents only**.
 * Target small, surgical improvements; defer architecture debates to a separate ticket.
-

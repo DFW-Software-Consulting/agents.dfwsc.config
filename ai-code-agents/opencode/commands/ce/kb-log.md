@@ -1,5 +1,4 @@
 ---
-allowed-tools: Read, Edit, Write, Bash(ls:*), Bash(mkdir:*)
 description: Creates a new KB entry with proper frontmatter and semantic directory placement
 ---
 

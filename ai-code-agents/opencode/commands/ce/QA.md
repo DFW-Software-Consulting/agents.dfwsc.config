@@ -1,5 +1,4 @@
 ---
-allowed-tools: View, Bash(git:*), Bash(grep:*), Bash(jq:*), Bash(python:*), Bash(pytest:*), Bash(coverage:*), Bash(mypy:*), Bash(trivy:*), Bash(hadolint:*), Bash(dive:*), Bash(npm:*), Bash(lighthouse:*), Bash(kubectl:*), Bash(helm:*), Bash(curl:*), Bash(gh:*)
 description: READ-ONLY QA focused FIRST on code-logic correctness of recent changes. Outlines issues/smells/antipatterns and risks. NO CODING, NO EDITS, NO FIXES.
 writes-to: memory-bank/QA/
 hard-guards:

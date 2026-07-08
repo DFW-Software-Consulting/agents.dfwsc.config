@@ -1,6 +1,6 @@
 ---
-allowed-tools: Task(subagent:lint)
-description: Run the project's lint command in the MiniMax lint subagent and return a concise issue report.
+agent: lint
+description: Run the project's lint command in the lint subagent and return a concise issue report.
 ---
 
 # Lint

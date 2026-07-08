@@ -1,6 +1,6 @@
 ---
-allowed-tools: Task(subagent:git-runner)
-description: Delegate git commit, push, PR, and issue workflows to a MiniMax git subagent using the git-workflow skill.
+agent: git-runner
+description: Delegate git commit, push, PR, and issue workflows to a git subagent using the git-workflow skill.
 ---
 
 # Git Workflow Delegate

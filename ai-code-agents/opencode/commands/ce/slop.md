@@ -1,5 +1,4 @@
 ---
-allowed-tools: Read, Edit, Bash(git:*), Bash(gh:*)
 description: Remove AI-generated code slop from diff against main branch
 ---
 

@@ -31,8 +31,8 @@
       "permission": {
         "bash": {
           "*": "deny",
-          "node ~/.opencode/tools/db-readonly.mjs*": "allow",
-          "node $HOME/.opencode/tools/db-readonly.mjs*": "allow"
+          "node ~/.config/opencode/tools/db-readonly.mjs*": "allow",
+          "node $HOME/.config/opencode/tools/db-readonly.mjs*": "allow"
         },
         "glob": "allow",
         "grep": "allow",
@@ -41,23 +41,56 @@
         "todowrite": "deny",
         "task": "deny"
       },
-      "prompt": "You are in working mode: a conversational explanation mode for talking through systems, code, behavior, and concepts without switching into implementation, review, or planning.\n\nCore behavior:\n- Do not edit files, apply patches, create files, run general shell commands, or make commits.\n- You may use read-only code exploration tools, including read, glob, and grep.\n- You may query databases only through the read-only wrapper: `node ~/.opencode/tools/db-readonly.mjs ...`.\n- Database queries must be read-only inspection queries. Do not run schema changes, writes, migrations, seed scripts, or destructive commands.\n- Do not create implementation plans unless the user explicitly asks for a plan.\n- Do not perform code review unless the user explicitly asks for a review.\n- Focus on explaining what things are, what they do, how they connect, and why they behave that way.\n- Use plain, direct language and ask clarifying questions when the user's goal is unclear.\n- If codebase context is needed, inspect files with read-only tools only.\n- Prefer concise explanations first, then add detail if the user asks.\n- If the user asks to build, fix, edit, test, commit, or otherwise change the project, tell them to switch to Build mode.\n\nGood outputs in this mode include:\n- \"This component is responsible for...\"\n- \"The request flows from this route into this service, then into...\"\n- \"That config means...\"\n- \"The tradeoff here is...\"\n- \"I can explain that from the UI side, backend side, or data-flow side.\"\n\nAvoid:\n- Proposing a step-by-step implementation plan by default.\n- Saying you will make changes.\n- Running verification commands outside the read-only DB wrapper.\n- Turning discussion into task execution."
+      "prompt": "You are in working mode: a conversational explanation mode for talking through systems, code, behavior, and concepts without switching into implementation, review, or planning.\n\nCore behavior:\n- Do not edit files, apply patches, create files, run general shell commands, or make commits.\n- You may use read-only code exploration tools, including read, glob, and grep.\n- You may query databases only through the read-only wrapper: `node ~/.config/opencode/tools/db-readonly.mjs ...`.\n- Database queries must be read-only inspection queries. Do not run schema changes, writes, migrations, seed scripts, or destructive commands.\n- Do not create implementation plans unless the user explicitly asks for a plan.\n- Do not perform code review unless the user explicitly asks for a review.\n- Focus on explaining what things are, what they do, how they connect, and why they behave that way.\n- Use plain, direct language and ask clarifying questions when the user's goal is unclear.\n- If codebase context is needed, inspect files with read-only tools only.\n- Prefer concise explanations first, then add detail if the user asks.\n- If the user asks to build, fix, edit, test, commit, or otherwise change the project, tell them to switch to Build mode.\n\nGood outputs in this mode include:\n- \"This component is responsible for...\"\n- \"The request flows from this route into this service, then into...\"\n- \"That config means...\"\n- \"The tradeoff here is...\"\n- \"I can explain that from the UI side, backend side, or data-flow side.\"\n\nAvoid:\n- Proposing a step-by-step implementation plan by default.\n- Saying you will make changes.\n- Running verification commands outside the read-only DB wrapper.\n- Turning discussion into task execution."
     },
-    "orchestrator": { "model": "{env:OPENCODE_ORCHESTRATOR_MODEL}" },
-    "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}" },
-    "typecheck": { "model": "{env:OPENCODE_FAST_MODEL}" },
-    "test-runner": { "model": "{env:OPENCODE_TEST_MODEL}" },
-    "lint": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-    "prettier": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-    "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}" },
-    "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}" },
-    "context-synthesis": { "model": "{env:OPENCODE_CONTEXT_MODEL}" },
-    "antipattern-sniffer": { "model": "{env:OPENCODE_SNIFFER_MODEL}" },
-    "frontend-developer": { "model": "{env:OPENCODE_FRONTEND_MODEL}" },
-    "mobile-developer": { "model": "{env:OPENCODE_MOBILE_MODEL}" },
-    "backend-architect": { "model": "{env:OPENCODE_BACKEND_MODEL}" },
-    "cloud-architect": { "model": "{env:OPENCODE_CLOUD_MODEL}" },
-    "database-optimizer": { "model": "{env:OPENCODE_DB_MODEL}" },
+    "orchestrator": {
+      "model": "{env:OPENCODE_ORCHESTRATOR_MODEL}"
+    },
+    "git-runner": {
+      "mode": "subagent",
+      "model": "{env:OPENCODE_LOCATOR_MODEL}"
+    },
+    "typecheck": {
+      "model": "{env:OPENCODE_FAST_MODEL}"
+    },
+    "test-runner": {
+      "model": "{env:OPENCODE_TEST_MODEL}"
+    },
+    "lint": {
+      "mode": "subagent",
+      "model": "{env:OPENCODE_FAST_MODEL}"
+    },
+    "prettier": {
+      "mode": "subagent",
+      "model": "{env:OPENCODE_FAST_MODEL}"
+    },
+    "codebase-locator": {
+      "model": "{env:OPENCODE_LOCATOR_MODEL}"
+    },
+    "codebase-analyzer": {
+      "model": "{env:OPENCODE_ANALYZER_MODEL}"
+    },
+    "context-synthesis": {
+      "model": "{env:OPENCODE_CONTEXT_MODEL}"
+    },
+    "antipattern-sniffer": {
+      "model": "{env:OPENCODE_SNIFFER_MODEL}"
+    },
+    "frontend-developer": {
+      "model": "{env:OPENCODE_FRONTEND_MODEL}"
+    },
+    "mobile-developer": {
+      "model": "{env:OPENCODE_MOBILE_MODEL}"
+    },
+    "backend-architect": {
+      "model": "{env:OPENCODE_BACKEND_MODEL}"
+    },
+    "cloud-architect": {
+      "model": "{env:OPENCODE_CLOUD_MODEL}"
+    },
+    "database-optimizer": {
+      "model": "{env:OPENCODE_DB_MODEL}"
+    },
     "deployment-engineer": {
       "model": "{env:OPENCODE_DEPLOY_MODEL}",
       "prompt": "Default to a cost-efficient first pass on this model. Escalate to openai/gpt-5.4 only after a failed cheaper pass, such as unresolved root cause, failed remediation attempts, or low-confidence output after validation."
@@ -66,16 +99,32 @@
       "model": "{env:OPENCODE_DEVOPS_MODEL}",
       "prompt": "Default to a cost-efficient first pass on this model. Escalate to openai/gpt-5.4 only after a failed cheaper pass, such as unresolved incident triage, failed mitigation attempts, or low-confidence diagnosis after validation."
     },
-    "performance-engineer": { "model": "{env:OPENCODE_PERF_MODEL}" },
-    "test-automator": { "model": "{env:OPENCODE_TEST_MODEL}" },
-    "executor": { "model": "{env:OPENCODE_EXECUTOR_MODEL}" }
+    "performance-engineer": {
+      "model": "{env:OPENCODE_PERF_MODEL}"
+    },
+    "test-automator": {
+      "model": "{env:OPENCODE_TEST_MODEL}"
+    },
+    "executor": {
+      "model": "{env:OPENCODE_EXECUTOR_MODEL}"
+    }
   },
-  "plugin": [["@plannotator/opencode@latest", { "workflow": "manual" }]],
+  "plugin": [
+    [
+      "@plannotator/opencode@latest",
+      {
+        "workflow": "manual"
+      }
+    ]
+  ],
   "mcp": {
     "github": {
       "type": "local",
       "enabled": false,
-      "command": ["sh", "/home/messyginger0804/.config/opencode/github-mcp.sh"],
+      "command": [
+        "sh",
+        "/home/messyginger0804/.config/opencode/github-mcp.sh"
+      ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}",
         "GITHUB_TOKEN": "{env:GITHUB_TOKEN}",
@@ -84,8 +133,11 @@
     },
     "dfwsc": {
       "type": "local",
-      "enabled": true,
-      "command": ["node", "/home/messyginger0804/dfwsc/dfwsc-mcp/src/index.js"],
+      "enabled": false,
+      "command": [
+        "node",
+        "/home/messyginger0804/dfwsc/dfwsc-mcp/src/index.js"
+      ],
       "environment": {
         "COOLIFY_URL": "{env:COOLIFY_URL}",
         "COOLIFY_TOKEN": "{env:COOLIFY_TOKEN}",
@@ -100,7 +152,13 @@
     "nextcloud": {
       "type": "local",
       "enabled": false,
-      "command": ["uvx", "nextcloud-mcp-server", "run", "--transport", "stdio"],
+      "command": [
+        "uvx",
+        "nextcloud-mcp-server",
+        "run",
+        "--transport",
+        "stdio"
+      ],
       "environment": {
         "NEXTCLOUD_HOST": "{env:NEXTCLOUD_URL}",
         "NEXTCLOUD_USERNAME": "{env:NEXTCLOUD_USER}",
@@ -109,10 +167,26 @@
     },
     "stripe": {
       "type": "local",
-      "command": ["npx", "-y", "@stripe/mcp"],
+      "command": [
+        "npx",
+        "-y",
+        "@stripe/mcp"
+      ],
       "enabled": true,
       "env": {
         "STRIPE_SECRET_KEY": "{env:STRIPE_SECRET_KEY}"
+      }
+    },
+    "coolify": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "@masonator/coolify-mcp@latest"
+      ],
+      "environment": {
+        "COOLIFY_BASE_URL": "{env:COOLIFY_URL}",
+        "COOLIFY_ACCESS_TOKEN": "{env:COOLIFY_TOKEN}"
       }
     }
   }

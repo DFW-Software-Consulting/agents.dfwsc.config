@@ -70,7 +70,8 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
 | `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
-| `/lint` | Run lint in the MiniMax lint subagent and summarize issues |
+| `/lint` | Run lint in the lint subagent and summarize issues |
+| `/prettier` | Run Prettier check mode in the prettier subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

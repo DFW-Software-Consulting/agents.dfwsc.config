@@ -9,7 +9,6 @@ permission:
     "npx fallow*": allow
     "npm exec fallow*": allow
     "bash ai-code-agents/opencode/skills/codebase-research/scripts/*": allow
-    "bash ~/.opencode/skills/codebase-research/scripts/*": allow
     "bash ~/.config/opencode/skills/codebase-research/scripts/*": allow
     "fallow fix*": deny
     "npx fallow fix*": deny

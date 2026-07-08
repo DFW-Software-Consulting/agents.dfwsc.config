@@ -1,5 +1,5 @@
 ---
-allowed-tools: Task(subagent:prettier)
+agent: prettier
 description: Run Prettier in check mode via the prettier subagent and return a concise formatting report.
 ---
 

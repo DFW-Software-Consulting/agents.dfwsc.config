@@ -1,5 +1,4 @@
 ---
-allowed-tools: Read, Glob, Grep, Write, Bash(mkdir:*), Bash(date:*), Bash(pwd:*)
 description: Build an agent prompt using existing agents as references and save it to memory-bank/prompt
 writes-to: memory-bank/prompt/
 argument-hint: <agent idea, workflow, or existing prompt to improve>

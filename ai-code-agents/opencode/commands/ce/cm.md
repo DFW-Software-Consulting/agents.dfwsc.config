@@ -1,5 +1,4 @@
 ---
-allowed-tools: View, Edit
 description: Prepare context for compaction when approaching token limits
 ---
 

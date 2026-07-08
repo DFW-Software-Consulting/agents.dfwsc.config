@@ -1,5 +1,4 @@
 ---
-allowed-tools: Read, Glob, Grep, Task, TodoWrite, Write, Bash(git branch:*), Bash(git status:*), Bash(git log:*), Bash(gh repo view:*)
 description: Conducts comprehensive codebase research by spawning parallel sub-agents and synthesizing findings into structured documentation
 writes-to: memory-bank/research/
 argument-hint: <research question or topic>

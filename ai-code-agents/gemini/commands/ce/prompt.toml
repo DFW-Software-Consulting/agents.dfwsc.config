@@ -1,0 +1,10 @@
+description = "Build or improve an agent prompt using existing agents as references and save it to memory-bank/prompt."
+prompt = """
+# Agent Prompt Builder
+
+Use the agent-prompt-builder skill to design or improve an agent prompt for: {{args}}
+
+Review existing agents for the target platform before drafting. Decide whether this creates a new agent, updates an existing agent, or should reuse an existing agent as-is. If it is a coordinator, include a delegation map with existing agents, handoff context, and output expectations.
+
+Create `memory-bank/prompt/` if needed and save the final prompt there with a descriptive filename.
+"""

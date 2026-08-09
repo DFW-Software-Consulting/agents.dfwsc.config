@@ -5,24 +5,23 @@ Configuration for [Gemini CLI](https://github.com/google-gemini/gemini-cli) — 
 ## Setup (New Machine)
 
 ```bash
-mkdir -p ~/.gemini/agents
-
-# Global instructions
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/GEMINI.md ~/.gemini/GEMINI.md
+./setup-agent-configs.sh gemini
 ```
+
+This links `GEMINI.md`, `agents/`, and `commands/` into `~/.gemini/`, and links the shared Agent Skills source `ai-code-agents/codex/skills` to `~/.agents/skills`. The `all` setup target does not include Gemini, so existing real Gemini directories are not silently replaced.
 
 ## What's Included
 
 | Directory | Purpose |
 |---|---|
 | `agents/` | Local agents with tool definitions |
-| `commands/` | Slash commands (`/qa`, `/git`, `/smallwins`, etc.) |
-| `skills/` | Reusable instruction sets |
+| `commands/` | Gemini TOML slash commands (`/qa`, `/git`, `/smallwins`, etc.) |
+| shared `~/.agents/skills` | Reusable instruction sets |
 | `GEMINI.md` | Global instructions loaded into every Gemini session |
 
 ## Agents
 
-13 agents mirrored from Claude — same behavior, adapted frontmatter for Gemini's format (`kind: local`, `tools` list).
+13 local agents mirrored behaviorally from the maintained lineup and adapted to Gemini frontmatter (`kind: local`, `tools` list). Gemini has no orchestrator in this setup.
 
 **Research agents** (read-only):
 - `codebase-locator`, `codebase-analyzer`, `context-synthesis`, `antipattern-sniffer`
@@ -37,18 +36,13 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/GEMINI.md ~/.gemini/GEM
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
 | `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
-| `/ce/pn` | Generate implementation plan from research doc |
-| `/ce/ex` | Execute a plan with gated checks and atomic commits |
-| `/ce/slop` | Remove AI-generated bloat from diff against main |
-| `/ce/cm` | Context compact — summarize state before token limit |
-| `/ce/kb-log` | Create a knowledge base entry |
+| `/ce:prompt` | Build an agent prompt and save it to `memory-bank/prompt/` |
+| `/ce:QA` | Read-only post-execution QA review |
+| `/ce:slop` | Remove AI-generated bloat from diff against main |
+| `/ce:cm` | Context compact — summarize state before token limit |
+| `/ce:kb-log` | Create a knowledge base entry |
+| `/ce:rr` | Read-only codebase research synthesis |
 
 ## Skills
 
-| Skill | What it does |
-|---|---|
-| `git-workflow` | Safe commit/push/PR lifecycle with pre-hook enforcement |
-| `worktree-hygiene` | Git worktree management scripts |
-| `codebase-research` | Structure map, symbol index, AST scan scripts |
-| `deep-review-workflow` | Autonomous code review + fix workflow |
-| `biome-autofix` | Run Biome linter and auto-fix issues |
+Gemini should use shared skills from `~/.agents/skills`; this repository does not install a separate `~/.gemini/skills` mirror.

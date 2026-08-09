@@ -1,0 +1,15 @@
+description = "Run git commit, push, PR, and issue workflows through git-workflow."
+prompt = """
+# Git Workflow
+
+Use the git-workflow skill for this request: {{args}}
+
+If the skill is unavailable, follow these rules directly:
+- Inspect git status, diffs, branch, remotes, and recent commits before changing git state.
+- For commits, propose exact file groups and commit messages; stage only approved files.
+- Do not commit, push, create PRs, or create issues unless explicitly requested.
+- Never use destructive git commands, --no-verify, force push, or direct pushes to main/master.
+- Use gh for GitHub actions when available and authenticated.
+
+Output: Outcome, Evidence, Next steps.
+"""

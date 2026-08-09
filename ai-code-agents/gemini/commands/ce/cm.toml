@@ -1,0 +1,16 @@
+description = "Prepare compact continuation context when approaching token limits."
+prompt = """
+# Context Compact
+
+Prepare context for compaction: {{args}}
+
+Summarize only what is needed to continue the work after context is compacted:
+- Main objective
+- Completed subtasks
+- Current working state
+- Key files, commands, outputs, and decisions
+- Remaining work
+- Blockers, risks, or user decisions needed
+
+Do not edit project files.
+"""

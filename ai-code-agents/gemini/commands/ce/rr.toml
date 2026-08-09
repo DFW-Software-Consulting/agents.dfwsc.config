@@ -1,0 +1,18 @@
+description = "Conduct read-only codebase research and synthesize findings into memory-bank/research."
+prompt = """
+# Research Codebase
+
+Research this question or topic: {{args}}
+
+Research only. Do not modify source files, run tests, create commits, branches, or PRs.
+
+Gather relevant paths, symbols, data flow, patterns, and constraints. Prefer evidence with file:line references.
+
+Write the synthesis to `memory-bank/research/YYYY-MM-DD_HH-MM-SS_<topic>.md` with:
+- Goal
+- Findings with key files and evidence
+- Relationships/data flow
+- Knowledge gaps or follow-up questions
+
+Final response: report the created research file path and a brief summary.
+"""

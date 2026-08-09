@@ -1,0 +1,20 @@
+description = "Run a read-only structured code review focused on cleanliness, idioms, coupling, cohesion, and correctness."
+prompt = """
+# Review & Critique Code
+
+Review the target for: {{args}}
+
+This is read-only review. Do not edit files, run formatters in write mode, commit, or create PRs.
+
+Focus on:
+- Correctness, edge cases, and error handling
+- Security and data exposure risks
+- Coupling, cohesion, and maintainability
+- Fit with the surrounding codebase patterns
+- Tests or verification gaps
+
+Output:
+- Critical: must-fix findings with file:line evidence
+- Suggested: useful non-blocking improvements
+- Passed: risks checked that appear sound
+"""

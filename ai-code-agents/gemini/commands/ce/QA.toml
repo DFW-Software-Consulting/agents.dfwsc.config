@@ -1,0 +1,23 @@
+description = "Run read-only post-execution QA focused first on code-logic correctness of recent changes."
+prompt = """
+# QA (Read-Only) — Code Logic First
+
+Run a post-execution QA review for: {{args}}
+
+No coding, no edits, no fixes, no commits, and no PRs. Do not run formatters or linters in write mode.
+
+Review recent changes or the named plan/report for:
+- Logic bugs and edge cases
+- Security and data integrity risks
+- Antipatterns, smells, and unnecessary complexity
+- Missing or weak verification
+
+Write the QA report to `memory-bank/QA/YYYY-MM-DD_HH-MM-SS_<topic>_qa.md` with:
+- Summary verdict
+- Critical: must-fix findings with evidence
+- Suggested: non-blocking improvements
+- Verification gaps: checks/tests still needed
+- Passed: important risks checked that look sound
+
+Final response: report the created QA file path and verdict.
+"""

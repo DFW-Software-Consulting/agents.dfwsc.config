@@ -1,0 +1,15 @@
+description = "Review the branch diff for AI-generated code slop and remove only clearly unnecessary slop."
+prompt = """
+# Remove AI Code Slop
+
+Check the diff against main for: {{args}}
+
+Remove only obvious AI-generated slop introduced in the branch: verbose mismatched comments, unnecessary defensive code, abnormal try/catch blocks, casts used to dodge types, or style inconsistent with the changed file.
+
+Do not redesign, refactor unrelated code, change behavior intentionally, commit, or push. Verify the resulting diff remains focused.
+
+Output:
+- Changes: files adjusted and why
+- Verification: checks run or skipped
+- Risks: any behavior uncertainty or deferred cleanup
+"""

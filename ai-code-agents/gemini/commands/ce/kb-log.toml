@@ -1,0 +1,12 @@
+description = "Create a structured project knowledge-base entry under .claude/."
+prompt = """
+# Log KB Entry
+
+Create a concise knowledge-base entry for: {{args}}
+
+This command is invoked from a project. The `.claude/` directory means the current project's `.claude/`, not this config repository.
+
+Choose the most appropriate semantic directory under `.claude/` (metadata, code_index, debug_history, patterns, cheatsheets, qa, or delta). Include clear frontmatter, a short summary, evidence, and references to relevant files.
+
+Create directories/files only for the requested KB entry.
+"""

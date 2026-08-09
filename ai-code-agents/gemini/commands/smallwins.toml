@@ -1,0 +1,20 @@
+description = "Find and document small low-risk improvement opportunities without editing code."
+prompt = """
+# Small Wins
+
+Find small wins for: {{args}}
+
+Scope is strictly detection and documentation. Do not edit files, refactor, commit, or create PRs.
+
+Look for low-risk improvements such as stale TODOs, duplicated tiny helpers, obvious docs gaps, simple test gaps, or unused local clutter. Avoid speculative redesigns.
+
+Create these artifacts:
+1. `AUDIT_SMALL_WINS_PLAN.md` with goals, read-only constraints, scan categories, and validation approach.
+2. `reports/SMALL_WINS_AUDIT.md` with:
+   - Executive summary
+   - Findings by category
+   - Per-file suggestions with risk/effort
+   - Suggested order and guardrails
+
+Final response: report both artifact paths and the top 3 small wins.
+"""

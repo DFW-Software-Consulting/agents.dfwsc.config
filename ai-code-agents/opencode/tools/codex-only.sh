@@ -12,7 +12,6 @@ TERRA_MODEL="${OPENCODE_TERRA_MODEL:-openai/gpt-5.6-terra}"
 LUNA_FAST_MODEL="${OPENCODE_LUNA_FAST_MODEL:-openai/gpt-5.6-luna-fast}"
 
 # Non-Codex defaults used when codex-only is OFF. Preserve every existing assignment.
-DEFAULT_ORCHESTRATOR_MODEL="${OPENCODE_DEFAULT_ORCHESTRATOR_MODEL:-$SOL_MODEL}"
 DEFAULT_LOCATOR_MODEL="${OPENCODE_DEFAULT_LOCATOR_MODEL:-opencode-go/deepseek-v4-flash}"
 DEFAULT_ANALYZER_MODEL="${OPENCODE_DEFAULT_ANALYZER_MODEL:-opencode-go/qwen3.7-max}"
 DEFAULT_CONTEXT_MODEL="${OPENCODE_DEFAULT_CONTEXT_MODEL:-opencode-go/glm-5.2}"
@@ -50,8 +49,6 @@ load_state() {
 print_exports() {
   load_state
 
-  printf 'export OPENCODE_ORCHESTRATOR_MODEL=%s\n' "$DEFAULT_ORCHESTRATOR_MODEL"
-
   if [ "$OPENCODE_CODEX_ONLY" = "1" ]; then
     printf 'export OPENCODE_FAST_MODEL=%s\n' "$LUNA_FAST_MODEL"
     printf 'export OPENCODE_MAX_CONCURRENT=10\n'
@@ -75,7 +72,6 @@ print_exports() {
     printf 'export OPENCODE_RESPONSE_REVIEWER_MODEL=%s\n' "$TERRA_MODEL"
     printf 'export OPENCODE_SPEC_REVIEWER_MODEL=%s\n' "$TERRA_MODEL"
 
-    printf 'export OPENCODE_ORCHESTRATOR_VARIANT=%s\n' "high"
     printf 'export OPENCODE_LOCATOR_VARIANT=%s\n' "low"
     printf 'export OPENCODE_GENERAL_VARIANT=%s\n' "medium"
     printf 'export OPENCODE_ANALYZER_VARIANT=%s\n' "medium"
@@ -119,7 +115,6 @@ print_exports() {
     printf 'export OPENCODE_SPEC_REVIEWER_MODEL=%s\n' "$DEFAULT_SPEC_REVIEWER_MODEL"
 
     # Empty variants let non-Codex providers keep their own default reasoning effort.
-    printf 'export OPENCODE_ORCHESTRATOR_VARIANT=%s\n' ""
     printf 'export OPENCODE_LOCATOR_VARIANT=%s\n' ""
     printf 'export OPENCODE_GENERAL_VARIANT=%s\n' ""
     printf 'export OPENCODE_ANALYZER_VARIANT=%s\n' ""

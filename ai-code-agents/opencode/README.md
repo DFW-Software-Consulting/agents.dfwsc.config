@@ -56,7 +56,7 @@ GPT-5.6 family with explicit reasoning variants.
 | Tier | Model | Variant | Agents |
 |---|---|---|---|
 | Free fast (Codex-off default) | `opencode/deepseek-v4-flash-free` | — | Main model, check |
-| Flagship reasoning | `openai/gpt-5.6-sol` | `high` | orchestrator, context-synthesis, frontend-developer, backend-architect, cloud-architect, database-optimizer, devops-troubleshooter, performance-engineer, executor |
+| Flagship reasoning | `openai/gpt-5.6-sol` | `high` | context-synthesis, frontend-developer, backend-architect, cloud-architect, database-optimizer, devops-troubleshooter, performance-engineer, executor |
 | Balanced reasoning | `openai/gpt-5.6-terra` | `medium` / `high` | codebase-analyzer, general, antipattern-sniffer, response-reviewer (`medium`); mobile-developer, deployment-engineer, test-automator, spec-reviewer (`high`) |
 | High-volume mechanical | `openai/gpt-5.6-luna-fast` | `none` / `low` | check (`none`); git-runner, codebase-locator, explore (`low`) |
 

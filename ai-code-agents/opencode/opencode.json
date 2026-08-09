@@ -39,8 +39,20 @@
         }
     },
     "agent": {
-        "review": {
-            "description": "Reviews code for best practices and potential issues"
+        "working": {
+            "permission": {
+                "bash": {
+                    "*": "deny",
+                    "node ~/.config/opencode/tools/db-readonly.mjs*": "allow",
+                    "node $HOME/.config/opencode/tools/db-readonly.mjs*": "allow"
+                },
+                "glob": "allow",
+                "grep": "allow",
+                "read": "allow",
+                "edit": "deny",
+                "todowrite": "deny",
+                "task": "deny"
+            }
         },
         "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
         "check": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },

@@ -34,10 +34,6 @@
         "task": "deny"
       }
     },
-    "orchestrator": {
-      "model": "{env:OPENCODE_ORCHESTRATOR_MODEL}",
-      "variant": "{env:OPENCODE_ORCHESTRATOR_VARIANT}"
-    },
     "git-runner": {
       "mode": "subagent",
       "model": "{env:OPENCODE_LOCATOR_MODEL}",

@@ -16,29 +16,17 @@ From the repo root, link Claude Code config into `~/.claude/`:
 Manual equivalent:
 
 ```bash
-mkdir -p ~/.claude/agents
+mkdir -p ~/.claude
 
 # Global instructions and settings
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/CLAUDE.md ~/.claude/CLAUDE.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/settings.json ~/.claude/settings.json
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents ~/.claude/agents
 ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/commands ~/.claude/commands
 ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/skills ~/.claude/skills
-
-# Global subagents
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-locator.md ~/.claude/agents/codebase-locator.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-analyzer.md ~/.claude/agents/codebase-analyzer.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/context-synthesis.md ~/.claude/agents/context-synthesis.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/antipattern-sniffer.md ~/.claude/agents/antipattern-sniffer.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/typecheck.md ~/.claude/agents/typecheck.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/test-runner.md ~/.claude/agents/test-runner.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/lint.md ~/.claude/agents/lint.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/prettier.md ~/.claude/agents/prettier.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/database-optimizer.md ~/.claude/agents/database-optimizer.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/devops-troubleshooter.md ~/.claude/agents/devops-troubleshooter.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engineer.md ~/.claude/agents/performance-engineer.md
 ```
 
-Broad implementation/design agents (`backend-architect`, `deployment-engineer`, etc.) are best copied per-project into `.claude/agents/` rather than linked globally.
+The setup script refuses to replace existing real directories; move them aside manually if you want the maintained directory linked.
 
 ## GitHub MCP
 
@@ -63,9 +51,10 @@ Before launching Claude, make sure GitHub MCP can authenticate in one of these w
 
 ## Agents
 
-See [agents/README.md](agents/README.md) for the full list and when to use each one.
-
-**Global agents** (link to `~/.claude/agents/`) — available in every project:
+**Linked agents** (the complete maintained `agents/` directory is linked to `~/.claude/agents/`) — available in every project:
+- `orchestrator` — coordination-only delegation map for multi-agent work
+- `executor` — general concrete implementation leaf for work no specialist owns
+- `backend-architect`, `frontend-developer`, `deployment-engineer`, `test-automator` — specialist implementation/design leaf agents
 - `codebase-locator` — finds files/dirs (haiku)
 - `codebase-analyzer` — explains how code works (sonnet)
 - `context-synthesis` — maps relationships between components (sonnet)
@@ -77,6 +66,7 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 - `database-optimizer` — analyzes query plans, indexes, and ORM performance (sonnet)
 - `devops-troubleshooter` — investigates incidents and observability gaps (sonnet)
 - `performance-engineer` — profiles bottlenecks and optimization targets (sonnet)
+- `git-workflow` — git/GitHub workflow only
 
 **Built-in shadows** — same-named definitions that override Claude Code's
 built-in agents solely to pin their model. Without these, built-ins inherit
@@ -87,9 +77,6 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 - `Explore` — read-only fan-out search (sonnet)
 - `general-purpose` — research and multi-step catch-all (sonnet)
 - `Plan` — implementation planning, read-only (sonnet)
-
-**Broad specialists** (copy per-project into `.claude/agents/`):
-- `backend-architect`, `frontend-developer`, `test-automator`, `deployment-engineer`
 
 ## Commands
 

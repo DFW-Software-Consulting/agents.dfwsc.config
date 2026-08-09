@@ -8,7 +8,7 @@ This directory contains DFWSC configuration and setup material for the AI coding
 |---------------|------------------|
 | Cline setup (VS Code) | [`cline/README.md`](cline/README.md) |
 | OpenCode config files | [`opencode/`](opencode/) |
-| OpenCode subagents | [`opencode/agents/README.md`](opencode/agents/README.md) |
+| OpenCode subagents | [`opencode/agents/`](opencode/agents/) |
 | Claude config files | [`claude/`](claude/) |
 | Codex config files | [`codex/`](codex/) |
 | Gemini config files | [`gemini/`](gemini/) |
@@ -36,10 +36,11 @@ Clone this repo, then run the setup script from the repo root to symlink local t
 ./setup-agent-configs.sh claude
 ./setup-agent-configs.sh opencode
 ./setup-agent-configs.sh codex
+./setup-agent-configs.sh gemini
 ./setup-agent-configs.sh plannotator
 ```
 
-The script does not install Claude Code or OpenCode themselves. Install the tools you use first, then run the setup script.
+The script does not install Claude Code, OpenCode, Codex, or Gemini themselves. Install the tools you use first, then run the setup script. The `all` target intentionally does not link Gemini; run `gemini` explicitly so existing real `~/.gemini/agents` or `~/.gemini/commands` directories are not silently replaced.
 
 ### 1. OpenCode Installation
 
@@ -58,7 +59,7 @@ Install Claude Code separately, then run:
 ### 3. Cline (VS Code Extension)
 
 1. Install from VS Code Marketplace
-2. Configure vLLM backend (see [`cline/README.md`](cline/README.md)):
+2. Optionally configure an OpenAI-compatible vLLM backend (see [`cline/README.md`](cline/README.md)). Example deployment:
    - **API Provider**: OpenAI Compatible
    - **Base URL**: `http://192.168.62.138:9000/v1`
    - **API Key**: `EMPTY` (vLLM default)
@@ -91,7 +92,7 @@ Step-by-step instructions...
 |------|-------------|
 | Claude Code | `.claude/skills/<name>/SKILL.md` |
 | OpenCode | `.opencode/skills/<name>/SKILL.md` |
-| Gemini CLI | `.gemini/skills/<name>/SKILL.md` |
+| Gemini CLI | shared `~/.agents/skills/<name>/SKILL.md` (this repo does not duplicate skills into `~/.gemini`) |
 | Codex CLI | `.agents/skills/<name>/SKILL.md` |
 
 ## Workflow Standards
@@ -124,7 +125,7 @@ When adding new agent configurations:
 | Feature | Claude Code | OpenCode | Cline | Gemini CLI |
 |---------|-------------|----------|-------|------------|
 | Terminal-based | Yes | Yes | No (VS Code) | Yes |
-| Local LLM | Yes | Yes | Yes (vLLM) | No |
+| Local LLM | Provider-dependent | Provider-dependent | Optional (for example, vLLM) | No |
 | Custom commands | Yes | Yes | Limited | Yes |
 | Skills system | Yes | Yes | No | Yes |
 | Plugin ecosystem | Yes | Yes | No | Yes |

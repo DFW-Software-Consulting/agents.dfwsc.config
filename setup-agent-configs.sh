@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [claude|claude-personal|opencode|codex|plannotator|all]\n' "${0##*/}"
+  printf 'Usage: %s [claude|claude-personal|opencode|codex|gemini|plannotator|all]\n' "${0##*/}"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +16,17 @@ link_path() {
     return
   fi
 
-  ln -sfn "$source" "$target_path"
+  if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+    if [ -L "$target_path" ]; then
+      rm "$target_path"
+    else
+      printf 'Refusing to replace existing non-symlink path: %s\n' "$target_path" >&2
+      printf 'Move it aside manually, then rerun setup if you want this repo linked there.\n' >&2
+      return 1
+    fi
+  fi
+
+  ln -s "$source" "$target_path"
 }
 
 install_codex_only_toggle() {
@@ -76,59 +86,21 @@ PY
 }
 
 link_claude() {
-  mkdir -p "$HOME/.claude/agents"
+  mkdir -p "$HOME/.claude"
 
   link_path "$repo_root/ai-code-agents/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
   link_path "$repo_root/ai-code-agents/claude/settings.json" "$HOME/.claude/settings.json"
+  link_path "$repo_root/ai-code-agents/claude/agents" "$HOME/.claude/agents"
   link_path "$repo_root/ai-code-agents/claude/commands" "$HOME/.claude/commands"
   link_path "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude/skills"
-
-  for agent in \
-    orchestrator \
-    codebase-locator \
-    codebase-analyzer \
-    context-synthesis \
-    antipattern-sniffer \
-    typecheck \
-    test-runner \
-    lint \
-    prettier \
-    git-workflow \
-    database-optimizer \
-    devops-troubleshooter \
-    performance-engineer \
-    Explore \
-    general-purpose \
-    Plan; do
-    link_path "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude/agents/$agent.md"
-  done
 }
 
 link_claude_personal() {
-  mkdir -p "$HOME/.claude-personal/agents"
+  mkdir -p "$HOME/.claude-personal"
 
+  link_path "$repo_root/ai-code-agents/claude/agents" "$HOME/.claude-personal/agents"
   link_path "$repo_root/ai-code-agents/claude/commands" "$HOME/.claude-personal/commands"
   link_path "$repo_root/ai-code-agents/claude/skills" "$HOME/.claude-personal/skills"
-
-  for agent in \
-    orchestrator \
-    codebase-locator \
-    codebase-analyzer \
-    context-synthesis \
-    antipattern-sniffer \
-    typecheck \
-    test-runner \
-    lint \
-    prettier \
-    git-workflow \
-    database-optimizer \
-    devops-troubleshooter \
-    performance-engineer \
-    Explore \
-    general-purpose \
-    Plan; do
-    link_path "$repo_root/ai-code-agents/claude/agents/$agent.md" "$HOME/.claude-personal/agents/$agent.md"
-  done
 }
 
 link_opencode() {
@@ -149,12 +121,21 @@ link_opencode() {
 }
 
 link_codex() {
-  mkdir -p "$HOME/.codex/agents" "$HOME/.codex/prompts" "$HOME/.agents"
+  mkdir -p "$HOME/.codex" "$HOME/.agents"
 
   link_path "$repo_root/ai-code-agents/codex/AGENTS.md" "$HOME/.codex/AGENTS.md"
   link_path "$repo_root/ai-code-agents/codex/config.toml" "$HOME/.codex/config.toml"
   link_path "$repo_root/ai-code-agents/codex/agents" "$HOME/.codex/agents"
   link_path "$repo_root/ai-code-agents/codex/prompts" "$HOME/.codex/prompts"
+  link_path "$repo_root/ai-code-agents/codex/skills" "$HOME/.agents/skills"
+}
+
+link_gemini() {
+  mkdir -p "$HOME/.gemini" "$HOME/.agents"
+
+  link_path "$repo_root/ai-code-agents/gemini/GEMINI.md" "$HOME/.gemini/GEMINI.md"
+  link_path "$repo_root/ai-code-agents/gemini/agents" "$HOME/.gemini/agents"
+  link_path "$repo_root/ai-code-agents/gemini/commands" "$HOME/.gemini/commands"
   link_path "$repo_root/ai-code-agents/codex/skills" "$HOME/.agents/skills"
 }
 
@@ -180,6 +161,9 @@ case "$target" in
   codex)
     link_codex
     ;;
+  gemini)
+    link_gemini
+    ;;
   plannotator)
     install_plannotator
     ;;
@@ -189,6 +173,7 @@ case "$target" in
     link_opencode
     link_codex
     install_plannotator
+    printf 'Gemini is not included in all; run %s gemini explicitly to link ~/.gemini assets.\n' "${0##*/}"
     ;;
   -h|--help|help)
     usage

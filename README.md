@@ -46,6 +46,7 @@ cd ~/dfwsc/agents.dfwsc.config
 ./setup-agent-configs.sh claude-personal
 ./setup-agent-configs.sh opencode
 ./setup-agent-configs.sh codex
+./setup-agent-configs.sh gemini
 ./setup-agent-configs.sh plannotator
 ```
 
@@ -122,9 +123,14 @@ Codex custom commands live in `~/.codex/prompts` and appear as `/prompts:<name>`
 ### Gemini CLI
 
 ```bash
-mkdir -p ~/.gemini/agents
+mkdir -p ~/.gemini ~/.agents
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/GEMINI.md ~/.gemini/GEMINI.md
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/agents ~/.gemini/agents
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/gemini/commands ~/.gemini/commands
+ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/skills ~/.agents/skills
 ```
+
+Gemini is not included in `./setup-agent-configs.sh all`; run the explicit `gemini` target when you want these links.
 
 ### Reload shell
 

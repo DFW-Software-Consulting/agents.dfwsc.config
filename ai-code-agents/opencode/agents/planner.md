@@ -1,5 +1,5 @@
 ---
-description: Use when planning any non-trivial task. Researches the codebase, writes a plan, then always gates it through Plannotator before proceeding. Never implements without an approved plan.
+description: Primary planning coordinator for non-trivial tasks. Researches, writes a plan, gates it through Plannotator, then delegates approved implementation. Do not use for trivial direct edits, pure code review, or git workflow.
 mode: primary
 permission:
   edit: allow
@@ -8,6 +8,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  task: allow
   skill: allow
 ---
 

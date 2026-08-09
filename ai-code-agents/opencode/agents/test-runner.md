@@ -1,5 +1,5 @@
 ---
-description: Runs the project's test suite and returns a concise structured result report. Use when you need test results without flooding the main context with raw test output.
+description: Leaf runner for existing project tests. Use when you need concise test results without raw output. Do not use to add tests, fix failures, or broaden scope beyond requested test commands.
 mode: subagent
 permission:
   edit: deny
@@ -8,6 +8,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 

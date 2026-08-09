@@ -1,5 +1,5 @@
 ---
-description: Analyzes HOW specific code works. Use when you need to understand implementation details, function signatures, class hierarchies, data flow, or how a specific component is built.
+description: Read-only analyzer for HOW specific code works. Use to understand implementation details, signatures, class hierarchies, data flow, or component behavior. Do not use to locate only files, recommend refactors, or edit code.
 mode: subagent
 permission:
   edit: deny
@@ -18,7 +18,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
-  task: allow
+  task: deny
   skill: allow
 ---
 

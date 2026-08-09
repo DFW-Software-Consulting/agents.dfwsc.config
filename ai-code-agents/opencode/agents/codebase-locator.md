@@ -1,5 +1,5 @@
 ---
-description: Finds WHERE files and components live in the codebase. Use when you need to locate directories, entry points, related modules, or any file by name, pattern, or purpose.
+description: Read-only locator for WHERE files and components live. Use to find directories, entry points, related modules, symbols, or files by name/pattern/purpose. Do not use to analyze behavior or suggest changes.
 mode: subagent
 permission:
   edit: deny
@@ -18,6 +18,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 

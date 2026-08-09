@@ -1,5 +1,5 @@
 ---
-description: Evaluates new or changed code for antipatterns, code smells, and bad practices. Use after implementation to audit new code before it is committed or merged.
+description: Read-only reviewer for new or changed code antipatterns, smells, and bad practices. Use after implementation to audit before commit/merge. Do not use to fix findings or run general lint/test suites.
 mode: subagent
 permission:
   edit: deny
@@ -16,7 +16,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
-  task: allow
+  task: deny
   skill: allow
 ---
 

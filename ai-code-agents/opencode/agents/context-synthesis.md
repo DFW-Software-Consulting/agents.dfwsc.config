@@ -1,5 +1,5 @@
 ---
-description: Finds connections and context between components. Use when you need to understand how different parts of the codebase relate, trace cross-cutting concerns, or gather surrounding context for a topic.
+description: Read-only research agent for connections between components. Use to understand relationships, data flow, shared patterns, or cross-cutting concerns. Do not use to propose changes, implement, or run verification.
 mode: subagent
 permission:
   edit: deny
@@ -18,7 +18,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
-  task: allow
+  task: deny
   skill: allow
 ---
 

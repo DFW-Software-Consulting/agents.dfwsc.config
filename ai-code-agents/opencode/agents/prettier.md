@@ -1,5 +1,5 @@
 ---
-description: Runs Prettier in check mode and returns a concise structured report of unformatted files. Use when you need to verify formatting without running a full lint suite.
+description: Leaf runner for Prettier or formatter check mode. Use when you need concise formatting status without a full lint suite. Do not use to format files or apply fixes.
 mode: subagent
 permission:
   edit: deny
@@ -8,6 +8,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 

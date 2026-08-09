@@ -1,12 +1,16 @@
 ---
-description: Use to review and refine the latest assistant response. Opens it in Plannotator, then revises based on returned annotations.
+description: Use to review and refine the latest assistant response only. Opens it in Plannotator and returns an improved response. Do not use to edit project files, run checks, or review code diffs.
 mode: subagent
 permission:
-  bash: allow
+  edit: deny
+  bash:
+    "*": deny
+    "plannotator last*": allow
   read: allow
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 

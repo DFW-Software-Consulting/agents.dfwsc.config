@@ -1,5 +1,5 @@
 ---
-description: Runs the project's typecheck command and returns a concise structured error report. Use when you need to typecheck without flooding the main context with raw compiler output.
+description: Leaf runner for the project's typecheck command. Use when you need concise compiler/type errors without raw output. Do not use to fix type errors or run unrelated checks.
 mode: subagent
 permission:
   edit: deny
@@ -8,6 +8,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 

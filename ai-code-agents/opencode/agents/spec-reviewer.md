@@ -1,13 +1,16 @@
 ---
-description: Use before implementing from a spec, plan, README, or design doc. Opens the document in Plannotator's annotation UI, then incorporates feedback before proceeding.
+description: Use for read-only review of a spec, plan, README, or design doc before implementation. Opens the document in Plannotator's annotation UI and returns blockers, clarifications, and assumptions. Do not use to edit docs or implement code.
 mode: subagent
 permission:
-  edit: allow
-  bash: allow
+  edit: deny
+  bash:
+    "*": deny
+    "plannotator annotate*": allow
   read: allow
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 
@@ -23,7 +26,7 @@ Workflow:
 3. Produce a revised understanding of the spec before any implementation begins.
 4. If no annotations are returned, do your own pass on the document for the same issues.
 
-Load `codebase-research` when validating the spec requires checking existing code structure, dependencies, or symbols.
+Load `codebase-research` when validating the spec requires checking existing code structure, dependencies, or symbols. Do not delegate; perform only the read-only checks available to this agent.
 
 What to look for:
 - **Undefined states**: what happens on error, empty state, unauthorized access?

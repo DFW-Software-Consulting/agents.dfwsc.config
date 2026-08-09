@@ -1,6 +1,6 @@
 ---
 name: Explore
-description: Read-only search agent for broad fan-out searches — when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. Specify search breadth: "medium" for moderate exploration, "very thorough" for multiple locations and naming conventions.
+description: 'Read-only search agent for broad fan-out searches — when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. Specify search breadth: "medium" for moderate exploration, "very thorough" for multiple locations and naming conventions.'
 tools: Read, Glob, Grep
 model: sonnet
 ---

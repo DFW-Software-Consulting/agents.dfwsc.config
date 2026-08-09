@@ -1,5 +1,5 @@
 ---
-description: General-purpose implementation agent. Use when there is a clear plan or spec and you need concrete edits, file creation, multi-step implementation, mechanical refactors, or build/script work executed. Not for design, review, or planning — only for doing.
+description: General implementation leaf. Use when there is a clear task, plan, or spec and you need concrete edits, file creation, mechanical refactors, or build/script work executed. Do not use for design, review, research, planning, or git workflow.
 mode: subagent
 permission:
   edit: allow
@@ -30,5 +30,5 @@ Approach:
 
 Output format:
 - **Changes**: files created or modified, with brief description of each
-- **Verified**: what you ran and whether it passed
-- **Notes**: any decisions, assumptions, or issues encountered
+- **Verification**: what you ran and whether it passed
+- **Risks**: decisions, assumptions, skipped checks, or remaining issues

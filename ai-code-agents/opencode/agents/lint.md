@@ -1,5 +1,5 @@
 ---
-description: Runs the project's lint command and returns a concise structured error report. Use when you need lint results without flooding the main context with raw linter output.
+description: Leaf runner for the project's lint command. Use when you need concise lint results without raw output. Do not use to apply fixes or investigate beyond lint diagnostics.
 mode: subagent
 permission:
   edit: deny
@@ -8,6 +8,7 @@ permission:
   glob: allow
   grep: allow
   list: allow
+  task: deny
   skill: allow
 ---
 

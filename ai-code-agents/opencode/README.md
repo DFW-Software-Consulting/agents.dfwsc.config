@@ -32,8 +32,7 @@ npm install --prefix ~/.config/opencode better-sqlite3 pg mysql2 mssql
 
 Add your API keys to your shell profile:
 ```bash
-export OPENROUTER_API_KEY=your-key-here
-# For OpenCode Zen models, run /connect inside OpenCode
+export OPENAI_API_KEY=your-key-here
 ```
 
 ## What's Included
@@ -49,12 +48,21 @@ export OPENROUTER_API_KEY=your-key-here
 
 ## Model Strategy
 
-| Agent group | Model |
-|---|---|
-| Default (main) | `opencode/minimax-m2.5-free` (Zen free) |
-| Research agents (read-only) | `opencode/minimax-m2.7` |
-| Specialist agents | `opencode/gpt-5.3-codex` |
-| `/git` git-runner / lint / typecheck / test-runner | `opencode/minimax-m2.5-free` |
+Toggle Codex-only routing with `tools/codex-only.sh` (`on`/`off`). When OFF, every
+specialized agent keeps its existing non-Codex default and variants are left empty
+so providers use their own reasoning effort. When ON, all agents route through the
+GPT-5.6 family with explicit reasoning variants.
+
+| Tier | Model | Variant | Agents |
+|---|---|---|---|
+| Free fast (Codex-off default) | `opencode/deepseek-v4-flash-free` | — | Main model, lint, prettier, typecheck |
+| Flagship reasoning | `openai/gpt-5.6-sol` | `high` | orchestrator, context-synthesis, frontend-developer, backend-architect, cloud-architect, database-optimizer, devops-troubleshooter, performance-engineer, executor |
+| Balanced reasoning | `openai/gpt-5.6-terra` | `medium` / `high` | codebase-analyzer, general, antipattern-sniffer, response-reviewer (`medium`); mobile-developer, deployment-engineer, test-automator, spec-reviewer (`high`) |
+| High-volume mechanical | `openai/gpt-5.6-luna-fast` | `none` / `low` | lint, prettier, typecheck (`none`); git-runner, codebase-locator, explore, test-runner (`low`) |
+
+The `max` and `xhigh` variants are intentionally unused by default; official guidance
+reserves them for eval-proven hardest workloads. See `tools/codex-only.sh` for the
+full per-agent `OPENCODE_*_MODEL` and `OPENCODE_*_VARIANT` exports.
 
 ## Agents
 
@@ -73,8 +81,9 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 | `/lint` | Run lint in the lint subagent and summarize issues |
 | `/prettier` | Run Prettier check mode in the prettier subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
-| `/ce/pn` | Generate implementation plan from research doc |
-| `/ce/ex` | Execute a plan with gated checks and atomic commits |
+| `/ce/prompt` | Build or improve an agent prompt artifact |
+| `/ce/rr` | Research the codebase and save findings |
+| `/ce/QA` | Read-only QA review of recent changes |
 | `/ce/slop` | Remove AI-generated bloat from diff against main |
 | `/ce/cm` | Context compact — summarize state before token limit |
 | `/ce/kb-log` | Create a knowledge base entry |

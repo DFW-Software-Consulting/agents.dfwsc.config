@@ -1,7 +1,5 @@
 ---
 description: Build an agent prompt using existing agents as references and save it to memory-bank/prompt
-writes-to: memory-bank/prompt/
-argument-hint: <agent idea, workflow, or existing prompt to improve>
 ---
 
 # Agent Prompt Builder

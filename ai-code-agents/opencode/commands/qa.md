@@ -17,7 +17,7 @@ Review and critique the following code for: $ARGUMENTS
   - Detect any framework/library in use (e.g., React, FastAPI, Django, Express)
   - Identify the main modules/classes/functions that define behavior or boundaries
 
-## Review Guidelines (You MUST follow these)
+## Review Guidelines
 
 Your task is to review and critique the following code.
 You MUST focus on:
@@ -26,7 +26,7 @@ You MUST focus on:
 - Modern, idiomatic use of the language and ecosystem
 - Coupling and cohesion between modules, classes, and functions
 
-You will be penalized if you:
+Avoid:
 
 - Give only generic advice without tying it to specific lines or constructs
 - Ignore the requested criteria
@@ -38,9 +38,9 @@ Think step by step and base your comments only on what is visible in the code.
 
 You MUST reference specific identifiers, functions, classes, or modules from the code to back up your judgement.
 
-## Response Structure (Strict)
+## Response Structure
 
-Your final answer MUST use exactly this structure and headings:
+Use this structure and headings:
 
 ### Quick Overview
 
@@ -149,7 +149,3 @@ Remember:
 - Stay grounded in what you can see in the code.
 - Always reference concrete identifiers, functions, classes, or files when making claims.
 - Avoid generic advice unless it is directly tied to a specific example in the code.
-
-```
-
-```

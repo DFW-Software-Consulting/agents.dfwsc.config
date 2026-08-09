@@ -1,17 +1,12 @@
 ---
 description: Conducts comprehensive codebase research by spawning parallel sub-agents and synthesizing findings into structured documentation
-writes-to: memory-bank/research/
-argument-hint: <research question or topic>
-hard-guards:
-  - Do not modify source files
-  - Do not create commits/branches/PRs
-  - Do not run code or tests
-  - Research and document ONLY
 ---
 
 # Research Codebase
 
 You are tasked with conducting comprehensive research across the codebase to answer user questions by spawning parallel sub-agents and synthesizing their findings. All research documents must be stored in the `memory-bank/research/` directory, following the YAML frontmatter and content structure below.
+
+Hard guards: do not modify source files, create commits/branches/PRs, or run code/tests. Research and document only.
 
 ## Initial Setup:
 
@@ -39,20 +34,15 @@ Then wait for the user's research query.
    - Consider which directories, files, or architectural patterns are relevant
 
 3. **Spawn parallel sub-agent tasks for comprehensive research:**
-   - Strictly limit to a maximum of 3 Task agents per research query. You may not spawn more than two sub-agents for any research query, regardless of the number of aspects or subtasks. This is a hard limit.
-   - Only reference files and resources that are part of the current codebase or workspace. Do not reference or include any files, tickets, or resources that are external or not present in this workspace.
+    - Use at most 2 concurrent sub-agents by default, and at most 3 total sub-agents for a research query unless the user explicitly asks for broader research.
+    - Only reference files and resources that are part of the current codebase or workspace. Do not reference or include any files, tickets, or resources that are external or not present in this workspace.
 
-   YOU MUST DEPLOY THESE 3 IN PARELLEL
-   YOU WILL BE PUNISHED FOR NOT DEPLOYING SUBAGENTS IN PARELLEL
-
-   **For codebase research:**
+    **For codebase research:**
    - Use the **codebase-locator** agent to find WHERE files and components live
    - Use the **codebase-analyzer** agent to understand HOW specific code works
    - Use the **context-synthesis** agent to find context as needed
 
-   one of these 3 agents can use the gemini mcp
-
-   The key is to use these agents intelligently:
+    The key is to use these agents intelligently:
    - Start with locator agents to find what exists
    - Then use analyzer and synthesis agents on the most promising findings
    - Run agents in parallel only if they are searching for different things, and never exceed two concurrent sub-agents.
@@ -159,6 +149,5 @@ Then wait for the user's research query.
   - Use snake_case for multi-word field names (e.g., `last_updated`, `git_commit`)
   - Tags should be relevant to the research topic and components studied
 
-  DO NOT CODE YOU WILL BE PUNISHED FOR CODING
-
-  SAVE THE DOCUMENT YOU MUST SAVE IN THE CORRECT FORMAT FOR THE NEXT DEV
+  - Do not code or edit source files.
+  - Save the research document in the requested format so the next developer can use it directly.

@@ -7,7 +7,7 @@ description: Run the project's lint command in the lint subagent and return a co
 
 Launch the `lint` subagent for the user's request: `$ARGUMENTS`.
 
-The OpenCode config pins `lint` to `opencode/minimax-m2.5-free`.
+Model assignment comes from the active OpenCode config.
 
 Ask the subagent to:
 

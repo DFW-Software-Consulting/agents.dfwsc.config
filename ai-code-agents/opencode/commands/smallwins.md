@@ -1,6 +1,5 @@
 ---
-description: Generates a concrete implementation plan from a research doc, with milestones, tasks, gates
-writes-to: memory-bank/qa/
+description: Run a read-only small-wins audit and write a concise report of low-risk cleanup opportunities.
 ---
 
 
@@ -22,7 +21,7 @@ writes-to: memory-bank/qa/
 
 ## Planning Note
 
-Create `AUDIT_SMALL_WINS_PLAN.md` with: goals, constraints (read‑only), and categories to scan.
+Optionally create `AUDIT_SMALL_WINS_PLAN.md` with: goals, constraints (read-only), and categories to scan.
 
 ## Detection Passes (Read‑Only)
 
@@ -76,16 +75,15 @@ Create `reports/SMALL_WINS_AUDIT.md` with sections:
 
 ## Success Criteria
 
-* Report exists at `reports/SMALL_WINS_AUDIT.md`.
+* Report exists at `reports/SMALL_WINS_AUDIT.md` unless the user requests a different output path.
 * ≤1 hour to implement first batch of wins.
-* No modifications performed by this command.
+* No source modifications performed by this command; report/plan artifacts are allowed.
 
-YOU MUST DEPLOY THESE 3 IN PARELLEL
-YOU WILL BE PUNISHED FOR NOT DEPLOYING SUBAGENT
 **For codebase research:**
 - Use the **codebase-locator** agent to find WHERE files and components live
 - Use the **codebase-analyzer** agent to understand HOW specific code works
 - Use the **context-synthesis** agent to find context as needed
+- Run agents in parallel only when their scopes are independent and the active config can support it safely.
 
 
 ## Notes

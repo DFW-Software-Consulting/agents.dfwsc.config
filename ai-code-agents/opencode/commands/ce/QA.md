@@ -1,16 +1,12 @@
 ---
 description: READ-ONLY QA focused FIRST on code-logic correctness of recent changes. Outlines issues/smells/antipatterns and risks. NO CODING, NO EDITS, NO FIXES.
-writes-to: memory-bank/QA/
-hard-guards:
-  - Do not modify source files
-  - Do not create commits/branches/PRs
-  - Do not run formatters/linters in write mode
-  - Produce findings & recommendations ONLY (outline, not code)
 ---
 
 # QA (Read-Only) — Code Logic First
 
 Run a post-execution QA review for: $ARGUMENTS  (topic OR path to plan/report)
+
+Hard guards: do not modify source files, create commits/branches/PRs, or run formatters/linters in write mode. Produce findings and recommendations only.
 
 ## Initial Prompt (to user)
 "I'm starting a **read-only** QA review focused on the **code logic of recent changes**. I will outline potential logic issues, smells/anti-patterns, and security concerns. **No coding or fixes will be performed.** Please provide a topic or the path to the plan/report under memory-bank/execute/."

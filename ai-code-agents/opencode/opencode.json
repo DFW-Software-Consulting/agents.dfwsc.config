@@ -6,15 +6,6 @@
             "name": "OpenAI",
             "options": {
                 "apiKey": "{env:OPENAI_API_KEY}"
-            },
-            "models": {
-                "chatgpt-5.4": {
-                    "name": "ChatGPT 5.4",
-                    "limit": {
-                        "context": 128000,
-                        "output": 16384
-                    }
-                }
             }
         },
         "vllm": {
@@ -51,24 +42,29 @@
         "review": {
             "description": "Reviews code for best practices and potential issues"
         },
-        "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-        "typecheck": { "model": "{env:OPENCODE_FAST_MODEL}" },
-        "test-runner": { "model": "{env:OPENCODE_FAST_MODEL}" },
-        "lint": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-        "prettier": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}" },
-        "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}" },
-        "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}" },
-        "context-synthesis": { "model": "{env:OPENCODE_CONTEXT_MODEL}" },
-        "antipattern-sniffer": { "model": "{env:OPENCODE_SNIFFER_MODEL}" },
-        "frontend-developer": { "model": "{env:OPENCODE_FRONTEND_MODEL}" },
-        "mobile-developer": { "model": "{env:OPENCODE_MOBILE_MODEL}" },
-        "backend-architect": { "model": "{env:OPENCODE_BACKEND_MODEL}" },
-        "cloud-architect": { "model": "{env:OPENCODE_CLOUD_MODEL}" },
-        "database-optimizer": { "model": "{env:OPENCODE_DB_MODEL}" },
-        "deployment-engineer": { "model": "{env:OPENCODE_DEPLOY_MODEL}" },
-        "devops-troubleshooter": { "model": "{env:OPENCODE_DEVOPS_MODEL}" },
-        "performance-engineer": { "model": "{env:OPENCODE_PERF_MODEL}" },
-        "test-automator": { "model": "{env:OPENCODE_TEST_MODEL}" }
+        "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
+        "typecheck": { "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
+        "test-runner": { "model": "{env:OPENCODE_TEST_RUNNER_MODEL}", "variant": "{env:OPENCODE_TEST_RUNNER_VARIANT}" },
+        "lint": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
+        "prettier": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
+        "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
+        "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}", "variant": "{env:OPENCODE_ANALYZER_VARIANT}" },
+        "context-synthesis": { "model": "{env:OPENCODE_CONTEXT_MODEL}", "variant": "{env:OPENCODE_CONTEXT_VARIANT}" },
+        "antipattern-sniffer": { "model": "{env:OPENCODE_SNIFFER_MODEL}", "variant": "{env:OPENCODE_SNIFFER_VARIANT}" },
+        "frontend-developer": { "model": "{env:OPENCODE_FRONTEND_MODEL}", "variant": "{env:OPENCODE_FRONTEND_VARIANT}" },
+        "mobile-developer": { "model": "{env:OPENCODE_MOBILE_MODEL}", "variant": "{env:OPENCODE_MOBILE_VARIANT}" },
+        "backend-architect": { "model": "{env:OPENCODE_BACKEND_MODEL}", "variant": "{env:OPENCODE_BACKEND_VARIANT}" },
+        "cloud-architect": { "model": "{env:OPENCODE_CLOUD_MODEL}", "variant": "{env:OPENCODE_CLOUD_VARIANT}" },
+        "database-optimizer": { "model": "{env:OPENCODE_DB_MODEL}", "variant": "{env:OPENCODE_DB_VARIANT}" },
+        "deployment-engineer": { "model": "{env:OPENCODE_DEPLOY_MODEL}", "variant": "{env:OPENCODE_DEPLOY_VARIANT}" },
+        "devops-troubleshooter": { "model": "{env:OPENCODE_DEVOPS_MODEL}", "variant": "{env:OPENCODE_DEVOPS_VARIANT}" },
+        "performance-engineer": { "model": "{env:OPENCODE_PERF_MODEL}", "variant": "{env:OPENCODE_PERF_VARIANT}" },
+        "test-automator": { "model": "{env:OPENCODE_TEST_AUTOMATOR_MODEL}", "variant": "{env:OPENCODE_TEST_AUTOMATOR_VARIANT}" },
+        "executor": { "model": "{env:OPENCODE_EXECUTOR_MODEL}", "variant": "{env:OPENCODE_EXECUTOR_VARIANT}" },
+        "general": { "model": "{env:OPENCODE_GENERAL_MODEL}", "variant": "{env:OPENCODE_GENERAL_VARIANT}" },
+        "explore": { "model": "{env:OPENCODE_EXPLORE_MODEL}", "variant": "{env:OPENCODE_EXPLORE_VARIANT}" },
+        "response-reviewer": { "model": "{env:OPENCODE_RESPONSE_REVIEWER_MODEL}", "variant": "{env:OPENCODE_RESPONSE_REVIEWER_VARIANT}" },
+        "spec-reviewer": { "model": "{env:OPENCODE_SPEC_REVIEWER_MODEL}", "variant": "{env:OPENCODE_SPEC_REVIEWER_VARIANT}" }
     },
     "mcp": {
       "shopify": {

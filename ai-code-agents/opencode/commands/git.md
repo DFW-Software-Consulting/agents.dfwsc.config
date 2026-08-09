@@ -7,7 +7,7 @@ description: Delegate git commit, push, PR, and issue workflows to a git subagen
 
 Use the `git-workflow` skill for the user's request: `$ARGUMENTS`.
 
-Launch the `git-runner` subagent to handle the git workflow in isolated context. OpenCode config pins `git-runner` to `opencode/minimax-m2.5-free`.
+Launch the `git-runner` subagent to handle the git workflow in isolated context. Model assignment comes from the active OpenCode config.
 
 ## Supported Requests
 
@@ -24,7 +24,7 @@ You are executing the git-workflow skill for this user request:
 $ARGUMENTS
 
 Use the repository's git-workflow rules as the source of truth.
-Use the configured `git-runner` subagent model: `opencode/minimax-m2.5-free`.
+Use the configured `git-runner` subagent and the repository's git-workflow rules.
 
 For commit requests:
 - Inspect the current branch and working tree before staging anything.
@@ -39,7 +39,7 @@ For commit requests:
 
 For push requests:
 - Run the git-workflow push lifecycle.
-- Never force push unless the user explicitly requests it and confirms twice.
+- Never force push or rewrite history.
 - Stop and report if hooks or checks fail.
 
 For PR requests:

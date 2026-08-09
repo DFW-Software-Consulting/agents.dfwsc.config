@@ -85,4 +85,4 @@ Format output as:
 
 This ensures smooth continuation after context reset. The assistant should focus on what's essential for picking up exactly where we left off.
 
-Take a deep breath in, count 1... 2... 3... and breathe out. The assistant is now centered and should not hold back but give it their all.
+Keep the summary concise and focused on what is needed to continue safely.

@@ -5,7 +5,14 @@ set -eu
 STATE_FILE="${OPENCODE_CODEX_ONLY_STATE:-$HOME/.config/opencode/codex-only.env}"
 
 FREE_FAST_MODEL="${OPENCODE_FREE_FAST_MODEL:-opencode/deepseek-v4-flash-free}"
-DEFAULT_ORCHESTRATOR_MODEL="${OPENCODE_DEFAULT_ORCHESTRATOR_MODEL:-openai/gpt-5}"
+
+# GPT-5.6 Codex tier defaults. These are the only models used when codex-only is ON.
+SOL_MODEL="${OPENCODE_SOL_MODEL:-openai/gpt-5.6-sol}"
+TERRA_MODEL="${OPENCODE_TERRA_MODEL:-openai/gpt-5.6-terra}"
+LUNA_FAST_MODEL="${OPENCODE_LUNA_FAST_MODEL:-openai/gpt-5.6-luna-fast}"
+
+# Non-Codex defaults used when codex-only is OFF. Preserve every existing assignment.
+DEFAULT_ORCHESTRATOR_MODEL="${OPENCODE_DEFAULT_ORCHESTRATOR_MODEL:-$SOL_MODEL}"
 DEFAULT_LOCATOR_MODEL="${OPENCODE_DEFAULT_LOCATOR_MODEL:-opencode-go/deepseek-v4-flash}"
 DEFAULT_ANALYZER_MODEL="${OPENCODE_DEFAULT_ANALYZER_MODEL:-opencode-go/qwen3.7-max}"
 DEFAULT_CONTEXT_MODEL="${OPENCODE_DEFAULT_CONTEXT_MODEL:-opencode-go/glm-5.2}"
@@ -21,8 +28,11 @@ DEFAULT_PERF_MODEL="${OPENCODE_DEFAULT_PERF_MODEL:-opencode-go/minimax-m3}"
 DEFAULT_TEST_MODEL="${OPENCODE_DEFAULT_TEST_MODEL:-opencode-go/qwen3.7-plus}"
 DEFAULT_EXECUTOR_MODEL="${OPENCODE_DEFAULT_EXECUTOR_MODEL:-opencode-go/kimi-k2.7-code}"
 
-CODEX_MODEL="${OPENCODE_CODEX_MODEL:-openai/gpt-5.5}"
-CODEX_SMALL_MODEL="${OPENCODE_CODEX_SMALL_MODEL:-openai/gpt-5.5-fast}"
+# Built-in agents that previously had no explicit default inherit from the closest analogue.
+DEFAULT_GENERAL_MODEL="${OPENCODE_DEFAULT_GENERAL_MODEL:-$DEFAULT_ANALYZER_MODEL}"
+DEFAULT_EXPLORE_MODEL="${OPENCODE_DEFAULT_EXPLORE_MODEL:-$DEFAULT_LOCATOR_MODEL}"
+DEFAULT_RESPONSE_REVIEWER_MODEL="${OPENCODE_DEFAULT_RESPONSE_REVIEWER_MODEL:-$DEFAULT_ANALYZER_MODEL}"
+DEFAULT_SPEC_REVIEWER_MODEL="${OPENCODE_DEFAULT_SPEC_REVIEWER_MODEL:-$DEFAULT_ANALYZER_MODEL}"
 
 write_state() {
   mkdir -p "$(dirname "$STATE_FILE")"
@@ -40,29 +50,59 @@ load_state() {
 print_exports() {
   load_state
 
-  # Always keep free-model agents on the free fast model.
-  printf 'export OPENCODE_FAST_MODEL=%s\n' "$FREE_FAST_MODEL"
   printf 'export OPENCODE_ORCHESTRATOR_MODEL=%s\n' "$DEFAULT_ORCHESTRATOR_MODEL"
 
   if [ "$OPENCODE_CODEX_ONLY" = "1" ]; then
+    printf 'export OPENCODE_FAST_MODEL=%s\n' "$LUNA_FAST_MODEL"
     printf 'export OPENCODE_MAX_CONCURRENT=10\n'
-    printf 'export OPENCODE_LOCATOR_MODEL=%s\n' "$CODEX_SMALL_MODEL"
-    printf 'export OPENCODE_ANALYZER_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_SNIFFER_MODEL=%s\n' "$CODEX_SMALL_MODEL"
-    printf 'export OPENCODE_FRONTEND_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_MOBILE_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_BACKEND_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_CLOUD_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_DB_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_DEPLOY_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_DEVOPS_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_PERF_MODEL=%s\n' "$CODEX_MODEL"
-    printf 'export OPENCODE_TEST_MODEL=%s\n' "$CODEX_SMALL_MODEL"
-    printf 'export OPENCODE_EXECUTOR_MODEL=%s\n' "$CODEX_MODEL"
+
+    printf 'export OPENCODE_LOCATOR_MODEL=%s\n' "$LUNA_FAST_MODEL"
+    printf 'export OPENCODE_GENERAL_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_ANALYZER_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_SNIFFER_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_FRONTEND_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_MOBILE_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_BACKEND_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_CLOUD_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_DB_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_DEPLOY_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_DEVOPS_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_PERF_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_TEST_RUNNER_MODEL=%s\n' "$LUNA_FAST_MODEL"
+    printf 'export OPENCODE_TEST_AUTOMATOR_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_EXECUTOR_MODEL=%s\n' "$SOL_MODEL"
+    printf 'export OPENCODE_EXPLORE_MODEL=%s\n' "$LUNA_FAST_MODEL"
+    printf 'export OPENCODE_RESPONSE_REVIEWER_MODEL=%s\n' "$TERRA_MODEL"
+    printf 'export OPENCODE_SPEC_REVIEWER_MODEL=%s\n' "$TERRA_MODEL"
+
+    printf 'export OPENCODE_ORCHESTRATOR_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_LOCATOR_VARIANT=%s\n' "low"
+    printf 'export OPENCODE_GENERAL_VARIANT=%s\n' "medium"
+    printf 'export OPENCODE_ANALYZER_VARIANT=%s\n' "medium"
+    printf 'export OPENCODE_CONTEXT_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_SNIFFER_VARIANT=%s\n' "medium"
+    printf 'export OPENCODE_FRONTEND_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_MOBILE_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_BACKEND_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_CLOUD_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_DB_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_DEPLOY_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_DEVOPS_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_PERF_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_TEST_RUNNER_VARIANT=%s\n' "low"
+    printf 'export OPENCODE_TEST_AUTOMATOR_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_EXECUTOR_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_EXPLORE_VARIANT=%s\n' "low"
+    printf 'export OPENCODE_RESPONSE_REVIEWER_VARIANT=%s\n' "medium"
+    printf 'export OPENCODE_SPEC_REVIEWER_VARIANT=%s\n' "high"
+    printf 'export OPENCODE_FAST_VARIANT=%s\n' "none"
   else
+    printf 'export OPENCODE_FAST_MODEL=%s\n' "$FREE_FAST_MODEL"
     printf 'export OPENCODE_MAX_CONCURRENT=2\n'
+
     printf 'export OPENCODE_LOCATOR_MODEL=%s\n' "$DEFAULT_LOCATOR_MODEL"
+    printf 'export OPENCODE_GENERAL_MODEL=%s\n' "$DEFAULT_GENERAL_MODEL"
     printf 'export OPENCODE_ANALYZER_MODEL=%s\n' "$DEFAULT_ANALYZER_MODEL"
     printf 'export OPENCODE_CONTEXT_MODEL=%s\n' "$DEFAULT_CONTEXT_MODEL"
     printf 'export OPENCODE_SNIFFER_MODEL=%s\n' "$DEFAULT_SNIFFER_MODEL"
@@ -74,8 +114,35 @@ print_exports() {
     printf 'export OPENCODE_DEPLOY_MODEL=%s\n' "$DEFAULT_DEPLOY_MODEL"
     printf 'export OPENCODE_DEVOPS_MODEL=%s\n' "$DEFAULT_DEVOPS_MODEL"
     printf 'export OPENCODE_PERF_MODEL=%s\n' "$DEFAULT_PERF_MODEL"
-    printf 'export OPENCODE_TEST_MODEL=%s\n' "$DEFAULT_TEST_MODEL"
+    printf 'export OPENCODE_TEST_RUNNER_MODEL=%s\n' "$DEFAULT_TEST_MODEL"
+    printf 'export OPENCODE_TEST_AUTOMATOR_MODEL=%s\n' "$DEFAULT_TEST_MODEL"
     printf 'export OPENCODE_EXECUTOR_MODEL=%s\n' "$DEFAULT_EXECUTOR_MODEL"
+    printf 'export OPENCODE_EXPLORE_MODEL=%s\n' "$DEFAULT_EXPLORE_MODEL"
+    printf 'export OPENCODE_RESPONSE_REVIEWER_MODEL=%s\n' "$DEFAULT_RESPONSE_REVIEWER_MODEL"
+    printf 'export OPENCODE_SPEC_REVIEWER_MODEL=%s\n' "$DEFAULT_SPEC_REVIEWER_MODEL"
+
+    # Empty variants let non-Codex providers keep their own default reasoning effort.
+    printf 'export OPENCODE_ORCHESTRATOR_VARIANT=%s\n' ""
+    printf 'export OPENCODE_LOCATOR_VARIANT=%s\n' ""
+    printf 'export OPENCODE_GENERAL_VARIANT=%s\n' ""
+    printf 'export OPENCODE_ANALYZER_VARIANT=%s\n' ""
+    printf 'export OPENCODE_CONTEXT_VARIANT=%s\n' ""
+    printf 'export OPENCODE_SNIFFER_VARIANT=%s\n' ""
+    printf 'export OPENCODE_FRONTEND_VARIANT=%s\n' ""
+    printf 'export OPENCODE_MOBILE_VARIANT=%s\n' ""
+    printf 'export OPENCODE_BACKEND_VARIANT=%s\n' ""
+    printf 'export OPENCODE_CLOUD_VARIANT=%s\n' ""
+    printf 'export OPENCODE_DB_VARIANT=%s\n' ""
+    printf 'export OPENCODE_DEPLOY_VARIANT=%s\n' ""
+    printf 'export OPENCODE_DEVOPS_VARIANT=%s\n' ""
+    printf 'export OPENCODE_PERF_VARIANT=%s\n' ""
+    printf 'export OPENCODE_TEST_RUNNER_VARIANT=%s\n' ""
+    printf 'export OPENCODE_TEST_AUTOMATOR_VARIANT=%s\n' ""
+    printf 'export OPENCODE_EXECUTOR_VARIANT=%s\n' ""
+    printf 'export OPENCODE_EXPLORE_VARIANT=%s\n' ""
+    printf 'export OPENCODE_RESPONSE_REVIEWER_VARIANT=%s\n' ""
+    printf 'export OPENCODE_SPEC_REVIEWER_VARIANT=%s\n' ""
+    printf 'export OPENCODE_FAST_VARIANT=%s\n' ""
   fi
 }
 

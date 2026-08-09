@@ -11,7 +11,7 @@
 - For broad "where does this live" searches, spawn the `codebase-locator` subagent.
 - For cross-module "how does this work" analysis, spawn the `codebase-analyzer` subagent.
 - For code review or audit work that is more than a small local diff, spawn the `antipattern-sniffer` or `code-reviewer` subagent.
-- For lint, typecheck, prettier, and test runs, use the corresponding custom subagent when available so the main thread receives a concise report.
+- For lint, typecheck, prettier, and test runs, use the `check` subagent (asking for the specific check needed) so the main thread receives a concise report.
 
 ## Execution Defaults
 

@@ -59,10 +59,7 @@ Before launching Claude, make sure GitHub MCP can authenticate in one of these w
 - `codebase-analyzer` — explains how code works (sonnet)
 - `context-synthesis` — maps relationships between components (sonnet)
 - `antipattern-sniffer` — audits code for smells and bad patterns (sonnet)
-- `typecheck` — runs typecheck and returns structured error report (haiku)
-- `test-runner` — runs tests and returns structured result report (haiku)
-- `lint` — runs lint and returns structured issue report (haiku)
-- `prettier` — runs Prettier check mode and returns formatting report (haiku)
+- `check` — runs lint, format, test, or typecheck (as requested) and returns a structured pass/fail report (haiku)
 - `database-optimizer` — analyzes query plans, indexes, and ORM performance (sonnet)
 - `devops-troubleshooter` — investigates incidents and observability gaps (sonnet)
 - `performance-engineer` — profiles bottlenecks and optimization targets (sonnet)
@@ -84,8 +81,8 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
 | `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
-| `/lint` | Run lint in the lint subagent and summarize issues |
-| `/prettier` | Run Prettier check mode in the prettier subagent |
+| `/lint` | Run lint in the check subagent and summarize issues |
+| `/prettier` | Run Prettier check mode in the check subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/pn` | Generate implementation plan from research doc |
 | `/ce/ex` | Execute a plan with gated checks and atomic commits |

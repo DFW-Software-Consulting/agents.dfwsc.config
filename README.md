@@ -93,8 +93,7 @@ ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-locator
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/codebase-analyzer.md ~/.claude/agents/codebase-analyzer.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/context-synthesis.md ~/.claude/agents/context-synthesis.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/antipattern-sniffer.md ~/.claude/agents/antipattern-sniffer.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/typecheck.md ~/.claude/agents/typecheck.md
-ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/test-runner.md ~/.claude/agents/test-runner.md
+ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/check.md ~/.claude/agents/check.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/database-optimizer.md ~/.claude/agents/database-optimizer.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/devops-troubleshooter.md ~/.claude/agents/devops-troubleshooter.md
 ln -sf ~/dfwsc/agents.dfwsc.config/ai-code-agents/claude/agents/performance-engineer.md ~/.claude/agents/performance-engineer.md

@@ -44,9 +44,9 @@ Before claiming any code dead: grep for the symbol, check dynamic imports, strin
 
 Merge results from all subagents. Group by severity (Critical/High/Medium/Low). Critical/High first. Out-of-scope findings go in a "Noted for later" section. Stop and wait for approval before any edits.
 
-### 6. Verification → `typecheck` / `test-runner`
+### 6. Verification → `check`
 
-After approved edits, delegate verification to `typecheck` and `test-runner` subagents.
+After approved edits, delegate verification to the `check` subagent (ask for a typecheck run, then a test run).
 
 ## Anti-Pattern Checklist
 

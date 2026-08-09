@@ -43,20 +43,7 @@
       "model": "{env:OPENCODE_LOCATOR_MODEL}",
       "variant": "{env:OPENCODE_LOCATOR_VARIANT}"
     },
-    "typecheck": {
-      "model": "{env:OPENCODE_FAST_MODEL}",
-      "variant": "{env:OPENCODE_FAST_VARIANT}"
-    },
-    "test-runner": {
-      "model": "{env:OPENCODE_TEST_RUNNER_MODEL}",
-      "variant": "{env:OPENCODE_TEST_RUNNER_VARIANT}"
-    },
-    "lint": {
-      "mode": "subagent",
-      "model": "{env:OPENCODE_FAST_MODEL}",
-      "variant": "{env:OPENCODE_FAST_VARIANT}"
-    },
-    "prettier": {
+    "check": {
       "mode": "subagent",
       "model": "{env:OPENCODE_FAST_MODEL}",
       "variant": "{env:OPENCODE_FAST_VARIANT}"

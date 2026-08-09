@@ -44,10 +44,7 @@ Identify the distinct units of work and which agent owns each:
 | CI/CD, containers, release automation | `deployment-engineer` | Pipeline/deploy files, target environment, rollback constraints | Changes or recommendations / Verification / Risks |
 | Production incident/observability | `devops-troubleshooter` | Symptoms, logs/metrics access, recent changes, safety constraints | Changes/actions or recommendations / Verification / Risks |
 | Tests to add or test strategy | `test-automator` | Behavior under test, existing test patterns, desired coverage | Changes or recommendations / Verification / Risks |
-| Existing test execution only | `test-runner` | Specific suite/command or changed area | TEST RESULT summary |
-| Lint execution only | `lint` | Project root and requested lint scope | LINT RESULT summary |
-| Formatter check only | `prettier` | Project root and requested format scope | PRETTIER RESULT summary |
-| Typecheck execution only | `typecheck` | Project root and requested typecheck scope | TYPECHECK RESULT summary |
+| Lint, format, test, or typecheck execution only | `check` | Which check(s) to run and project root/scope | LINT/PRETTIER/TEST/TYPECHECK RESULT summary |
 | Performance profiling/optimization | `performance-engineer` | Hot path, baseline, profiling/benchmark constraints | Changes or findings / Verification / Risks |
 | Where files/symbols live | `codebase-locator` | Names, patterns, feature/topic to locate | Paths and entry points |
 | How code works | `codebase-analyzer` | Files/components/topic to explain | Behavior, signatures, data flow, line references |

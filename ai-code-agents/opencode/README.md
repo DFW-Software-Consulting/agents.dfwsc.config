@@ -55,10 +55,10 @@ GPT-5.6 family with explicit reasoning variants.
 
 | Tier | Model | Variant | Agents |
 |---|---|---|---|
-| Free fast (Codex-off default) | `opencode/deepseek-v4-flash-free` | — | Main model, lint, prettier, typecheck |
+| Free fast (Codex-off default) | `opencode/deepseek-v4-flash-free` | — | Main model, check |
 | Flagship reasoning | `openai/gpt-5.6-sol` | `high` | orchestrator, context-synthesis, frontend-developer, backend-architect, cloud-architect, database-optimizer, devops-troubleshooter, performance-engineer, executor |
 | Balanced reasoning | `openai/gpt-5.6-terra` | `medium` / `high` | codebase-analyzer, general, antipattern-sniffer, response-reviewer (`medium`); mobile-developer, deployment-engineer, test-automator, spec-reviewer (`high`) |
-| High-volume mechanical | `openai/gpt-5.6-luna-fast` | `none` / `low` | lint, prettier, typecheck (`none`); git-runner, codebase-locator, explore, test-runner (`low`) |
+| High-volume mechanical | `openai/gpt-5.6-luna-fast` | `none` / `low` | check (`none`); git-runner, codebase-locator, explore (`low`) |
 
 The `max` and `xhigh` variants are intentionally unused by default; official guidance
 reserves them for eval-proven hardest workloads. See `tools/codex-only.sh` for the
@@ -78,8 +78,8 @@ See [agents/README.md](agents/README.md) for the full list and when to use each 
 |---|---|
 | `/qa` | Code review — cleanliness, idioms, coupling, cohesion |
 | `/git` | Safe commit, push, PR, and issue workflows through `git-workflow` |
-| `/lint` | Run lint in the lint subagent and summarize issues |
-| `/prettier` | Run Prettier check mode in the prettier subagent |
+| `/lint` | Run lint in the check subagent and summarize issues |
+| `/prettier` | Run Prettier check mode in the check subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
 | `/ce/prompt` | Build or improve an agent prompt artifact |
 | `/ce/rr` | Research the codebase and save findings |

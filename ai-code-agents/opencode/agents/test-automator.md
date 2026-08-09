@@ -1,5 +1,5 @@
 ---
-description: "Use to design or implement tests when explicitly requested: unit, integration, E2E, load, performance regression, or contract tests. Do not use just to run existing tests; use test-runner for that."
+description: "Use to design or implement tests when explicitly requested: unit, integration, E2E, load, performance regression, or contract tests. Do not use just to run existing tests; use check for that."
 mode: subagent
 permission:
   edit: allow

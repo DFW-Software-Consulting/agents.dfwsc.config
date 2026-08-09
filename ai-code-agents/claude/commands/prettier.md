@@ -1,6 +1,6 @@
 ---
-allowed-tools: Task(subagent:prettier)
-description: Run Prettier in check mode via the prettier subagent and return a concise formatting report.
+allowed-tools: Task(subagent:check)
+description: Run Prettier in check mode via the check subagent and return a concise formatting report.
 ---
 
-Launch the `prettier` subagent to run Prettier check mode for the user's request: `$ARGUMENTS`.
+Launch the `check` subagent, asking it to run a format check, for the user's request: `$ARGUMENTS`.

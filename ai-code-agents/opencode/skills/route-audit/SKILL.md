@@ -63,11 +63,11 @@ Before claiming any code dead: grep for the symbol, check dynamic imports, strin
 
 Merge results from all subagents into a single findings report. Group by severity (Critical/High/Medium/Low). Critical/High first. Out-of-scope findings go in a "Noted for later" section. Stop and wait for approval before any edits.
 
-### 6. Verification (after approved changes) → `typecheck` / `test-runner`
+### 6. Verification (after approved changes) → `check`
 
 After edits are approved and applied, delegate verification:
-- `typecheck` subagent for TypeScript compilation
-- `test-runner` subagent for relevant tests
+- `check` subagent, asking for a typecheck run, for TypeScript compilation
+- `check` subagent, asking for a test run, for relevant tests
 
 ## Anti-Pattern Checklist
 
@@ -182,4 +182,4 @@ Severity definitions:
 - No commits or pushes without explicit approval.
 - Do NOT recommend wholesale Server Actions migration — this repo's convention is Route Handlers + service layer. Flag isolated Server Action opportunities only if they materially simplify a flow.
 - Before recommending React Compiler memo removal: confirm the compiler is enabled in `next.config`.
-- After approved edits, delegate verification to `typecheck` and `test-runner` subagents (not main agent — see Step 6).
+- After approved edits, delegate verification to the `check` subagent (not main agent — see Step 6).

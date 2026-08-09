@@ -33,10 +33,7 @@ Identify the distinct units of work and which agent owns each:
 | CI/CD, containers, deployment automation | `deployment-engineer` | Changes or recommendations / Verification / Risks |
 | Production incident/observability | `devops-troubleshooter` | Actions/findings or recommendations / Verification / Risks |
 | Tests to add or test strategy | `test-automator` | Changes or recommendations / Verification / Risks |
-| Existing test execution only | `test-runner` | TEST RESULT summary |
-| Lint execution only | `lint` | LINT RESULT summary |
-| Formatter check only | `prettier` | PRETTIER RESULT summary |
-| Typecheck execution only | `typecheck` | TYPECHECK RESULT summary |
+| Lint, format, test, or typecheck execution only | `check` | LINT/PRETTIER/TEST/TYPECHECK RESULT summary |
 | Performance profiling/optimization | `performance-engineer` | Changes or findings / Verification / Risks |
 | Where files/symbols live | `codebase-locator` | Paths and entry points |
 | How code works | `codebase-analyzer` | Behavior, signatures, data flow, line references |

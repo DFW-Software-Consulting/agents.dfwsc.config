@@ -43,10 +43,7 @@
             "description": "Reviews code for best practices and potential issues"
         },
         "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
-        "typecheck": { "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
-        "test-runner": { "model": "{env:OPENCODE_TEST_RUNNER_MODEL}", "variant": "{env:OPENCODE_TEST_RUNNER_VARIANT}" },
-        "lint": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
-        "prettier": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
+        "check": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
         "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
         "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}", "variant": "{env:OPENCODE_ANALYZER_VARIANT}" },
         "context-synthesis": { "model": "{env:OPENCODE_CONTEXT_MODEL}", "variant": "{env:OPENCODE_CONTEXT_VARIANT}" },

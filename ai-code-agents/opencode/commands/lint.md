@@ -1,11 +1,11 @@
 ---
-agent: lint
-description: Run the project's lint command in the lint subagent and return a concise issue report.
+agent: check
+description: Run the project's lint command in the check subagent and return a concise issue report.
 ---
 
 # Lint
 
-Launch the `lint` subagent for the user's request: `$ARGUMENTS`.
+Launch the `check` subagent, asking it to run a lint check, for the user's request: `$ARGUMENTS`.
 
 Model assignment comes from the active OpenCode config.
 

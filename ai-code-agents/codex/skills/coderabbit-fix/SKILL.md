@@ -80,7 +80,7 @@ Group trivially-related findings in the same file into one subagent to avoid edi
 Never run parallel agents that edit the same file.
 
 ### 5. Validate
-Run the project's test/lint/typecheck (prefer the `test-runner` / `lint` / `typecheck` agents to
+Run the project's test/lint/typecheck (prefer the `check` agent, asking for each relevant check, to
 keep output out of the main context). Confirm green before reporting.
 
 ### 6. Report, then commit on request only

@@ -12,6 +12,12 @@ commands directly. But by default, hand real implementation work to the
   `executor` via the Task tool, not the main model. This keeps routine execution
   isolated and reserves the main session for reasoning, review, and coordination.
   When in doubt on something non-trivial, delegate.
+- **If the Agent tool reports `executor` (or any other custom agent) as not
+  found**, fall back to `general-purpose` for that unit of work instead of
+  failing the delegation — Claude Code appears to cap how many custom agents
+  get surfaced per session, so a defined agent can be silently unavailable in a
+  given session even though its definition is fine. Don't re-diagnose this each
+  time; just fall back and continue.
 - **Do it yourself only when delegating would cost more than it saves:** a single
   trivial edit (a one-line fix, a rename, a config toggle), or work so tightly
   coupled to the live conversation that re-specifying it to a subagent would lose
@@ -24,9 +30,6 @@ commands directly. But by default, hand real implementation work to the
   coordination — reasoning and dispatching to other agents without doing the
   implementation directly. Invoke it explicitly for that mode; it carries the
   full orchestration workflow and agent-routing table.
-
-## Git Commits
-- Do NOT mention coding agents (like Claude, "Claude Code", Anthropic, etc.) in commit messages or PR messages.
 
 ## Token Conservation
 - Do NOT read large files or run verbose commands in the main conversation. Delegate when context will be large, noisy, or cross-cutting.
@@ -55,3 +58,12 @@ commands directly. But by default, hand real implementation work to the
   or the equivalent attribution column before writing to any row I didn't create,
   and surface it to me instead of touching it. Applies to cleanup/consolidation
   passes too, not just new writes. See the `brain-locate` skill for the full rule.
+
+## Response length (default cap)
+- Keep every chat response to at most 600 characters unless I've explicitly
+  approved a longer one for that reply, or explicitly asked for more detail/length
+  (e.g. "go long", "no limit", "give me the full writeup").
+- This caps the conversational text shown to me — not code written to files,
+  file/diff contents, or raw tool output. If 600 characters can't cover what's
+  needed, say so briefly and ask whether to go longer rather than silently
+  exceeding it.

@@ -8,6 +8,19 @@ usage() {
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target="${1:-all}"
 
+dir_contains_only_repo_links() {
+  local dir="$1" entry
+  for entry in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    [ -L "$entry" ] || return 1
+    case "$(readlink "$entry")" in
+      "$repo_root"/*) ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
 link_path() {
   local source="$1"
   local target_path="$2"
@@ -19,6 +32,13 @@ link_path() {
   if [ -e "$target_path" ] || [ -L "$target_path" ]; then
     if [ -L "$target_path" ]; then
       rm "$target_path"
+    elif [ -d "$target_path" ] && dir_contains_only_repo_links "$target_path"; then
+      # Legacy per-file symlink dir from an older setup version. Every entry
+      # points into this repo, so replacing the dir with one symlink loses
+      # nothing — and per-file links go stale when the repo adds or removes
+      # files, which is why the setup switched to dir-level links.
+      printf 'Migrating legacy per-file symlink directory: %s\n' "$target_path"
+      rm -rf "$target_path"
     else
       printf 'Refusing to replace existing non-symlink path: %s\n' "$target_path" >&2
       printf 'Move it aside manually, then rerun setup if you want this repo linked there.\n' >&2

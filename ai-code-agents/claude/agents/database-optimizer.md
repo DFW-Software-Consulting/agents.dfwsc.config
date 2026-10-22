@@ -2,7 +2,7 @@
 name: database-optimizer
 model: sonnet
 effort: high
-description: 'Use for database performance and explicitly requested DB implementation: SQL/ORM queries, execution plans, indexes, N+1 fixes, schema review, and migrations. Do not use for general backend work.'
+description: 'Use for database performance and explicitly requested DB implementation: SQL/ORM queries, execution plans, indexes, N+1 fixes, schema review, and migrations. Do not use for general backend work. Suggested model: sonnet.'
 tools: Read, Glob, Grep, Bash
 ---
 

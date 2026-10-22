@@ -1,6 +1,6 @@
 ---
 name: codebase-locator
-description: Finds WHERE files and components live in the codebase. Use when you need to locate directories, entry points, related modules, or any file by name, pattern, or purpose.
+description: 'Finds WHERE files and components live in the codebase. Use when you need to locate directories, entry points, related modules, or any file by name, pattern, or purpose. Suggested model: haiku.'
 tools: Read, Glob, Grep
 model: haiku
 effort: low

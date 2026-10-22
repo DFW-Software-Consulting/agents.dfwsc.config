@@ -1,6 +1,6 @@
 ---
 name: executor
-description: Catch-all execution agent for carrying out concrete, well-specified work — implementing changes, running commands, multi-step file edits, and code searches. Use when the task is already decided and just needs to be done. Not for open-ended planning or architectural decisions (keep those on the planning/orchestration agents).
+description: 'Catch-all execution agent for carrying out concrete, well-specified work — implementing changes, running commands, multi-step file edits, and code searches. Use when the task is already decided and just needs to be done. Not for open-ended planning or architectural decisions (keep those on the planning/orchestration agents). Suggested model: sonnet.'
 tools: Read, Glob, Grep, Write, Edit, Bash
 model: sonnet
 effort: xhigh

@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Primary coordination-only agent. Use to break down multi-step work, delegate to the right Claude agents, and synthesize results without implementing. Do not use for single-agent execution, direct edits, or git workflow-only requests.
+description: 'Primary coordination-only agent. Use to break down multi-step work, delegate to the right Claude agents, and synthesize results without implementing. Do not use for single-agent execution, direct edits, or git workflow-only requests. Suggested model: opus.'
 tools: Read, Glob, Grep, Task
 model: opus
 effort: high

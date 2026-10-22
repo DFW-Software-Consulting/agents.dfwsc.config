@@ -2,7 +2,7 @@
 name: deployment-engineer
 model: sonnet
 effort: medium
-description: 'Use for deployment implementation/review: CI/CD pipelines, build optimization, container images, release strategies, rollback paths, and deployment automation.'
+description: 'Use for deployment implementation/review: CI/CD pipelines, build optimization, container images, release strategies, rollback paths, and deployment automation. Suggested model: sonnet.'
 tools: Read, Glob, Grep, Write, Edit, Bash
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: context-synthesis
-description: Finds connections and context between components. Use when you need to understand how different parts of the codebase relate, trace cross-cutting concerns, or gather surrounding context for a topic.
+description: 'Finds connections and context between components. Use when you need to understand how different parts of the codebase relate, trace cross-cutting concerns, or gather surrounding context for a topic. Suggested model: sonnet.'
 tools: Read, Glob, Grep
 model: sonnet
 effort: low

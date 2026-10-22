@@ -1,6 +1,6 @@
 ---
 name: check
-description: Leaf runner for project verification commands (lint, format check, tests, typecheck). Invoke with which check to run. Use when you need a concise pass/fail summary without raw tool output. Do not use to apply fixes or investigate beyond the requested check's diagnostics.
+description: 'Leaf runner for project verification commands (lint, format check, tests, typecheck). Invoke with which check to run. Use when you need a concise pass/fail summary without raw tool output. Do not use to apply fixes or investigate beyond the requested check''s diagnostics. Suggested model: haiku.'
 tools: Read, Glob, Bash
 model: haiku
 effort: low

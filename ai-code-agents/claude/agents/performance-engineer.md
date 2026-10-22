@@ -2,7 +2,7 @@
 name: performance-engineer
 model: sonnet
 effort: high
-description: 'Use for performance profiling, diagnosis, and explicitly requested optimization: CPU, memory, I/O, latency, throughput, and hot-path bottlenecks.'
+description: 'Use for performance profiling, diagnosis, and explicitly requested optimization: CPU, memory, I/O, latency, throughput, and hot-path bottlenecks. Suggested model: sonnet.'
 tools: Read, Glob, Grep, Write, Edit, Bash
 ---
 

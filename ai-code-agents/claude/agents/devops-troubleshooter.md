@@ -2,7 +2,7 @@
 name: devops-troubleshooter
 model: sonnet
 effort: high
-description: 'Use for operations troubleshooting and explicitly requested observability changes: incidents, logs, metrics, traces, alerting, SLOs, and production diagnostics.'
+description: 'Use for operations troubleshooting and explicitly requested observability changes: incidents, logs, metrics, traces, alerting, SLOs, and production diagnostics. Suggested model: sonnet.'
 tools: Read, Glob, Grep, Bash
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: 'Use only for explicitly requested git/GitHub workflow: status/diff/log review, commits, pushes, PRs, and issues. Do not use for implementation or general code review.'
+description: 'Use only for explicitly requested git/GitHub workflow: status/diff/log review, commits, pushes, PRs, and issues. Do not use for implementation or general code review. Suggested model: sonnet.'
 tools: Read, Glob, Grep, Bash
 model: sonnet
 effort: low

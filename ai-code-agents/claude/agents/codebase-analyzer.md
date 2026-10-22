@@ -1,6 +1,6 @@
 ---
 name: codebase-analyzer
-description: Analyzes HOW specific code works. Use when you need to understand implementation details, function signatures, class hierarchies, data flow, or how a specific component is built.
+description: 'Analyzes HOW specific code works. Use when you need to understand implementation details, function signatures, class hierarchies, data flow, or how a specific component is built. Suggested model: sonnet.'
 tools: Read, Glob, Grep
 model: sonnet
 effort: high

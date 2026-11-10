@@ -2,11 +2,12 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [claude|claude-personal|opencode|codex|gemini|plannotator|all]\n' "${0##*/}"
+  printf 'Usage: %s [claude|claude-personal|opencode|codex|gemini|hermes|plannotator|all]\n' "${0##*/}"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target="${1:-all}"
+hermes_skipped=0
 
 link_path() {
   local source="$1"
@@ -139,6 +140,43 @@ link_gemini() {
   link_path "$repo_root/ai-code-agents/codex/skills" "$HOME/.agents/skills"
 }
 
+setup_hermes() {
+  local skills_dir="$repo_root/ai-code-agents/hermes/skills"
+  local hermes_home="${HERMES_HOME:-$HOME/.hermes}"
+  local config="$hermes_home/config.yaml"
+  local rel="${skills_dir#"$HOME"/}"
+  local candidates item
+
+  if [ ! -f "$config" ]; then
+    printf 'No Hermes config at %s; install Hermes first, then rerun %s hermes.\n' "$config" "${0##*/}" >&2
+    hermes_skipped=1
+    return 0
+  fi
+
+  # Never edit config.yaml; only report whether the path is already wired in.
+  # Only YAML list items count (not comments, other keys, or prefix paths).
+  candidates="$skills_dir"
+  if [ "$rel" != "$skills_dir" ]; then
+    candidates="$candidates
+~/$rel
+\$HOME/$rel
+\${HOME}/$rel"
+  fi
+
+  item="$(sed -n -E 's/^[[:space:]]*-[[:space:]]+(.*)$/\1/p' "$config" \
+    | sed -E -e 's/[[:space:]]+#.*$//' -e 's/[[:space:]]+$//' \
+        -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'\$/\\1/" -e 's#/+$##' || true)"
+
+  if printf '%s\n' "$item" | grep -Fxq -f <(printf '%s\n' "$candidates"); then
+    printf 'Hermes already lists %s in skills.external_dirs\n' "$skills_dir"
+    return 0
+  fi
+
+  printf 'Add this to %s (merge into an existing skills: block; do not duplicate the key):\n\n' "$config"
+  printf 'skills:\n  external_dirs:\n    - %s\n\n' "$skills_dir"
+  printf 'Then restart the Hermes gateway. This script does not edit config.yaml.\n'
+}
+
 install_plannotator() {
   if command -v plannotator >/dev/null 2>&1; then
     printf 'Plannotator already installed: %s\n' "$(command -v plannotator)"
@@ -164,6 +202,9 @@ case "$target" in
   gemini)
     link_gemini
     ;;
+  hermes)
+    setup_hermes
+    ;;
   plannotator)
     install_plannotator
     ;;
@@ -172,6 +213,9 @@ case "$target" in
     link_claude_personal
     link_opencode
     link_codex
+    if [ -d "${HERMES_HOME:-$HOME/.hermes}" ]; then
+      setup_hermes
+    fi
     install_plannotator
     printf 'Gemini is not included in all; run %s gemini explicitly to link ~/.gemini assets.\n' "${0##*/}"
     ;;
@@ -185,5 +229,9 @@ case "$target" in
     ;;
 esac
 
-printf 'Set up %s from %s\n' "$target" "$repo_root"
-printf 'Restart Claude Code/OpenCode/Codex after changing linked config files.\n'
+if [ "$target" = hermes ] && [ "$hermes_skipped" -eq 1 ]; then
+  printf 'Skipped hermes: no config.yaml found; nothing was set up.\n'
+else
+  printf 'Set up %s from %s\n' "$target" "$repo_root"
+fi
+printf 'Restart Claude Code/OpenCode/Codex (and the Hermes gateway, if used) after changing linked config files.\n'

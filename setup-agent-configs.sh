@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s [claude|claude-personal|opencode|codex|gemini|plannotator|all]\n' "${0##*/}"
+  printf 'Usage: %s [claude|claude-personal|opencode|codex|gemini|hermes|plannotator|all]\n' "${0##*/}"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -139,6 +139,28 @@ link_gemini() {
   link_path "$repo_root/ai-code-agents/codex/skills" "$HOME/.agents/skills"
 }
 
+setup_hermes() {
+  local skills_dir="$repo_root/ai-code-agents/hermes/skills"
+  local hermes_home="${HERMES_HOME:-$HOME/.hermes}"
+  local config="$hermes_home/config.yaml"
+  local tilde_dir="${skills_dir/#$HOME/\~}"
+
+  if [ ! -f "$config" ]; then
+    printf 'No Hermes config at %s; install Hermes first, then rerun %s hermes.\n' "$config" "${0##*/}" >&2
+    return 0
+  fi
+
+  # Never edit config.yaml; only report whether the path is already wired in.
+  if grep -Fq -e "$skills_dir" -e "$tilde_dir" "$config"; then
+    printf 'Hermes already lists %s in skills.external_dirs\n' "$skills_dir"
+    return
+  fi
+
+  printf 'Add this to %s (merge into an existing skills: block; do not duplicate the key):\n\n' "$config"
+  printf 'skills:\n  external_dirs:\n    - %s\n\n' "$skills_dir"
+  printf 'Then restart the Hermes gateway. This script does not edit config.yaml.\n'
+}
+
 install_plannotator() {
   if command -v plannotator >/dev/null 2>&1; then
     printf 'Plannotator already installed: %s\n' "$(command -v plannotator)"
@@ -164,6 +186,9 @@ case "$target" in
   gemini)
     link_gemini
     ;;
+  hermes)
+    setup_hermes
+    ;;
   plannotator)
     install_plannotator
     ;;
@@ -172,6 +197,9 @@ case "$target" in
     link_claude_personal
     link_opencode
     link_codex
+    if [ -d "${HERMES_HOME:-$HOME/.hermes}" ]; then
+      setup_hermes
+    fi
     install_plannotator
     printf 'Gemini is not included in all; run %s gemini explicitly to link ~/.gemini assets.\n' "${0##*/}"
     ;;
@@ -186,4 +214,4 @@ case "$target" in
 esac
 
 printf 'Set up %s from %s\n' "$target" "$repo_root"
-printf 'Restart Claude Code/OpenCode/Codex after changing linked config files.\n'
+printf 'Restart Claude Code/OpenCode/Codex (and the Hermes gateway, if used) after changing linked config files.\n'

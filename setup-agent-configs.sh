@@ -7,6 +7,7 @@ usage() {
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target="${1:-all}"
+hermes_skipped=0
 
 link_path() {
   local source="$1"
@@ -143,17 +144,32 @@ setup_hermes() {
   local skills_dir="$repo_root/ai-code-agents/hermes/skills"
   local hermes_home="${HERMES_HOME:-$HOME/.hermes}"
   local config="$hermes_home/config.yaml"
-  local tilde_dir="${skills_dir/#$HOME/\~}"
+  local rel="${skills_dir#"$HOME"/}"
+  local candidates item
 
   if [ ! -f "$config" ]; then
     printf 'No Hermes config at %s; install Hermes first, then rerun %s hermes.\n' "$config" "${0##*/}" >&2
+    hermes_skipped=1
     return 0
   fi
 
   # Never edit config.yaml; only report whether the path is already wired in.
-  if grep -Fq -e "$skills_dir" -e "$tilde_dir" "$config"; then
+  # Only YAML list items count (not comments, other keys, or prefix paths).
+  candidates="$skills_dir"
+  if [ "$rel" != "$skills_dir" ]; then
+    candidates="$candidates
+~/$rel
+\$HOME/$rel
+\${HOME}/$rel"
+  fi
+
+  item="$(sed -n -E 's/^[[:space:]]*-[[:space:]]+(.*)$/\1/p' "$config" \
+    | sed -E -e 's/[[:space:]]+#.*$//' -e 's/[[:space:]]+$//' \
+        -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'\$/\\1/" -e 's#/+$##' || true)"
+
+  if printf '%s\n' "$item" | grep -Fxq -f <(printf '%s\n' "$candidates"); then
     printf 'Hermes already lists %s in skills.external_dirs\n' "$skills_dir"
-    return
+    return 0
   fi
 
   printf 'Add this to %s (merge into an existing skills: block; do not duplicate the key):\n\n' "$config"
@@ -213,5 +229,9 @@ case "$target" in
     ;;
 esac
 
-printf 'Set up %s from %s\n' "$target" "$repo_root"
+if [ "$target" = hermes ] && [ "$hermes_skipped" -eq 1 ]; then
+  printf 'Skipped hermes: no config.yaml found; nothing was set up.\n'
+else
+  printf 'Set up %s from %s\n' "$target" "$repo_root"
+fi
 printf 'Restart Claude Code/OpenCode/Codex (and the Hermes gateway, if used) after changing linked config files.\n'

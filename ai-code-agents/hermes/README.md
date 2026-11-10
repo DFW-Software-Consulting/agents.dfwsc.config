@@ -18,10 +18,11 @@ Categories follow Hermes's own names (`software-development`, `devops`, `creativ
 | Skill | Path under `skills/` | Origin |
 |-------|----------------------|--------|
 | `wizard` | `software-development/wizard` | claude |
-| `grill-with-docs` | `software-development/grill-with-docs` | claude |
 | `writing-fragments` | `creative/writing-fragments` | claude |
 | `writing-beats` | `creative/writing-beats` | claude |
 | `writing-shape` | `creative/writing-shape` | claude |
+
+Each skill's `agents/openai.yaml` is upstream metadata that Hermes ignores. The `writing-*` skills are marked in-progress upstream.
 
 The `claude` skills originate from the mattpocock-skills repo (MIT, copyright Matt Pocock). The upstream license is included at [`skills/LICENSE-mattpocock-skills`](skills/LICENSE-mattpocock-skills).
 
@@ -57,9 +58,9 @@ How Hermes treats this directory:
 - **claude skills:** canonical source is `../claude/skills/<name>` (in practice a symlink to a local mattpocock-skills checkout). This directory holds real copies, because the symlink targets live outside this repo. After updating the claude copy, resync:
 
   ```bash
-  cp -rL ../claude/skills/wizard skills/software-development/
-  cp -rL ../claude/skills/grill-with-docs skills/software-development/
-  for s in writing-fragments writing-beats writing-shape; do cp -rL ../claude/skills/$s skills/creative/; done
+  cd ai-code-agents/hermes
+  rm -rf skills/software-development/wizard && cp -rL ../claude/skills/wizard skills/software-development/
+  for s in writing-fragments writing-beats writing-shape; do rm -rf "skills/creative/$s" && cp -rL "../claude/skills/$s" skills/creative/; done
   ```
 
 Do not copy Hermes-bundled skills (anything in `~/.hermes/skills/.bundled_manifest`) or hub-installed ones (`.hub/lock.json`) into this directory.
@@ -72,6 +73,7 @@ Claude skills that could move over but need changes first:
 - `worktree-hygiene`: reword for Hermes terminal and kanban worker usage.
 - `git-workflow`: drop Claude hook assumptions and the Claude-specific commit trailer rules.
 - `wayfinder`, `to-spec`, `to-tickets`, `triage`: need mapping onto Hermes kanban cards instead of Claude plan and task tools.
+- `grill-with-docs`: depends on upstream `grilling` and `domain-modeling` (vendor both to enable it), and it writes ADRs/glossary into a repo.
 - `domain-modeling`: check that it does not rely on Claude-only tools or file locations.
 - `agent-prompt-builder`: re-aim at Hermes profiles and SOUL files instead of Claude subagent definitions.
 - `local-ci`: depends on an external skills checkout; vendor it or document the path.

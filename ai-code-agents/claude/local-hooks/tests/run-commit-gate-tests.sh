@@ -603,6 +603,9 @@ check "-m x -h is a help request: allowed" allow "$(bp 'git commit -m x -h' "$HR
 check "git commit -h is a help request: allowed" allow "$(bp 'git commit -h' "$HR")"
 check "git commit --help is a help request: allowed" allow "$(bp 'git commit --help' "$HR")"
 check "-m --dry-run is a message: staged .env denied" deny "$(bp 'git commit -m --dry-run' "$HR")"
+# a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
+check "W=<clean repo>; W=\`pwd\`; cd \"\$W\" && commit: unknown directory, denied" deny "$(bp 'W='"$CLEAN"'; W=`pwd`; cd "$W" && git commit -m "feat: x"' "$elsewhere")"
+reason_has "backtick reassignment: the denial says the directory is unknown" "$(bp 'W='"$CLEAN"'; W=`pwd`; cd "$W" && git commit -m "feat: x"' "$elsewhere")" "unknown-directory"
 # without _cmd_dirs.py the gate falls back to the literal-directory scan
 iso2="$(mktemp -d "$HOME/iso2.XXXXXX")"; cp -r "$hooks" "$iso2/lh"; rm -f "$iso2/lh/_cmd_dirs.py"
 isocheck() {  # NAME EXPECT PAYLOAD: run the copy without _cmd_dirs.py

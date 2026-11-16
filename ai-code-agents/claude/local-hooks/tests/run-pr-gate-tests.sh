@@ -512,6 +512,9 @@ check "-R=owner/repo naming this repo is judged" deny "$(bp "gh pr create -R=own
 check "-R=owner/repo naming another repo skipped" allow "$(bp "gh pr create -R=owner/elsewhere --title x --body 'y $AWS'")"
 check "unknown directory: -R=owner/repo not denied as unknown" allow "$(bp 'cd "$W" && gh pr create -R=owner/elsewhere --title x --body y' "$PUSHED")"
 check "-t=title attached value with a secret denied" deny "$(bp "gh pr create -t=\"y $AWS\" --body y" "$PUSHED")"
+# a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
+check "W=<pushed repo>; W=\`pwd\`; cd \"\$W\" && gh pr create: unknown directory, denied" deny "$(bp 'W='"$PUSHED"'; W=`pwd`; cd "$W" && '"$(prc 'body text')" "$elsewhere")"
+reason_has "backtick reassignment: the denial says the directory is unknown" "$(bp 'W='"$PUSHED"'; W=`pwd`; cd "$W" && '"$(prc 'body text')" "$elsewhere")" "unknown-directory"
 # without _cmd_dirs.py the gate falls back to the literal-directory scan
 iso3="$(mktemp -d "$HOME/iso3.XXXXXX")"; cp -r "$hooks" "$iso3/lh"; rm -f "$iso3/lh/_cmd_dirs.py"
 isocheck() {  # NAME EXPECT PAYLOAD

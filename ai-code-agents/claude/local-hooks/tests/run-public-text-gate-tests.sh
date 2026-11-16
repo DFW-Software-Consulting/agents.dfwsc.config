@@ -311,6 +311,9 @@ check "-R=owner/repo public: denied" deny "$(bp 'cd "$W" && gh pr create -R=owne
 check "-R=owner/repo private: silent" allow "$(bp 'cd "$W" && gh pr create -R=owner-x/private-z --title fakehost-01 --body x' "$PUB")"
 check "-m -h is a message: a hit after it is judged" deny "$(bp 'git commit -m -h -m "move to fakehost-01"' "$PUB")"
 check "git commit -h is a help request: silent" allow "$(bp 'git commit -h -m "move to fakehost-01"' "$PUB")"
+# a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
+check "W=<private>; W=\`pwd\`; cd \"\$W\" && commit with a hit: unknown directory, denied" deny "$(bp 'W='"$PRIV"'; W=`pwd`; cd "$W" && git commit -m "move to fakehost-01"' "$PUB")"
+check "W=<private>; W=\`pwd\`; cd \"\$W\" && gh pr create with a hit: unknown directory, denied" deny "$(bp 'W='"$PRIV"'; W=`pwd`; cd "$W" && gh pr create --title fakehost-01 --body x' "$PUB")"
 # without _cmd_dirs.py the gate falls back to the literal-directory scan
 iso4="$(mktemp -d "$work/iso4.XXXXXX")"; cp -r "$hooks" "$iso4/local-hooks"; cp -r "$hooks/../hooks" "$iso4/hooks"; rm -f "$iso4/local-hooks/_cmd_dirs.py"
 isocheck() {  # NAME EXPECT PAYLOAD

@@ -165,6 +165,108 @@ check "gh pr create body with repo path ai-code-agents/claude/hooks allowed" all
 check "gh pr create body with claude-code path denied (existing matcher)" deny "$mention" "$(pr 'gh pr create --title t --body "see plugins/claude-code/x"')"
 check "commit then gh pr in one command: banned PR body denied" deny "$mention" "$(pr 'git commit -m ok && gh pr create --title t --body "Generated with Claude"')"
 
+# --- delegate-gate: targets held in variables and writes inside command bodies ---
+# A target that cannot be resolved stays ALLOWED (a temporary file through a variable is everyday).
+for c in 'F=/abs/file && echo hi > "$F"' 'F=/abs/file; echo hi > "$F"' 'F=/abs/file; echo hi >> $F' 'OUT=/abs/out; echo hi | tee "$OUT"' \
+  'F=/abs/file; sed -i s/a/b/ "$F"' 'F=/abs/file; cp x "$F"; echo y > "$F"' 'D=/abs/dir; echo hi > "$D/x.txt"' 'F=rel.txt; echo hi > "$F"' \
+  "bash -c 'echo hi > /abs/file'" "sh -c 'echo hi | tee /abs/file'" 'bash -c "echo hi > /abs/file"' "eval 'echo hi > /abs/file'" \
+  "bash -c 'F=/abs/file; echo hi > \"\$F\"'" 'F=/abs/file; eval "echo hi > \$F"' 'F=/abs/file; bash -c "echo hi > \$F"' \
+  "bash -c \"bash -c 'echo hi > /abs/deep'\"" "bash -c \"bash -c \\\"sh -c 'echo hi > /abs/deeper'\\\"\"" 'env -S "sh -c \"echo hi > /abs/f\""'; do
+  check "deny: $c" deny "$gate" "$(bash_payload "$c")"
+done
+for c in "F=$scratch/x && echo hi > \"\$F\"" "OUT=$scratch/o; echo hi | tee \"\$OUT\"" "F=$HOME/.claude/n.md; sed -i s/a/b/ \"\$F\"" \
+  "D=$scratch; echo hi > \"\$D/x.txt\"" "bash -c 'echo hi > $scratch/f'" "bash -c 'F=$scratch/f; echo hi > \"\$F\"'" \
+  "F=$scratch/f; eval \"echo hi > \$F\"" "eval 'echo hi > $HOME/.claude/x'" "F=/dev/null; echo hi > \$F" \
+  'f=$(mktemp); echo hi > "$f"' 'f=$(mktemp); cmd | tee "$f"' 'echo hi > "$OUTFILE"' 'for f in a b; do echo hi > "$f"; done' \
+  'echo hi > "$f" ; f=/abs/after' 'if true; then F=/abs/f; fi; echo hi > "$F"' 'F=/abs/f; unset F; echo hi > "$F"' \
+  'cmd && F=/abs/f; echo hi > "$G"' "bash -c 'echo hi > \"\$OUT\"'" "bash -c 'f=\$(mktemp); echo hi > \"\$f\"'" \
+  "bash -c 'echo \"a > b\"'" "echo 'bash -c \"echo hi > /abs/file\"'" 'echo "F=/abs/file; echo hi > $F"' "bash -c 'ls /abs'" \
+  "bash -c 'echo hi > /abs/file" 'F=/abs/f; echo hi > ${F}'; do
+  check "allow: $c" allow "$gate" "$(bash_payload "$c")"
+done
+for c in 'F=/abs/file && echo hi > "$F"' "bash -c 'echo hi > /abs/file'" 'F=/abs/f; sed -i s/a/b/ "$F"' 'F=/abs/f; eval "echo > \$F"'; do
+  check "subagent allowed: $c" allow "$gate" "$(sub_bash_payload "$c")"
+done
+touch "$off"
+check "fresh off-file disables variable-target check" allow "$gate" "$(bash_payload 'F=/abs/file; echo hi > "$F"')"
+rm -f "$off"
+# without the shared walker only literal targets in the line are judged, as before
+iso="$(mktemp -d)"; cp "$hooks/delegate-gate.sh" "$hooks/_gate-common.sh" "$hooks/_bash-write-check.py" "$iso/"
+check "no walker: variable target allowed as before" allow "bash $iso/delegate-gate.sh" "$(bash_payload 'F=/abs/file; echo hi > "$F"')"
+check "no walker: body write allowed as before" allow "bash $iso/delegate-gate.sh" "$(bash_payload "bash -c 'echo hi > /abs/file'")"
+check "no walker: literal target still denied" deny "bash $iso/delegate-gate.sh" "$(bash_payload 'echo hi > /abs/file')"
+rm -rf "$iso"
+
+# --- no-agent-mention.py: message files from the directory the command runs in, variables, bodies ---
+prc() { jq -n --arg c "$1" --arg d "$2" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}'; }
+proj="$HOME/proj"; mkdir -p "$proj/sub" "$proj/other"
+printf 'fix\n\nGenerated with Claude Code\n' > "$proj/sub/bad.txt"; printf 'fix the parser\n' > "$proj/sub/ok.txt"
+printf 'fine\n' > "$proj/bad.txt"   # same name, clean, in the cwd itself: the cd must win
+printf 'summary\n\nGenerated with Claude Code\n' > "$proj/sub/pbad.md"; printf 'summary only\n' > "$proj/sub/pok.md"
+printf 'fine\n' > "$proj/pbad.md"
+for pair in "commit|git commit -F" "pr|gh pr create --title t --body-file"; do
+  k="${pair%%|*}"; v="${pair#*|}"
+  bad="bad.txt"; ok="ok.txt"; [ "$k" = pr ] && { bad="pbad.md"; ok="pok.md"; }
+  check "$k: literal cd, relative file with attribution denied" deny "$mention" "$(prc "cd sub && $v $bad" "$proj")"
+  check "$k: literal cd, relative clean file allowed" allow "$mention" "$(prc "cd sub && $v $ok" "$proj")"
+  check "$k: cd with a variable path, attribution denied" deny "$mention" "$(prc "D=sub; cd \"\$D\" && $v $bad" "$proj")"
+  check "$k: cd with a variable path, clean allowed" allow "$mention" "$(prc "D=sub; cd \"\$D\" && $v $ok" "$proj")"
+  check "$k: absolute cd, attribution denied" deny "$mention" "$(prc "cd $proj/sub && $v $bad" "/")"
+  check "$k: inside bash -c, attribution denied" deny "$mention" "$(prc "bash -c 'cd sub && $v $bad'" "$proj")"
+  check "$k: inside bash -c, clean allowed" allow "$mention" "$(prc "bash -c 'cd sub && $v $ok'" "$proj")"
+  check "$k: inside eval, attribution denied" deny "$mention" "$(prc "eval 'cd sub && $v $bad'" "$proj")"
+  check "$k: cd to a directory without the file unreadable" "$([ $k = commit ] && echo deny || echo allow)" "$mention" "$(prc "cd other && $v $bad" "$proj")"
+done
+check "commit: git -C, attribution denied" deny "$mention" "$(prc "git -C sub commit -F bad.txt" "$proj")"
+check "commit: git -C, clean allowed" allow "$mention" "$(prc "git -C sub commit -F ok.txt" "$proj")"
+check "commit: git -C inside a body, attribution denied" deny "$mention" "$(prc "sh -c 'git -C sub commit -F bad.txt'" "$proj")"
+check "commit: env -C, attribution denied" deny "$mention" "$(prc "env -C sub git commit -F bad.txt" "$proj")"
+check "commit: no cd, file in the cwd read (cwd given by the payload)" allow "$mention" "$(prc "git commit -F bad.txt" "$proj")"
+check "commit: file named by --file= after cd, denied" deny "$mention" "$(prc "cd sub && git commit --file=bad.txt" "$proj")"
+check "pr: gh body file with -F attached after cd denied" deny "$mention" "$(prc "cd sub && gh pr create --title t -Fpbad.md" "$proj")"
+check "commit: unreadable file denied" deny "$mention" "$(prc "git commit -F /nonexistent/msg.txt" "$proj")"
+check "commit: unreadable relative file after cd denied" deny "$mention" "$(prc "cd sub && git commit -F missing.txt" "$proj")"
+check "pr: unreadable body file allowed (as before)" allow "$mention" "$(prc "cd sub && gh pr create --title t --body-file missing.md" "$proj")"
+check "pr: body file - allowed" allow "$mention" "$(prc "cd sub && gh pr create --title t --body-file -" "$proj")"
+check "message in a variable, attribution denied" deny "$mention" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+check "message in a variable with &&, attribution denied" deny "$mention" "$(pr 'M="Co-Authored-By: Claude <a@b.c>" && git commit -m "$M"')"
+check "message in a variable, clean allowed" allow "$mention" "$(pr 'M="fix the parser"; git commit -m "$M"')"
+check "message in a variable braces, attribution denied" deny "$mention" "$(pr 'M="made with Claude Code"; git commit -m "${M}"')"
+check "pr title in a variable, attribution denied" deny "$mention" "$(pr 'T="Written by Claude"; gh pr create --title "$T" --body ok')"
+check "pr body in a variable, attribution denied" deny "$mention" "$(pr 'B="Generated with Claude Code"; gh pr create --title t --body "$B"')"
+check "pr body in a variable, clean allowed" allow "$mention" "$(pr 'B="all good"; gh pr create --title t --body "$B"')"
+check "message in an outer variable used in a double-quoted body denied" deny "$mention" "$(pr "M='Generated with Claude Code'; bash -c \"git commit -m '\$M'\"")"
+check "inline message in bash -c denied" deny "$mention" "$(pr "bash -c 'git commit -m \"Co-Authored-By: Claude <a@b.c>\"'")"
+check "inline message in bash -c clean allowed" allow "$mention" "$(pr "bash -c 'git commit -m \"fix parser\"'")"
+check "inline message in eval denied" deny "$mention" "$(pr "eval 'git commit -m \"Generated with Claude Code\"'")"
+check "inline message in nested bodies denied" deny "$mention" "$(pr "bash -c \"sh -c 'git commit -m \\\"Generated with Claude Code\\\"'\"")"
+check "pr text inside bash -c denied" deny "$mention" "$(pr "sh -c 'gh pr create --title t --body \"Generated with Claude Code\"'")"
+check "variable inside a body set in the body, denied" deny "$mention" "$(pr "bash -c 'M=\"Generated with Claude Code\"; git commit -m \"\$M\"'")"
+check "unresolvable message (command substitution) allowed as before" allow "$mention" "$(pr 'git commit -m "$(cat msg.txt)"')"
+check "unresolvable message (environment variable) allowed as before" allow "$mention" "$(pr 'git commit -m "$MSG"')"
+check "variable not certain (set in a branch) allowed as before" allow "$mention" "$(pr 'if x; then M="Generated with Claude Code"; fi; git commit -m "$M"')"
+check "loop variable message allowed as before" allow "$mention" "$(pr 'for M in "Generated with Claude Code"; do git commit -m "$M"; done')"
+check "text as data (echo) silent" allow "$mention" "$(pr 'echo "M=Generated with Claude Code; git commit -m \$M"')"
+check "message var unrelated to the commit allowed" allow "$mention" "$(pr 'M="Generated with Claude Code"; echo $M; git commit -m fix')"
+check "malformed payload allowed" allow "$mention" 'not json'
+# isolated copies: without the shared walker the hook behaves as it did
+iso="$(mktemp -d)"; mkdir "$iso/hooks"; cp "$(dirname "$pyhook")/no-agent-mention.py" "$iso/hooks/"
+check "no walker: variable message allowed as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+check "no walker: body message allowed as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(pr "bash -c 'git commit -m \"Generated with Claude Code\"'")"
+check "no walker: literal message still denied" deny "python3 $iso/hooks/no-agent-mention.py" "$(pr 'git commit -m "Generated with Claude Code"')"
+check "no walker: relative file read from the working directory as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(prc "cd sub && gh pr create --title t --body-file pbad.md" "$proj")"
+mkdir "$iso/local-hooks"; echo 'raise RuntimeError("broken")' > "$iso/local-hooks/_cmd_dirs.py"
+check "broken walker: variable message allowed as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+# the repository layout, a copy of both directories side by side, and an installed layout of links
+lh="$(cd "$hooks" && pwd)"; hk="$(dirname "$pyhook")"
+iso2="$(mktemp -d)"; mkdir "$iso2/hooks" "$iso2/local-hooks"; cp "$hk"/no-agent-mention.py "$iso2/hooks/"; cp "$lh"/*.py "$iso2/local-hooks/"
+check "copied side by side: variable message denied" deny "python3 $iso2/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+iso3="$(mktemp -d)"; ln -s "$hk" "$iso3/hooks"; ln -s "$lh" "$iso3/local-hooks"
+check "linked layout: variable message denied" deny "python3 $iso3/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+iso4="$(mktemp -d)"; mkdir "$iso4/cfg"; ln -s "$lh" "$iso4/cfg/local-hooks"; mkdir "$iso4/cfg/hooks"; ln -s "$hk/no-agent-mention.py" "$iso4/cfg/hooks/no-agent-mention.py"
+check "linked file beside linked local-hooks: variable message denied" deny "python3 $iso4/cfg/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+rm -rf "$iso" "$iso2" "$iso3" "$iso4"
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

@@ -93,3 +93,9 @@ Newest first. Check here before proposing a fix.
 - Cause: only `local-hooks/` was exported to test a merged main; `run-tests.sh` calls `../hooks/no-agent-mention.py`.
 - Fix: export or check out both `local-hooks/` and `hooks/`.
 - Date: 2026-11-15
+
+## Relative message file read from the wrong directory (no-agent-mention.py), variable or body target not judged (delegate-gate.sh)
+- Signature: `cd sub && gh pr create --body-file msg.txt` allowed without the right file read, `cd sub && git commit -F msg.txt` denied with "Cannot verify the commit-message file" although the file exists there; `F=/abs/f; echo hi > "$F"` and `bash -c 'echo hi > /abs/f'` not denied by the delegate gate; `M="..."; git commit -m "$M"` not judged.
+- Cause: the hook opened a relative path from its own working directory and scanned only the literal words of the line; the write finder saw a variable as an unknown target and never looked inside command bodies.
+- Fix: both use the shared walker (`_cmd_dirs.py`: `certain_env`, `subst`, `trace`). Unresolvable targets and messages stay allowed on purpose. If the module cannot be imported both fall back to the old behaviour.
+- Date: 2026-11-16

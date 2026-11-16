@@ -10,6 +10,15 @@
 # Deliberately out of scope: cp, mv, rm, git, package managers, and
 # interpreters writing files. This closes an obvious bypass; it is not a
 # sandbox. Parsing lives in _bash-write-check.py and fails open.
+#
+# A target held in a variable is judged like the literal path when the variable
+# is set by a plain literal assignment certain to have run on the same line
+# (the shared walker's rule, _cmd_dirs.py), and the same goes for writes inside
+# `bash -c`, `sh -c`, `eval` and `env -S` bodies (three deep). A target that
+# still cannot be resolved (`f=$(mktemp); cmd > "$f"`, an environment variable,
+# a loop variable) stays ALLOWED. This is deliberate: writing to a temporary
+# file through a variable is an everyday pattern, and this gate does not deny
+# on an unknown target. Without _cmd_dirs.py only literal targets are judged.
 set -uo pipefail
 payload="$(cat)"
 

@@ -34,6 +34,9 @@ levels deep, at the position of the wrapper, in the directory in effect there,
             then its prefix assignments; a wrapper's are inherited by its body)
   config    [(key, value)] from `git -c key=value`
   depth     0 on the line itself, 1 to 3 inside wrapper bodies
+trace(cmd, cwd) is the same walk for callers that also need each command's
+certain variables and the text of every followed body (additive; walk() is
+unchanged).
 Raises Budget when the line has more than MAX_CMDS commands to follow or the
 analysis takes longer than BUDGET_SECS: the caller then applies only rules that
 need no directory (see cheap_commands). legacy=True is not bounded.
@@ -583,6 +586,8 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
         e_env = list(dict(list(inherit) + _session(toks, i) + prefix_env(toks, idx)).items())
         if name == "gh":
             out.append(_entry("gh", d, w, tmp, args=args, env=e_env, depth=_depth))
+            if "trace" in state:
+                state["trace"].append((out[-1], dict(env)))
         elif name == "git":
             r = git_target(args, d, w, tmp, env, temps, tmp_ok)
             if legacy:
@@ -593,6 +598,8 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             out.append(_entry("git", r["dir"], r["why"], r["temp"], sub=r["sub"], args=r["rest"],
                               pre=r["pre"], redirect=r["redirect"], gitdir=r["gitdir"],
                               worktree=r["worktree"], env=e_env, config=r["config"], depth=_depth))
+            if "trace" in state:
+                state["trace"].append((out[-1], dict(env)))
         elif _depth < MAX_DEPTH:
             body = shell_body(name, args)
             if body:
@@ -601,6 +608,23 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
                 out.extend(_body(body, cmd, d, w, tmp, env, temps, name == "eval", inh, _depth + 1, legacy,
                                  tainted, state))
     return out
+
+
+def trace(cmd, cwd, home=None):
+    """(entries, bodies) for a caller that needs more than walk() reports; walk()
+    itself returns exactly what it did before. entries: [(entry, env)] for every
+    git/gh command (wrapper bodies included), in walk() order, where env is the
+    {NAME: literal} certain to hold when that command expands its words (see
+    certain_env; inside a body, the body's own, plus an eval's outer ones).
+    bodies: [(text, dir)] for every followed `bash -c`/`sh -c`/`eval`/`env -S`
+    body (3 deep; eval's text carries its outer assignments as a prefix; dir is
+    the path in effect or None). Both are [] when the line is over budget."""
+    state = {"start": time.monotonic(), "count": 0, "trace": [], "bodies": []}
+    try:
+        walk(cmd, cwd, home, False, _state=state)
+    except Budget:
+        return [], []
+    return state["trace"], state["bodies"]
 
 
 def _session(toks, i):
@@ -617,9 +641,15 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
     such a body is walked unescaped (both ways when the quoting cannot be told).
     When no candidate parses, one "body" entry reports the text."""
     pre = ""
-    if is_eval:
+    if is_eval or "bodies" in state:  # trace() also hands a bash -c body the outer
+        # assignments: in double quotes the outer shell expands them, and an exported one is inherited
         pre = "".join(f"{k}={v}; " for k, v in env.items() if scan.literal(v) and re.fullmatch(r"\w+", k)
                       and re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
+    if "bodies" in state:  # trace() only: a value with spaces or quotes goes in single quotes
+        pre += "".join(f"{k}='{v}'; " for k, v in env.items() if scan.literal(v) and re.fullmatch(r"\w+", k)
+                       and "'" not in v and "\\" not in v and "\n" not in v
+                       and not re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
+    if is_eval:
         pre += "".join(f"{k}=$(mktemp -d); " for k in temps if re.fullmatch(r"\w+", k))
     if legacy:
         return walk(pre + body, cwd, None, legacy, depth, why, temp, inherit, taint, state)
@@ -638,6 +668,8 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
         if len(r) == 1 and r[0]["kind"] == "body" and r[0]["text"] == pre + c:
             failed += 1
             continue
+        if "bodies" in state:
+            state["bodies"].append((pre + c, cwd))
         if n == 0 and len(cands) > 1:
             # A path with a quote or backslash in it is the text read wrongly
             # (the quotes belonged to the outer word): the unescaped text has the real one.

@@ -7,6 +7,18 @@ editors (sed -i, perl -i, awk -i inplace). Quoted text is never a redirect.
 Out of scope on purpose: cp, mv, rm, git, package managers, interpreters
 writing files. This closes an obvious bypass; it is not a sandbox.
 
+A target written as a variable (`> "$F"`, `tee "$OUT"`, `sed -i s/a/b/ "$F"`)
+is judged like the literal path when the variable is set by a plain literal
+assignment certain to have run on the same line (_cmd_dirs.certain_env and
+subst: one resolver, not a second one here). Command bodies (`bash -c`,
+`sh -c`, `eval`, `env -S`; three deep, found by _cmd_dirs.trace) are scanned
+the same way, each with its own assignments. A target that still cannot be
+resolved (`f=$(mktemp); cmd > "$f"`, an environment variable, a loop
+variable, an unquoted `${F}`) stays ALLOWED. This is deliberate: writing to a
+temporary file through a variable is an everyday pattern, and this gate does
+not deny on an unknown target. If _cmd_dirs.py cannot be imported, only
+literal targets in the line itself are judged, as before.
+
 Env: CMD (the command), GATE_HOME, GATE_SCRATCH. Allowlist mirrors the
 Edit/Write case statement in delegate-gate.sh.
 """
@@ -232,6 +244,26 @@ def allowlisted(p):
     return bool(SCRATCH) and p.startswith(SCRATCH + "/")
 
 
+_CD = []
+
+
+def _cmd_dirs():
+    """The shared walker module, or None when it cannot be imported (then only
+    literal targets are judged, as before)."""
+    if not _CD:
+        try:
+            sys.dont_write_bytecode = True
+            here = os.path.dirname(os.path.abspath(__file__))
+            if here not in sys.path:
+                sys.path.insert(0, here)
+            import _cmd_dirs as mod
+            mod.scan.HOME = HOME
+            _CD.append(mod)
+        except Exception:
+            _CD.append(None)
+    return _CD[0]
+
+
 def blocked_target(p):
     """Return p if writing it should be denied, else None."""
     p = resolve(p)
@@ -315,17 +347,37 @@ def inplace_targets(name, args):
 
 def find_write(cmd):
     toks = tokenize(strip_heredocs(cmd))
+    cache = {}
+
+    def blocked(p, i):
+        """blocked_target(p), with a variable written as the target replaced by
+        a value certain to have run before token i (else it stays unjudged)."""
+        q = resolve(p)
+        if unresolvable(q) and "$" in q and "((" not in cmd and len(toks) <= 3000:
+            mod = _cmd_dirs()
+            if mod is None:
+                return None
+            try:
+                if i not in cache:
+                    cache[i] = mod.certain_env(toks, i)
+                q = mod.subst(q, cache[i])
+            except Exception:
+                return None
+            if unresolvable(q):
+                return None
+        return blocked_target(q)
+
     i = 0
     while i < len(toks):
         kind, t = toks[i]
         nxt = toks[i + 1] if i + 1 < len(toks) and toks[i + 1][0] == "w" else None
         if kind == "o":
             if t in REDIR and nxt:
-                hit = blocked_target(nxt[1])
+                hit = blocked(nxt[1], i)
                 if hit:
                     return hit
             elif t == ">&" and nxt and not re.fullmatch(r"\d+-?|-", nxt[1]):
-                hit = blocked_target(nxt[1])  # `>&file` writes; `>&2`, `>&-` are fds
+                hit = blocked(nxt[1], i)  # `>&file` writes; `>&2`, `>&-` are fds
                 if hit:
                     return hit
             i += 1
@@ -341,7 +393,7 @@ def find_write(cmd):
                 for a in args:
                     if a.startswith("-"):
                         continue
-                    hit = blocked_target(a)
+                    hit = blocked(a, i)
                     if hit:
                         return hit
             elif name in ("sed", "perl", "awk", "gawk"):
@@ -350,18 +402,45 @@ def find_write(cmd):
                     if not targets:
                         return "(in-place edit)"
                     for tg in targets:
-                        hit = blocked_target(tg)
+                        hit = blocked(tg, i)
                         if hit:
                             return hit
         i += 1
     return None
 
 
-def main():
+BODYISH = re.compile(r"\b(?:bash|sh|zsh|dash|ksh|eval|env)\b")
+
+
+def find_write_in_bodies(cmd):
+    """First blocked target inside a followed command body, else None."""
+    if not BODYISH.search(cmd):
+        return None
+    mod = _cmd_dirs()
+    if mod is None:
+        return None
     try:
-        hit = find_write(os.environ.get("CMD", ""))
+        _, bodies = mod.trace(cmd, None, HOME)
+    except Exception:
+        return None
+    for text, _dir in bodies:
+        try:
+            hit = find_write(text)
+        except Exception:
+            continue  # a body that cannot be scanned is allowed
+        if hit:
+            return hit
+    return None
+
+
+def main():
+    cmd = os.environ.get("CMD", "")
+    try:
+        hit = find_write(cmd)
     except Exception:
         return  # cannot parse: allow
+    if not hit:
+        hit = find_write_in_bodies(cmd)
     if hit:
         print(hit)
 

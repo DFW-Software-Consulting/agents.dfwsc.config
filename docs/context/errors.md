@@ -2,6 +2,13 @@
 
 Newest first. Check here before proposing a fix.
 
+## A gate stayed silent when the directory came from a variable or a wrapper (worktree-gate.sh, git-guard.sh, `_cmd_dirs.py`)
+- Signature: `W=<path> && cd "$W" && git commit ...`, `cd "$ENV_VAR"`, `git -C "$W"`, `(cd "$W" && ...)`, `pushd "$W"`, `env -C <dir> git ...`, `bash -c '...'` or `cd -` in front of a checkout-changing git command produced no worktree-gate denial; `GIT_DIR=x git push --force`, `git --git-dir=x push --force`, `bash -c 'git push --force'`, `sh -c`, `eval` or `env -C x git commit --no-verify` produced no git-guard denial; a push to `main` through `git -C "$W"` was not judged.
+- Cause: the scanner followed `cd` and `-C` only for literal paths and treated "directory unknown" as "nothing to judge"; git commands with `--git-dir`, `GIT_DIR=` or inside a wrapper body were skipped entirely, even for rules that need no directory.
+- Review round, same signature: a `mktemp -d` with `-p`/`--tmpdir`/a template, a TMPDIR set on the line, escaped quotes in a `bash -c "..."` body (`\"`), `mkdir t && cd t` (a directory not there yet), `GIT_DIR=<primary>/.git`, `env -C <dir> bash -c ...` still landed a change in a primary checkout. Fix: a directory counts as temporary only for a bare `mktemp -d` with TMPDIR untouched and a safe temp root; bodies are unescaped by their quoting (an unparseable body holding a guarded command is unknown); the nearest existing ancestor is judged; an explicit git directory is judged by its work tree; `env -C` carries into bodies.
+- Fix: the shared walker `_cmd_dirs.py` (variables resolved only when certain, wrapper bodies followed three levels, explicit git directories reported). worktree-gate denies an unknown directory for checkout-changing commands (`mktemp -d` directories allowed); git-guard applies its text-only rules everywhere and, with an unknown directory, denies a push naming `main`/`master` or no destination. Write the directory literally (`git -C /absolute/path ...`).
+- Date: 2026-11-15
+
 ## commit-gate misses a secret in a staged file when named by directory or glob, or when a big file is staged (`_commit-gate-check.py`)
 - Signature: `git commit -m x d/` or `"d/*.js"` passes with an access key in a newly staged `d/s.js`; a small file with a secret passes when a 3 MB file is staged alongside; a path-limited first commit in an empty repository scans nothing.
 - Cause: the directory and glob listing asked only for modified or untracked files; the whole content scan was skipped over 2 MB; the comparison against HEAD fails with no commits.

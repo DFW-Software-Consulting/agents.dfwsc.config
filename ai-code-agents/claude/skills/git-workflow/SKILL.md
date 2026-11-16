@@ -7,7 +7,7 @@ description: Git commit/push/PR/issue lifecycle with pre-commit/pre-push hook en
 
 Safe commit, push, PR, and issue creation with full pre-hook enforcement. This skill wraps the git lifecycle — it runs every available check before touching the remote and never bypasses failures.
 
-Complementary to `deep-review-workflow` (which handles autonomous code fixing). This skill handles the safe lifecycle: commit → push → PR/issue creation.
+This skill handles the safe lifecycle: commit → push → PR/issue creation.
 
 ## Core Rules (Non-Negotiable)
 

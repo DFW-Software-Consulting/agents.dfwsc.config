@@ -84,8 +84,6 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 | `/lint` | Run lint in the check subagent and summarize issues |
 | `/prettier` | Run Prettier check mode in the check subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
-| `/ce/pn` | Generate implementation plan from research doc |
-| `/ce/ex` | Execute a plan with gated checks and atomic commits |
 | `/ce/slop` | Remove AI-generated bloat from diff against main |
 | `/ce/cm` | Context compact — summarize state before token limit |
 | `/ce/kb-log` | Create a knowledge base entry in `.claude/` |
@@ -97,5 +95,4 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 | `git-workflow` | Safe commit/push/PR lifecycle with pre-hook enforcement |
 | `worktree-hygiene` | Git worktree management scripts |
 | `codebase-research` | Structure map, symbol index, AST scan scripts |
-| `deep-review-workflow` | Autonomous code review + fix workflow |
 | `biome-autofix` | Run Biome linter and auto-fix issues |

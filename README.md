@@ -18,7 +18,7 @@ Use this project to keep AI agent setup and engineering process docs in one plac
 - **[SOP](engineering-principles/SOP.md)** — AI-assisted development workflow (4-gate process)
 - **[Work Issue Template](engineering-principles/git/work-issue.md)** — Gate 1 and 2 templates
 - **[Work PR Template](engineering-principles/git/work-pr.md)** — Gate 4 verification template
-- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, Claude Code, Codex, and Gemini setup guides
+- **[AI Agent Configs](ai-code-agents/)** — Cline, OpenCode, Claude Code, Codex, Gemini, and Hermes setup guides
 
 ## Getting Started
 
@@ -47,6 +47,7 @@ cd ~/dfwsc/agents.dfwsc.config
 ./setup-agent-configs.sh opencode
 ./setup-agent-configs.sh codex
 ./setup-agent-configs.sh gemini
+./setup-agent-configs.sh hermes
 ./setup-agent-configs.sh plannotator
 ```
 
@@ -130,6 +131,14 @@ ln -sfn ~/dfwsc/agents.dfwsc.config/ai-code-agents/codex/skills ~/.agents/skills
 ```
 
 Gemini is not included in `./setup-agent-configs.sh all`; run the explicit `gemini` target when you want these links.
+
+### Hermes
+
+```bash
+./setup-agent-configs.sh hermes
+```
+
+Hermes reads this repo's skills in place. The script does not edit `~/.hermes/config.yaml`; it checks whether `skills.external_dirs` already has the path and prints the snippet to add if not. See [`ai-code-agents/hermes/README.md`](ai-code-agents/hermes/README.md).
 
 ### Reload shell
 

@@ -1,0 +1,8 @@
+# Copy to ~/.claude/clock-reminders.conf (or point CLAUDE_CLOCK_REMINDERS_CONF at it).
+# Format: name|days|start-end|cwd_glob|message
+#   days: ISO weekdays, 1 = Monday; a range (1-5) or list (1,3,5)
+#   start-end: local 24-hour HH:MM-HH:MM, start inclusive, end exclusive
+#   cwd_glob: shell glob against the session cwd; * matches any
+# Each reminder shows once per calendar day.
+morning-plan|1-5|08:00-10:00|*|Write down today's priorities before starting.
+weekly-review|5|15:00-17:00|*/projects/*|Take a few minutes to review this week's open items.

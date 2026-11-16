@@ -1,0 +1,22 @@
+# Local config for shared-db-write-gate.sh. Copy to ~/.claude/shared-db-gate.conf
+# (or point CLAUDE_SHARED_DB_GATE_CONF at it) and fill in your own values.
+# Plain KEY=value lines, read as data (never sourced as shell). Keep the real
+# file out of version control. Without a SCHEMA the gate does nothing.
+
+# Space-separated project references that identify the shared database.
+PROJECT_REFS=your-project-ref
+
+# The shared schema name.
+SCHEMA=your_schema
+
+# Your own person id (may be empty: then every UPDATE/DELETE asks).
+ME_PERSON_ID=
+
+# Columns that record who owns a row (space-separated).
+ATTRIBUTION_COLUMNS=owner_person_id created_by_person_id decided_by
+
+# Table whose lookup counts as "project located" before an INSERT.
+LOCATE_TABLE=projects
+
+# Space-separated table.column pairs that must never be inserted.
+GENERATED_COLUMNS=tasks.is_ready

@@ -1,15 +1,11 @@
 ---
-allowed-tools: View, Edit
+allowed-tools: Agent, Write
 description: Prepare context for compaction when approaching token limits
 ---
 
 # Context Compact
 
 Prepare context for compaction: $ARGUMENTS
-
-<ultrathink>
-Context window approaching limit. Need to preserve essential information for task continuation.
-</ultrathink>
 
 <megaexpertise type="context-preservation-specialist">
 The assistant should distill current work state to essential elements and capture critical context for seamless continuation after compaction.
@@ -46,7 +42,7 @@ Need to compact context while preserving task continuity
    - Any blockers or dependencies
    
 4. References:
-   - Linear issue ID (if applicable)
+   - Issue or task reference (GitHub issue, Brain task, ticket), if applicable
    - Git branch name
    - Key documentation or examples used
    - Important test files or commands
@@ -77,12 +73,18 @@ Format output as:
 ### Key Context:
 - Files: [path1], [path2]
 - Branch: [branch-name]
-- Issue: [LINEAR-123]
+- Issue: [reference, if any]
 - Commands: [test command], [build command]
 
 ### Notes:
 [Any critical information for continuation]
 ```
+
+After printing the summary, save it:
+- Target: `~/memory-bank/handoff/YYYY-MM-DD_HH-MM-SS_<subject>.md`, using the current local date and time and a short lowercase hyphenated subject, at most six words, taken from $ARGUMENTS when given, otherwise from the main objective in the summary. Create the folder if it is missing.
+- Content: first line `# Handoff: <subject>`, then a line with the date, time, working directory and `branch: <name>` (only inside a git repository), then the same summary that was printed.
+- Writing: by default hand the write to the `executor` subagent with an explicit `model` of haiku, giving it the exact path and exact text and a brief with a "Done when" section (the file exists at the path and its content matches). If `executor` is not available, use `general-purpose`. Write the file directly only when direct mode is on (the main session's writes are currently permitted).
+- Then print one line with the saved path. If saving fails, say so in one line; the printed summary is still the result.
 
 This ensures smooth continuation after context reset. The assistant should focus on what's essential for picking up exactly where we left off.
 

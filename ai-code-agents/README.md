@@ -12,6 +12,7 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | Claude config files | [`claude/`](claude/) |
 | Codex config files | [`codex/`](codex/) |
 | Gemini config files | [`gemini/`](gemini/) |
+| Hermes skills | [`hermes/README.md`](hermes/README.md) |
 | Skills reference | [`skills/README.md`](skills/README.md) |
 
 ## Supported Agents
@@ -23,6 +24,7 @@ This directory contains DFWSC configuration and setup material for the AI coding
 | **Claude Code** | Terminal AI agent | `claude/` |
 | **Codex** | Terminal, IDE, and app coding agent | `codex/` |
 | **Gemini CLI** | Terminal AI agent (Google) | `gemini/` |
+| **Hermes** | Self-hosted agent gateway (skills only) | `hermes/` |
 
 ## Quick Setup
 
@@ -37,10 +39,11 @@ Clone this repo, then run the setup script from the repo root to symlink local t
 ./setup-agent-configs.sh opencode
 ./setup-agent-configs.sh codex
 ./setup-agent-configs.sh gemini
+./setup-agent-configs.sh hermes
 ./setup-agent-configs.sh plannotator
 ```
 
-The script does not install Claude Code, OpenCode, Codex, or Gemini themselves. Install the tools you use first, then run the setup script. The `all` target intentionally does not link Gemini; run `gemini` explicitly so existing real `~/.gemini/agents` or `~/.gemini/commands` directories are not silently replaced.
+The script does not install Claude Code, OpenCode, Codex, or Gemini themselves. Install the tools you use first, then run the setup script. The `all` target intentionally does not link Gemini; run `gemini` explicitly so existing real `~/.gemini/agents` or `~/.gemini/commands` directories are not silently replaced. The `hermes` target never edits `~/.hermes/config.yaml`; it prints the `skills.external_dirs` entry to add (see [`hermes/README.md`](hermes/README.md)).
 
 ### 1. OpenCode Installation
 
@@ -93,6 +96,7 @@ Step-by-step instructions...
 | Claude Code | `.claude/skills/<name>/SKILL.md` |
 | OpenCode | `.opencode/skills/<name>/SKILL.md` |
 | Gemini CLI | shared `~/.agents/skills/<name>/SKILL.md` (this repo does not duplicate skills into `~/.gemini`) |
+| Hermes | `skills.external_dirs` entry pointing at `hermes/skills/` (category folders, read in place) |
 | Codex CLI | `.agents/skills/<name>/SKILL.md` |
 
 ## Workflow Standards
@@ -143,6 +147,7 @@ ai-code-agents/
 ├── [cline/](cline/)          # Cline VS Code extension setup
 ├── [codex/](codex/)          # Codex config, agents, prompts, and skills
 ├── [gemini/](gemini/)        # Gemini CLI config and assets
+├── [hermes/](hermes/)        # Hermes skills and setup notes
 ├── [opencode/](opencode/)    # OpenCode configuration files
 └── [skills/](skills/)        # Skill authoring and portability reference
 ```

@@ -84,18 +84,19 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 | `/lint` | Run lint in the check subagent and summarize issues |
 | `/prettier` | Run Prettier check mode in the check subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
-| `/ce/pn` | Generate implementation plan from research doc |
-| `/ce/ex` | Execute a plan with gated checks and atomic commits |
-| `/ce/slop` | Remove AI-generated bloat from diff against main |
-| `/ce/cm` | Context compact — summarize state before token limit |
+| `/ce/cm` | Context compact — summarize state before token limit; handoff also saved under `memory-bank/handoff/` |
 | `/ce/kb-log` | Create a knowledge base entry in `.claude/` |
 
 ## Skills
 
 | Skill | What it does |
 |---|---|
-| `git-workflow` | Safe commit/push/PR lifecycle with pre-hook enforcement |
+| `git-workflow` | Stub that points at the five git skills below; the `git-workflow` agent sequences them |
+| `git-commit` | Group changes, propose messages for approval, commit what was approved |
+| `git-verify` | Run the project's checks for the current commit and record a stamp |
+| `git-push` | Publish the current branch with upstream tracking |
+| `git-pr` | Open a pull request from a pushed branch using the PR template |
+| `git-issue` | Create an issue from the issue template |
 | `worktree-hygiene` | Git worktree management scripts |
 | `codebase-research` | Structure map, symbol index, AST scan scripts |
-| `deep-review-workflow` | Autonomous code review + fix workflow |
 | `biome-autofix` | Run Biome linter and auto-fix issues |

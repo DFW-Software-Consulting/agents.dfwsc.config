@@ -75,7 +75,9 @@ if [ -z "$out" ]; then pass=$((pass+1)); echo "ok   - gate off is silent"; else 
 check "other project ref ignored" allow "$(P "drop table $S.tasks" sess1 someotherref)"
 check "non-SQL tool ignored" allow "$(P "drop table $S.tasks" sess1 $REF mcp__x__list_tables)"
 check "schema-less SQL, no project_id: ignored" allow "$(P "delete from tasks" sess1 '')"
-check "schema-less SQL, project matches: ignored" allow "$(P "delete from tasks")"
+check "schema-less write, project matches: denied (qualify the table)" deny "$(P "delete from tasks where id=1 returning id")"
+check "schema-less read, project matches: allowed" allow "$(P "select * from tasks")"
+check "write to another schema, project matches: ignored" allow "$(P "delete from otherschema.tasks where id=1 returning id")"
 check "no project_id but schema-qualified: gated" deny "$(P "drop table $S.tasks" sess1 '')"
 check "no project_id, search_path names schema, unqualified update asks" ask "$(P "set search_path to $S, public; update tasks set a=1 where id=1 returning id" sess1 '')"
 check "missing query field" allow '{"tool_name":"mcp__x__execute_sql","tool_input":{"project_id":"testref000"}}'
@@ -182,6 +184,39 @@ check "EXPLAIN ANALYZE of write detected" deny "$(P "explain analyze delete from
 check "unterminated string mentioning schema asks" ask "$(P "select 'oops from $S.tasks")"
 check "unterminated string not mentioning schema ignored" allow "$(P "select 'oops from t")"
 check "unterminated string, other project ignored" allow "$(P "select 'oops $S.t" sess1 other)"
+
+# --- review fixes ---
+fresh; locate
+check "UPDATE FROM: predicate on target alias allowed" allow "$(P "update $S.tasks t set status='x' from $S.people p where t.owner_person_id='$ME' and p.id=t.id returning t.id")"
+check "UPDATE FROM: predicate on joined alias asks" ask "$(P "update $S.tasks t set status='x' from $S.people p where p.owner_person_id='$ME' and p.id=t.id returning t.id")"
+check "UPDATE FROM self-join other alias asks" ask "$(P "update $S.tasks t set a=1 from $S.tasks u where u.owner_person_id='$ME' returning id")"
+check "UPDATE FROM: unqualified column asks" ask "$(P "update $S.tasks t set a=1 from $S.people p where owner_person_id='$ME' and p.id=t.id returning t.id")"
+check "UPDATE FROM no alias: target-name qualified allowed" allow "$(P "update $S.tasks set a=1 from $S.people p where tasks.owner_person_id='$ME' and p.id=tasks.id returning tasks.id")"
+check "DELETE USING: joined alias asks" ask "$(P "delete from $S.tasks t using $S.people p where p.owner_person_id='$ME' and p.id=t.id returning t.id")"
+check "DELETE USING: target alias allowed" allow "$(P "delete from $S.tasks t using $S.people p where t.owner_person_id='$ME' and p.id=t.id returning t.id")"
+check "plain UPDATE target-qualified allowed" allow "$(P "update $S.tasks set a=1 where tasks.owner_person_id='$ME' returning id")"
+check "plain UPDATE schema-qualified column allowed" allow "$(P "update $S.tasks set a=1 where $S.tasks.owner_person_id='$ME' returning id")"
+check "plain UPDATE unqualified allowed" allow "$(P "update $S.tasks set a=1 where owner_person_id='$ME' returning id")"
+check "plain UPDATE other-qualified asks" ask "$(P "update $S.tasks t set a=1 where x.owner_person_id='$ME' returning id")"
+check "parenthesised SELECT allowed" allow "$(P "(select id from $S.tasks)")"
+check "UNION of parenthesised SELECTs allowed" allow "$(P "(select id from $S.tasks) union (select id from $S.notes)")"
+check "UPDATE assigning attribution column asks" ask "$(P "update $S.tasks set owner_person_id='$OTHER' where owner_person_id='$ME' returning id")"
+check "UPDATE assigning attribution column (2nd in SET) asks" ask "$(P "update $S.tasks set a=1, decided_by='$OTHER' where owner_person_id='$ME' returning id")"
+check "UPDATE setting non-attribution column still allowed" allow "$(P "update $S.tasks set title='x' where owner_person_id='$ME' returning id")"
+check "literal with trailing space does not count" ask "$(P "update $S.tasks set a=1 where owner_person_id='$ME ' returning id")"
+check "literal with leading space does not count" ask "$(P "update $S.tasks set a=1 where owner_person_id=' $ME' returning id")"
+check "SELECT INTO schema table denied" deny "$(P "select * into $S.copy from $S.tasks")"
+check "SELECT INTO other schema ignored" allow "$(P "select * into public.copy from $S.tasks")"
+check "set schema then unqualified UPDATE asks" ask "$(P "set schema '$S'; update tasks set a=1 where id=1 returning id" sess1 '')"
+check "set_config search_path then unqualified DELETE denied (no WHERE)" deny "$(P "select set_config('search_path', '$S, public', false); delete from tasks returning id" sess1 '')"
+check "set_config search_path then unqualified UPDATE asks" ask "$(P "select set_config('search_path', '$S, public', false); update tasks set a=1 where id=1 returning id" sess1 '')"
+check "INSERT without column list, generated column configured, denied" deny "$(P "insert into $S.tasks values (1,'a') returning id")"
+check "INSERT without column list, table without generated columns allowed" allow "$(P "insert into $S.notes values (1,'a') returning id")"
+check "ANALYZE schema table allowed" allow "$(P "analyze $S.tasks")"
+check "VACUUM still asks" ask "$(P "vacuum $S.tasks")"
+printf 'export PROJECT_REFS=%s\nexport SCHEMA=%s\n' "$REF" "$S" > "$HOME/export.conf"
+out="$(printf '%s' "$(P "drop table $S.tasks")" | CLAUDE_SHARED_DB_GATE_CONF="$HOME/export.conf" $gate 2>&1)"
+if grep -q '"deny"' <<<"$out"; then pass=$((pass+1)); echo "ok   - config 'export KEY=value' accepted"; else fail=$((fail+1)); echo "FAIL - export config: $out"; fi
 
 # --- JSON safety ---
 nasty="update $S.tasks set a='q\"uote\\\\back' where id=1 /* \"c\" */ and b = 'x

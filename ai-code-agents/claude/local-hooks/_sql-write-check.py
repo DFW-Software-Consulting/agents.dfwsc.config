@@ -3,6 +3,9 @@
 
 Reads a PreToolUse payload on stdin. Prints a PreToolUse deny/ask decision as
 JSON, or nothing to allow. Any unexpected failure prints nothing (fail open).
+
+Known gaps (documented, not handled): functions that write when called from a
+SELECT, and writes made through a shell client instead of the MCP tool.
 """
 import json
 import os
@@ -146,7 +149,7 @@ DDL = ('create', 'alter', 'drop', 'truncate', 'grant', 'revoke', 'comment')
 READ = ('select', 'values', 'table', 'show')
 BENIGN = ('begin', 'start', 'commit', 'rollback', 'end', 'abort', 'savepoint',
           'release', 'reset', 'discard', 'close', 'deallocate', 'declare',
-          'fetch', 'move', 'listen', 'unlisten')
+          'fetch', 'move', 'listen', 'unlisten', 'analyze', 'analyse')
 
 
 def isp(t, v):
@@ -272,10 +275,13 @@ def operand_left(wt, k):
     if pos < 0:
         return None
     if wt[pos][0] == 's':
-        return ('s', wt[pos][1], pos)
+        return ('s', wt[pos][1], pos, ())
     if isid(wt[pos]):
-        start = pos - 2 if pos >= 2 and isp(wt[pos - 1], '.') and isid(wt[pos - 2]) else pos
-        return ('c', wt[pos][1], start)
+        start, qual = pos, []
+        while start >= 2 and isp(wt[start - 1], '.') and isid(wt[start - 2]):
+            qual.insert(0, wt[start - 2][1])
+            start -= 2
+        return ('c', wt[pos][1], start, tuple(qual))
     return None
 
 
@@ -284,21 +290,22 @@ def operand_right(wt, k):
     if pos >= n:
         return None
     if wt[pos][0] == 's':
-        kind, val, end = 's', wt[pos][1], pos
+        kind, val, end, qual = 's', wt[pos][1], pos, ()
     elif isid(wt[pos]):
-        if pos + 2 < n and isp(wt[pos + 1], '.') and isid(wt[pos + 2]):
-            kind, val, end = 'c', wt[pos + 2][1], pos + 2
-        else:
-            kind, val, end = 'c', wt[pos][1], pos
+        names, end = [wt[pos][1]], pos
+        while end + 2 < n and isp(wt[end + 1], '.') and isid(wt[end + 2]):
+            names.append(wt[end + 2][1])
+            end += 2
+        kind, val, qual = 'c', names[-1], tuple(names[:-1])
     else:
         return None
     if end + 2 < n and isp(wt[end + 1], '::') and isid(wt[end + 2]):
         end += 2
-    return (kind, val, end)
+    return (kind, val, end, qual)
 
 
-def scoped_to_me(wt, cfg):
-    me = cfg['ME_PERSON_ID'].strip().lower()
+def scoped_to_me(wt, cfg, targets, join):
+    me = cfg['ME_PERSON_ID'].strip()
     if not me:
         return False
     if any(isw(t, 'or') for t in wt):
@@ -308,12 +315,15 @@ def scoped_to_me(wt, cfg):
         if not isp(t, '='):
             continue
         left, right = operand_left(wt, k), operand_right(wt, k)
-        if not left or not right:
+        if not left or not right or left[0] == right[0]:
             continue
-        pair = {left[0]: left[1], right[0]: right[1]}
-        if left[0] == right[0] or 'c' not in pair or 's' not in pair:
+        colop, strop = (left, right) if left[0] == 'c' else (right, left)
+        if colop[1] not in cols or strop[1] != me:
             continue
-        if pair['c'] not in cols or pair['s'].strip().lower() != me:
+        qual = colop[3]
+        if qual in targets or (qual == () and not join):
+            pass
+        else:
             continue
         before = left[2] - 1
         after = right[2] + 1
@@ -346,6 +356,10 @@ def handle_dml(verb, i, st, dep, ctx):
         return
     tbl = schema_table(parts, ctx)
     if tbl is None:
+        if len(parts) == 1 and ctx.by_ref:
+            ctx.targeted = True
+            ctx.deny('Shared database gate: qualify the table with its schema (%s.%s) so this %s can be '
+                     'checked.' % (schema, parts[0], verb.upper()))
         return
     ctx.targeted = True
     full = '%s.%s' % (schema, tbl)
@@ -370,7 +384,32 @@ def handle_dml(verb, i, st, dep, ctx):
             return
         wend = returning_i if returning_i > where_i else end
         wt = [st[j] for j in top if where_i < j < wend]
-        if scoped_to_me(wt, cfg):
+        alias = None
+        if k2 < end and isw(st[k2], 'as') and k2 + 1 < end and isid(st[k2 + 1]):
+            alias = st[k2 + 1][1]
+        elif k2 < end and isid(st[k2]) and not isw(st[k2], 'set', 'using', 'where', 'returning'):
+            alias = st[k2][1]
+        targets = {(alias,)} if alias else {(tbl,), (schema, tbl)}
+        join = any(isw(st[j], 'from' if verb == 'update' else 'using') for j in top)
+        reassigns = False
+        if verb == 'update':
+            set_i = next((j for j in top if isw(st[j], 'set')), None)
+            if set_i is not None:
+                stop = min([j for j in top if j > set_i and isw(st[j], 'from', 'where', 'returning')] + [end])
+                tj = [j for j in top if set_i <= j < stop]
+                for a_, b_ in zip(tj, tj[1:]):
+                    if isw(st[a_], 'set') or isp(st[a_], ','):
+                        pass
+                    else:
+                        continue
+                    if isid(st[b_]) and st[b_][1] in cfg['ATTRIBUTION_COLUMNS'] and b_ + 1 < end \
+                            and isp(st[b_ + 1], '='):
+                        reassigns = True
+        if reassigns:
+            ctx.ask('Shared database gate: this UPDATE on %s assigns an attribution column, which changes '
+                    'who owns the row. Confirm it is intended.' % full)
+            return
+        if scoped_to_me(wt, cfg, targets, join):
             return
         wtext = text_of(st[where_i + 1:wend], ctx.src)
         if len(wtext) > 300:
@@ -394,6 +433,11 @@ def handle_dml(verb, i, st, dep, ctx):
                 cols.append(st[j][1])
             j += 1
     gen = set(cfg['GENERATED_COLUMNS_SET'])
+    listed = k2 < end and isp(st[k2], '(') and k2 + 1 < end and not isw(st[k2 + 1], 'select', 'with', 'values')
+    default_values = k2 + 1 < end and isw(st[k2], 'default') and isw(st[k2 + 1], 'values')
+    if not listed and not default_values and any(g.startswith(tbl + '.') for g in gen):
+        ctx.deny('Shared database gate: give an explicit column list for this INSERT into %s so generated '
+                 'columns can be checked.' % full)
     bad = [c for c in cols if '%s.%s' % (tbl, c) in gen]
     for c in bad:
         ctx.deny('Shared database gate: %s.%s is a generated column and must never be inserted. '
@@ -410,6 +454,18 @@ def handle_dml(verb, i, st, dep, ctx):
 
 def read_stmt(st, ctx):
     schema, loc = ctx.schema, ctx.cfg['LOCATE_TABLE']
+    dep = depths(st)
+    for i, t in enumerate(st):
+        if dep[i] == 0 and isw(t, 'into'):
+            k = i + 1
+            while k < len(st) and isw(st[k], 'temp', 'temporary', 'unlogged', 'table'):
+                k += 1
+            parts, _ = parse_name(st, k, len(st))
+            if parts and schema_table(parts, ctx):
+                ctx.targeted = True
+                ctx.deny('Shared database gate: SELECT ... INTO creates a table in the shared database (%s); '
+                         'schema changes are not made by agents, the user runs them.' % schema)
+                return
     if loc in ref_tables(st, schema):
         ctx.located = True
         ctx.newly_located = True
@@ -422,7 +478,27 @@ def analyze(st, ctx):
     if not st:
         return
     schema = ctx.schema
+    lead = 0
+    while lead < len(st) and isp(st[lead], '('):
+        lead += 1
+    st = st[lead:]
+    if not st:
+        return
     dep = depths(st)
+    pending_flag = any(isw(t, 'set_config') for t in st) and \
+        any(t[0] == 's' and t[1].strip().lower() == 'search_path' for t in st) and \
+        any(t[0] == 's' and t[1].strip().lower() != 'search_path' and mentions(t[1], schema) for t in st)
+    if pending_flag:
+        ctx.targeted = True
+    try:
+        _analyze(st, dep, ctx)
+    finally:
+        if pending_flag:
+            ctx.flag = True
+
+
+def _analyze(st, dep, ctx):
+    schema = ctx.schema
     fw = st[0][1] if st[0][0] == 'w' else None
     if ref_tables(st, schema):
         ctx.targeted = True
@@ -459,7 +535,7 @@ def analyze(st, ctx):
             return
 
     if fw == 'set':
-        if any(isw(t, 'search_path') for t in st):
+        if any(isw(t, 'search_path', 'schema') for t in st[:4]):
             hit = any(isid(t) and t[1] == schema for t in st) or \
                 any(t[0] == 's' and mentions(t[1], schema) for t in st)
             if hit:
@@ -512,6 +588,8 @@ def load_config():
             continue
         key, val = line.split('=', 1)
         key, val = key.strip(), val.strip()
+        if key.startswith('export '):
+            key = key[7:].strip()
         if len(val) >= 2 and val[0] == val[-1] and val[0] in '"\'':
             val = val[1:-1]
         raw[key] = val

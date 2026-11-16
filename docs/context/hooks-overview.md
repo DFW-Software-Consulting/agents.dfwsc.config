@@ -28,7 +28,7 @@ Scripts live in `ai-code-agents/claude/local-hooks/`, `hooks/` and `personal-hoo
 The 12h off-file: a file under `~/.claude/` (path overridable by an environment variable named in the script) whose modification time is under 12 hours old; a stale one is ignored, not deleted.
 
 ## Not a hook: run-checks
-`run-checks.sh` (logic in `_run_checks.py`) runs a repo's checks for the current commit and writes a stamp file in the worktree's git dir. It is run on request by the `git-verify` skill (`skills/git-verify/SKILL.md`), never from a hook. `_checks_stamp.py` defines check detection and the stamp and is used only by `_run_checks.py`; a later gate is meant to read stamps. Checks come from a `git-checks` file, else the `typecheck`, `lint` and `test` scripts in package.json. `CLAUDE_CHECKS_TIMEOUT` sets seconds per command.
+`run-checks.sh` (logic in `_run_checks.py`) runs a repo's checks for the current commit and writes a stamp file in the worktree's git dir. It is run on request by the `git-verify` skill (`skills/git-verify/SKILL.md`), never from a hook. `_checks_stamp.py` defines check detection and the stamp and is used only by `_run_checks.py`; a later gate is meant to read stamps. Checks come from a `.claude/git-checks` file at the repository root, else the `typecheck`, `lint` and `test` scripts in package.json. `CLAUDE_CHECKS_TIMEOUT` sets seconds per command.
 
 ## Libraries
 - `_gate-common.sh`: off switch and off-file expiry. Sourced by delegate-gate, delegate-reminder, require-agent-model, read-size-gate, worktree-gate, git-guard. If missing, gates stay on.

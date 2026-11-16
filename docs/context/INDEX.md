@@ -1,6 +1,6 @@
 # Context docs
 
-- [hooks-overview.md](hooks-overview.md) : read when adding, changing or debugging a script under ai-code-agents/claude/local-hooks or hooks, or when you need to know which hook enforces a rule
+- [hooks-overview.md](hooks-overview.md) : read when adding, changing or debugging a script under ai-code-agents/claude/local-hooks or hooks, when you need to know which hook enforces a rule, or when asking about run-checks or the git-verify skill
 - [hooks-testing.md](hooks-testing.md) : read when running or writing the hook test suites, or reviewing a hook change
 - [hooks-shipping.md](hooks-shipping.md) : read when a hook change is ready to merge, you add a new hook, or need to know how it reaches a live session
 - [repo-layout.md](repo-layout.md) : read when you are new to the repo, touching setup-agent-configs.sh, or unsure which directory is linked into a tool config

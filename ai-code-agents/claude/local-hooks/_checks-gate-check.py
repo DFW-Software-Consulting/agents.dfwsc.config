@@ -197,6 +197,18 @@ WORDS_RE = re.compile(r"\b(?:git|gh|cd|pushd|popd|eval|bash|sh|zsh|dash|ksh)\b")
 BODY_RE = re.compile(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+pr\s+create\b")
 
 
+class CannotAnalyse(str):
+    """A `why` marking that the command could not be analysed (a walker or analysis error, or
+    a line over the walker's budget), as opposed to a directory that is not written literally."""
+
+
+def _error_result(cmd, why):
+    """The unknown-directory result for a push or `gh pr create` on a line that could not be
+    analysed; [] (nothing to judge) when the line holds neither."""
+    m = BODY_RE.search(cmd)
+    return [("pr" if m.group(0).startswith("gh") else "push", None, None, CannotAnalyse(why))] if m else []
+
+
 def analyze(cmd, cwd):
     """Walk a command line (_cmd_dirs.walk), following literal and
     simply-assigned directories and `bash -c` / `eval` bodies. Returns
@@ -204,18 +216,18 @@ def analyze(cmd, cwd):
     gh pr create ("pr"); dir is None, with why, when it cannot be established
     (a temporary directory counts as unknown here). A text-only exemption (dry
     run, delete, tags-only) is already applied."""
-    out = []
     try:
-        entries = cd.walk(cmd, cwd, home=scan.HOME)
-    except Exception as e:
-        # Over the walker's budget (cd.Budget) or any other walker error: a
-        # push or pull-request creation on the line counts as an unknown
-        # directory, never a silent allow.
-        m = BODY_RE.search(cmd)
-        why = ("a line with too many commands to analyse" if isinstance(e, cd.Budget)
-               else "a command line that could not be analysed")
-        return [("pr" if m.group(0).startswith("gh") else "push", None, None, why)] if m else []
-    for c in entries:
+        return _analyze(cmd, cwd)
+    except cd.Budget:
+        return _error_result(cmd, "a line with too many commands to analyse")
+    except Exception:
+        # Any other walker or analysis error: never a silent allow.
+        return _error_result(cmd, "an error while analysing the command")
+
+
+def _analyze(cmd, cwd):
+    out = []
+    for c in cd.walk(cmd, cwd, home=scan.HOME):
         if c["kind"] == "body":
             m = BODY_RE.search(c["text"])
             if m:
@@ -235,6 +247,11 @@ def analyze(cmd, cwd):
 
 def unknown_message(kind, why):
     what = "git push" if kind == "push" else "gh pr create"
+    if isinstance(why, CannotAnalyse):
+        return (f"checks-gate: could not analyse this command, so the repository for this {what} "
+                f"and its check record cannot be found ({why}). Simplify the command or split it "
+                f"into separate calls, with the directory written literally, for example "
+                f"`git -C /absolute/path push ...`.")
     return (f"checks-gate: could not tell which repository this {what} runs in ({why}), so the "
             f"check record for the commit cannot be found. Write the directory literally, for "
             f"example `git -C /absolute/path push ...` or `cd /absolute/path && git push ...`. "
@@ -271,12 +288,18 @@ def main():
         if not m:
             return
         jobs = []
-        unknown = [("pr" if m.group(0).startswith("gh") else "push", "a line with too many commands to analyse")]
+        unknown = [("pr" if m.group(0).startswith("gh") else "push",
+                    CannotAnalyse("a line with too many commands to analyse"))]
     else:
-        jobs = targets(cmd, cwd)
-        if cwd:
-            known, unknown = resolved_targets(cmd, cwd)
-            jobs += known
+        try:
+            jobs = targets(cmd, cwd)
+            if cwd:
+                known, unknown = resolved_targets(cmd, cwd)
+                jobs += known
+        except Exception:
+            # An error while finding the pushes: a push on the line is an unknown directory.
+            jobs = []
+            unknown = [(k, w) for k, _d, _c, w in _error_result(cmd, "an error while analysing the command")]
     for d, remote in jobs:
         if (d, remote) in seen:
             continue

@@ -878,7 +878,7 @@ def _boom(exc):
         raise exc
     return w
 _real = cgc.cd.walk
-for label, exc, why in (("budget", cd.Budget(), "too many commands"), ("other error", RuntimeError("x"), "could not be analysed")):
+for label, exc, why in (("budget", cd.Budget(), "too many commands"), ("other error", RuntimeError("x"), "error while analysing")):
     cgc.cd.walk = _boom(exc)
     try:
         push = cgc.analyze("git -C /p push origin feat", "/w")
@@ -891,6 +891,37 @@ for label, exc, why in (("budget", cd.Budget(), "too many commands"), ("other er
         passed += 1; print(f"ok   - checks-gate analyze(): walker {label} on a push or gh pr create is an unknown directory")
     else:
         failed += 1; print(f"FAIL - checks-gate analyze(): walker {label}: {push} {pr} {quiet}")
+
+# an error after the walker (entry loop, targets()) is an unknown directory too, through main()
+import io, contextlib
+def _raise(*a, **k):
+    raise RuntimeError("forced")
+_cf = os.path.join(tempfile.mkdtemp(), "conf")
+open(_cf, "w").write("MODE=deny\n")
+def _out(cmd, patches):
+    saved = [(o, n, getattr(o, n)) for o, n in patches]
+    for o, n in patches:
+        setattr(o, n, _raise)
+    os.environ.update(CMD=cmd, CWD="/w", GATE_HOME=H, CLAUDE_CHECKS_GATE_CONF=_cf)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            cgc.main()
+    finally:
+        for o, n, v in saved:
+            setattr(o, n, v)
+    return buf.getvalue()
+for label, patches in (("cd.effective", [(cgc.cd, "effective")]), ("gg.push_parts", [(cgc.gg, "push_parts")]),
+                       ("text_exempt", [(cgc, "text_exempt")]), ("targets()", [(cgc, "targets")]),
+                       ("resolved_targets()", [(cgc, "resolved_targets")])):
+    pushy = _out("git -C /p push origin feat", patches)
+    prc = _out("gh pr create --title x", patches)
+    quiet = _out("git status", patches)
+    if ('"permissionDecision": "deny"' in pushy and "could not analyse" in pushy and "Traceback" not in pushy
+            and ("could not analyse" in prc or label in ("cd.effective", "gg.push_parts", "text_exempt")) and quiet == ""):
+        passed += 1; print(f"ok   - checks-gate: an error in {label} on a push or gh pr create is denied, a line without one stays silent")
+    else:
+        failed += 1; print(f"FAIL - checks-gate: error in {label}: {pushy!r} {prc!r} {quiet!r}")
 
 print()
 print(f"passed: {passed}  failed: {failed}")

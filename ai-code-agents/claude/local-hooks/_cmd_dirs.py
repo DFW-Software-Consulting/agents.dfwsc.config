@@ -69,7 +69,7 @@ or substitution, nesting over MAX_NEST in any frame, or any failure inside the
 lexer) is one "body" entry holding the whole text: the gates judge it with
 BODY_GUARDS, so it fails closed.
 Known limits: `bash -c`/`eval` nesting deeper than 3, aliases,
-xargs/find -exec/ssh wrappers, lines over about 128 KB and word splitting under a
+find -exec/ssh wrappers, lines over about 128 KB and word splitting under a
 changed IFS are not followed; a command word that is, or starts with, an
 expansion (`$(echo git) push`, `"$cmd" push`, `$x git push`, `$(true)git push`) is
 not a command; the refspec of a push (`git push origin $(echo main)`) is not

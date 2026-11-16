@@ -235,6 +235,10 @@ check "env -C <stamped repo> push silent" silent "$(bp "env -C $r git push origi
 check "wrapped push in a cd chain denied" deny "$(bp "cd $p && timeout 5 git push origin feat")"
 check "cd <stamped> && timeout push silent" silent "$(bp "cd $r && timeout 5 git push origin feat")"
 check "nested bash -c push denied" deny "$(bp "bash -c \"bash -c 'git -C $p push origin feat'\"")"
+check "wrapped gh pr create, unstamped repo denied" deny "$(bp "timeout 5 gh pr create --title x" "$p")"
+check "wrapped gh pr create, passing record silent" silent "$(bp "timeout 5 gh pr create --title x" "$r")"
+check "builtin cd <unstamped repo> && push denied" deny "$(bp "builtin cd $p && git push origin feat")"
+check "builtin cd <stamped repo> && push silent" silent "$(bp "builtin cd $r && git push origin feat")"
 check "wrapped push with a text-only exemption silent" silent "$(bp "timeout 5 git -C $p push --dry-run origin feat")"
 # a passing record plus a literal path stays silent; so does the resolved simple assignment
 check "literal cd with passing record silent" silent "$(bp "cd $r && git push origin feat")"

@@ -1,12 +1,13 @@
 # Testing hooks
 
-Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-tests.sh` except `run-tests.sh`. Each pipes sample hook payloads into the repo copy of the scripts and checks the result. Each prints a summary line containing passed and failed counts; the punctuation differs between suites. The bar is 0 failed. Counts change with every change, so they are not recorded here (the two git-gates suites are the exception, noted below as written).
+Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-tests.sh` except `run-tests.sh`. Each pipes sample hook payloads into the repo copy of the scripts and checks the result. Each prints a summary line containing passed and failed counts; the punctuation differs between suites. The bar is 0 failed. Counts change with every change, so they are not recorded here (the two git-gates suites and run-cmd-dirs are the exception, noted below as written).
 
 ## Suites
 - `run-tests.sh` : delegate-gate, delegate-reminder, require-agent-model, `../hooks/no-agent-mention.py`.
 - `run-handback-tests.sh` : context-docs-start, require-acceptance-criteria, handback-gate.
-- `run-worktree-tests.sh` : worktree-gate and `_git-cmd-scan.py`.
-- `run-git-guard-tests.sh` : git-guard (including the lease and ask cases) and the git parts of `_git-cmd-scan.py`.
+- `run-worktree-tests.sh` : worktree-gate, `_worktree-gate-check.py` and `_git-cmd-scan.py` (210 passed when written, including variables, wrappers, `env -C`, `mktemp -d`, unknown directories).
+- `run-git-guard-tests.sh` : git-guard (including the lease and ask cases, wrapper bodies, explicit git directories and the unknown-directory default-branch rule) and the git parts of `_git-cmd-scan.py` (292 passed when written).
+- `run-cmd-dirs-tests.sh` : `_cmd_dirs.py` directory states for about 40 representative lines (43 passed when written); no repositories needed.
 - `run-shared-db-tests.sh` : shared-db-write-gate and `_sql-write-check.py`.
 - `run-read-gate-tests.sh` : read-size-gate.
 - `run-clock-reminder-tests.sh` : clock-reminder.
@@ -42,5 +43,5 @@ HOME="$(mktemp -d)" TMPDIR=<scratch dir> PUBLIC_TEXT_GATE_NO_NETWORK=1 bash ai-c
 ## Review method for hook changes
 1. Payload-driven tests of the new behavior.
 2. An independent probe: a few hundred hand-written commands or inputs aimed at false denials, misses, crashes and slow paths; note timing.
-3. When a shared scanner such as `_git-cmd-scan.py` changes, run old and new versions over the same command and directory combinations and compare the output; existing callers must see no difference.
+3. When a shared scanner such as `_git-cmd-scan.py` or `_cmd_dirs.py` changes, run old and new versions over the same command and directory combinations and compare the output; existing callers must see no difference.
 4. List known limits in the pull request description.

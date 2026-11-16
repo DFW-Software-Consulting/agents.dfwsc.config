@@ -22,6 +22,20 @@ Categories follow Hermes's own names (`software-development`, `devops`, `creativ
 | `writing-beats` | `creative/writing-beats` | claude |
 | `writing-shape` | `creative/writing-shape` | claude |
 | `grilling` | `productivity/grilling` | mattpocock-skills |
+| `lint` | `software-development/lint` | claude command |
+| `prettier` | `software-development/prettier` | claude command |
+| `git` | `software-development/git` | claude command |
+| `qa` | `software-development/qa` | claude command |
+| `smallwins` | `software-development/smallwins` | claude command |
+| `ce-qa` | `software-development/ce-qa` | claude command |
+| `ce-rr` | `software-development/ce-rr` | claude command |
+| `ce-slop` | `software-development/ce-slop` | claude command |
+| `ce-cm` | `productivity/ce-cm` | claude command |
+| `ce-kb-log` | `productivity/ce-kb-log` | claude command |
+| `ce-prompt` | `productivity/ce-prompt` | claude command |
+| `standup-brief` | `productivity/standup-brief` | claude command |
+
+The `claude command` skills are ports of `../claude/commands/*.md` (the `ce/` commands are `ce-*`; `ce-prompt` because `/prompt` is a Hermes built-in). They use Hermes' `delegate_task` in place of Claude subagents. `standup-brief` needs Slack and Supabase MCP servers configured in Hermes. `firm` and `plannotator-annotate|last|review` are not ported: same-named skills already exist in `../claude/skills`.
 
 Each skill's `agents/openai.yaml` is upstream metadata that Hermes ignores. The `writing-*` skills are marked in-progress upstream.
 

@@ -10,6 +10,8 @@ PRIVATE_REPOS="owner-x/private-*"
 TERMS="fakehost-01 example-tail.ts.net 'Fake Project'"
 
 # Literals removed from the text before scanning, to allow a deliberate mention.
+# This is also how to whitelist a benign name the built-in detectors catch
+# (for example a hostname-looking filename such as build.local).
 ALLOW_TERMS="fakehost-docs"
 
 # Extra regexes, one per line. A bad regex is skipped.

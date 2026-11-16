@@ -80,7 +80,7 @@ check "cached result used on next call (network off)" deny "$(bp 'git commit -m 
 rm -f "$cache"
 out="$(bp 'git commit -m "fakehost-01"' "$work/unk" | PUBLIC_TEXT_GATE_NO_NETWORK=0 PUBLIC_TEXT_GATE_LOOKUP_CMD="$stub_fail" $gate)"
 [ -z "$out" ]; ok "stub lookup failure allows silently" $?
-[ ! -s "$cache" ]; ok "failed lookup not cached" $?
+grep -q $'^owner-x/unknown-q\tUNKNOWN\t' "$cache"; ok "failed lookup cached as UNKNOWN" $?
 
 # --- IPs ---
 check "IPv4 denied" deny "$(bp 'git commit -m "server at 10.1.2.3"')"
@@ -100,7 +100,7 @@ check ".local hostname denied" deny "$(bp 'git commit -m "open nas.local"')"
 check ".lan hostname denied" deny "$(bp 'git commit -m "open nas.lan"')"
 check ".internal hostname denied" deny "$(bp 'git commit -m "call svc.internal"')"
 check ".home.arpa hostname denied" deny "$(bp 'git commit -m "call svc.home.arpa"')"
-check "email denied" deny "$(bp 'git commit -m "ask someone@example.org"')"
+check "email denied" deny "$(bp 'git commit -m "ask someone@mailhost.net"')"
 check "noreply email allowed" allow "$(bp 'git commit -m "Co-authored-by: A <noreply@example.org>"')"
 check "users.noreply.github.com allowed" allow "$(bp 'git commit -m "by 123+user@users.noreply.github.com"')"
 
@@ -149,6 +149,130 @@ check "cd public dir && git commit uses that remote" deny "$(bp "cd $work/pub &&
 check "cd private dir && git commit uses that remote" allow "$(bp "cd $work/priv && git commit -m fakehost-01" "$work/pub")"
 check "echo \"git commit\" is not a commit" allow "$(bp 'echo "git commit -m fakehost-01"')"
 
+# --- round 2: email forms ---
+check "scp-style remote git@host:path allowed" allow "$(bp 'git commit -m "origin is git@github.com:owner-x/repo-y.git"')"
+check "user@host:path (other user) allowed" allow "$(bp 'git commit -m "scp deploy@mailhost.net:/srv/x"')"
+check "email followed by colon+space still denied" deny "$(bp 'git commit -m "mail me@mailhost.net: thanks"')"
+check "example.com address allowed" allow "$(bp 'git commit -m "a@example.com"')"
+check "example.org address allowed" allow "$(bp 'git commit -m "a@example.org"')"
+check "example.net subdomain address allowed" allow "$(bp 'git commit -m "a@mail.example.net"')"
+check ".example TLD address allowed" allow "$(bp 'git commit -m "a@corp.example"')"
+check ".test TLD address allowed" allow "$(bp 'git commit -m "a@corp.test"')"
+check ".invalid TLD address allowed" allow "$(bp 'git commit -m "a@corp.invalid"')"
+check ".localhost TLD address allowed" allow "$(bp 'git commit -m "a@corp.localhost"')"
+check "lookalike notexample.com still denied" deny "$(bp 'git commit -m "a@notexample.com"')"
+check "Signed-off-by trailer allowed" allow "$(bp $'git commit -m "fix\n\nSigned-off-by: A <a@mailhost.net>"')"
+check "Co-authored-by trailer allowed" allow "$(bp $'git commit -m "fix\n\nCo-authored-by: A <a@mailhost.net>"')"
+check "Reviewed-by trailer allowed" allow "$(bp $'git commit -m "fix\n\nReviewed-by: A <a@mailhost.net>"')"
+check "Acked-by / Tested-by / Reported-by allowed" allow "$(bp $'git commit -m "fix\n\nAcked-by: A <a@mailhost.net>\nTested-by: A <a@mailhost.net>\nReported-by: A <a@mailhost.net>"')"
+check "Any Word-by trailer allowed" allow "$(bp $'git commit -m "fix\n\nHelped-by: A <a@mailhost.net>"')"
+check "address in body (not trailer) still denied" deny "$(bp $'git commit -m "fix\n\nSigned-off-by: A <a@mailhost.net>\nping b@mailhost.net"')"
+
+# --- IP contexts ---
+for ip in 10.0.0.5 172.16.4.4 172.31.1.1 192.168.1.20 100.64.3.3 169.254.9.9; do
+  check "private range $ip denied" deny "$(bp "git commit -m \"host $ip\"")"
+  check "private range $ip denied after 'version'" deny "$(bp "git commit -m \"version $ip\"")"
+  check "private range $ip denied after v" deny "$(bp "git commit -m \"v$ip\"")"
+  check "private range $ip denied after @" deny "$(bp "git commit -m \"pkg@$ip\"")"
+done
+check "172.32.0.1 (outside 172.16/12) read as plain address, denied" deny "$(bp 'git commit -m "host 172.32.0.1"')"
+check "release 1.2.3.4 allowed" allow "$(bp 'git commit -m "release 1.2.3.4 done"')"
+check "version 1.2.3.4 allowed" allow "$(bp 'git commit -m "version 1.2.3.4"')"
+check "ver: 1.2.3.4 allowed" allow "$(bp 'git commit -m "ver: 1.2.3.4"')"
+check "build 1.2.3.4 allowed" allow "$(bp 'git commit -m "build 1.2.3.4"')"
+check "pkg@1.2.3.4 allowed" allow "$(bp 'git commit -m "pkg@1.2.3.4"')"
+check "pkg==1.2.3.4 allowed" allow "$(bp 'git commit -m "pkg==1.2.3.4"')"
+check "v-prefixed 1.2.3.4 allowed" allow "$(bp 'git commit -m "tag v1.2.3.4"')"
+check "version word on an earlier line does not excuse" deny "$(bp $'git commit -m "version bump\nserver at 8.8.4.4"')"
+check "server at 8.8.4.4 denied" deny "$(bp 'git commit -m "server at 8.8.4.4"')"
+check "8.8.4.4 bare denied" deny "$(bp 'git commit -m "8.8.4.4"')"
+
+# --- segment discipline ---
+printf 'host 10.5.5.5 in log\n' >"$work/log.txt"
+check "tail -F log | head; git commit -m ok allowed" allow "$(bp "tail -F $work/log.txt | head -1; git commit -m ok")"
+check "other command's -m ignored" allow "$(bp 'echo -m "fakehost-01"; git commit -m ok')"
+check "commit file argument after tail -F still scanned" deny "$(bp "tail -F x | head -1; git commit -F $work/log.txt")"
+check "git commit && echo with term after segment allowed" allow "$(bp 'git commit -m ok && echo fakehost-01')"
+check "gh segment: other command's --body ignored" allow "$(bp 'curl --body fakehost-01 x; gh pr create --title t --body ok')"
+
+# --- gh directory resolution ---
+check "cd public && gh pr create from private cwd denied" deny "$(bp "cd $work/pub && gh pr create --title fakehost-01 --body x" "$work/priv")"
+check "cd private && gh pr create from public cwd allowed" allow "$(bp "cd $work/priv && gh pr create --title fakehost-01 --body x" "$work/pub")"
+check "non-literal cd then gh allowed (undeterminable)" allow "$(bp 'cd $SOMEWHERE && gh pr create --title fakehost-01 --body x' "$work/pub")"
+check "cd public && gh pr edit denied" deny "$(bp "cd $work/pub && gh pr edit 3 --body 10.9.9.9" "$plain")"
+check "--repo beats cd for gh" allow "$(bp "cd $work/pub && gh pr create --repo owner-x/private-z --title fakehost-01 --body x" "$plain")"
+
+# --- message on stdin ---
+check "git commit -F - heredoc denied" deny "$(bp $'git commit -F - <<EOF\nmove to fakehost-01\nEOF')"
+check "git commit -F- heredoc denied" deny "$(bp $'git commit -F- <<\'EOF\'\nbox 10.2.3.4\nEOF')"
+check "git commit -F - heredoc clean allowed" allow "$(bp $'git commit -F - <<EOF\nfix parser\nEOF')"
+check "cat heredoc | git commit -F - denied" deny "$(bp $'cat <<EOF | git commit -F -\nfakehost-01\nEOF')"
+check "gh pr create --body-file - heredoc denied" deny "$(bp $'gh pr create --title t --body-file - <<EOF\nrun on fakehost-01\nEOF')"
+check "gh pr create --body-file=- heredoc denied" deny "$(bp $'gh pr create --title t --body-file=- <<EOF\nrun on fakehost-01\nEOF')"
+check "gh pr create --body-file - clean heredoc allowed" allow "$(bp $'gh pr create --title t --body-file - <<EOF\nsummary\nEOF')"
+check "-F - with no heredoc allowed" allow "$(bp 'echo hi | git commit -F -')"
+
+# --- multi-word terms ---
+check "multi-space term denied" deny "$(bp 'git commit -m "for Fake   Project launch"')"
+check "term split by newline denied" deny "$(bp $'git commit -m "for Fake\nProject launch"')"
+check "term split by tab denied" deny "$(bp $'git commit -m "for Fake\tProject launch"')"
+
+# --- gh issue and git tag ---
+check "gh issue create denied" deny "$(bp 'gh issue create --title "fakehost-01" --body x')"
+check "gh issue comment denied" deny "$(bp 'gh issue comment 4 --body "10.1.1.1"')"
+check "gh issue edit --repo private allowed" allow "$(bp 'gh issue edit 4 --repo owner-x/private-z --body "10.1.1.1"' "$work/pub")"
+check "gh issue clean allowed" allow "$(bp 'gh issue create --title "Parser bug" --body x')"
+check "git tag -m denied" deny "$(bp 'git tag -a v1 -m "fakehost-01"')"
+check "git tag -F file scanned" deny "$(bp "git tag -a v1 -F $work/log.txt")"
+check "git tag -m in private repo allowed" allow "$(bp 'git tag -a v1 -m "fakehost-01"' "$work/priv")"
+check "git tag listing allowed" allow "$(bp 'git tag -l')"
+
+# --- cache robustness ---
+calls="$work/stub-calls"; : >"$calls"
+stub_count="$work/stub-count.sh"; printf '#!/bin/sh\necho x >>%s\necho "${STUB_ANSWER:-PUBLIC}"\n' "$calls" >"$stub_count"
+stub_unk="$work/stub-unk.sh"; printf '#!/bin/sh\necho x >>%s\nexit 1\n' "$calls" >"$stub_unk"
+chmod +x "$stub_count" "$stub_unk"
+withstub() {  # STUB PAYLOAD
+  printf '%s' "$2" | PUBLIC_TEXT_GATE_NO_NETWORK=0 PUBLIC_TEXT_GATE_LOOKUP_CMD="$1" $gate
+}
+rm -rf "$XDG_CACHE_HOME/claude-hooks"; mkdir -p "$XDG_CACHE_HOME/claude-hooks"
+printf '\xff\xfe\x00garbage\n\xc3\x28\tbad\n' >"$cache"
+out="$(withstub "$stub_count" "$(bp 'git commit -m "fakehost-01"' "$work/unk")")"
+grep -q '"deny"' <<<"$out"; ok "corrupt cache then PUBLIC stub denies" $?
+grep -q $'^owner-x/unknown-q\tPUBLIC\t' "$cache" && ! grep -aq garbage "$cache"; ok "corrupt cache repaired by rewrite" $?
+! ls "$XDG_CACHE_HOME/claude-hooks" | grep -q tmp; ok "no temp file left behind" $?
+fut=$((now + 86400))
+printf 'owner-x/unknown-q\tPUBLIC\t%s\n' "$fut" >"$cache"
+check "future-timestamp cache entry ignored" allow "$(bp 'git commit -m "fakehost-01"' "$work/unk")"
+rm -f "$cache"; : >"$calls"
+withstub "$stub_unk" "$(bp 'git commit -m "fakehost-01"' "$work/unk")" >/dev/null
+withstub "$stub_unk" "$(bp 'git commit -m "fakehost-01"' "$work/unk")" >/dev/null
+[ "$(wc -l <"$calls")" -eq 1 ]; ok "unknown cached: second run does not call the stub" $?
+printf 'owner-x/unknown-q\tUNKNOWN\t%s\n' "$((now - 700))" >"$cache"; : >"$calls"
+withstub "$stub_unk" "$(bp 'git commit -m "fakehost-01"' "$work/unk")" >/dev/null
+[ "$(wc -l <"$calls")" -eq 1 ]; ok "UNKNOWN entry older than 10 minutes looked up again" $?
+printf 'owner-x/unknown-q\tPRIVATE\t%s\n' "$((now - 3600))" >"$cache"; : >"$calls"
+withstub "$stub_count" "$(bp 'git commit -m "fakehost-01"' "$work/unk")" >/dev/null
+[ "$(wc -l <"$calls")" -eq 0 ]; ok "fresh PRIVATE entry (1h) used without lookup" $?
+printf 'owner-x/unknown-q\tPRIVATE\t%s\n' "$((now - 2*86400))" >"$cache"; : >"$calls"
+out="$(withstub "$stub_count" "$(bp 'git commit -m "fakehost-01"' "$work/unk")")"
+[ "$(wc -l <"$calls")" -eq 1 ] && grep -q '"deny"' <<<"$out"; ok "PRIVATE entry older than 1 day re-looked-up (now public)" $?
+printf 'owner-x/unknown-q\tPUBLIC\t%s\n' "$((now - 3*86400))" >"$cache"; : >"$calls"
+withstub "$stub_count" "$(bp 'git commit -m "fakehost-01"' "$work/unk")" >/dev/null
+[ "$(wc -l <"$calls")" -eq 0 ]; ok "PUBLIC entry (3 days) still trusted" $?
+rm -f "$cache"
+
+# --- pathological user pattern ---
+cp "$work/gate.conf" "$work/gate.conf.bak2"
+printf 'PATTERN=(a+)+$\n' >>"$work/gate.conf"
+long="$(printf 'a%.0s' $(seq 1 60))!"
+start=$(date +%s)
+out="$(printf '%s' "$(bp "git commit -m \"$long 10.8.8.8\"")" | $gate)"
+elapsed=$(( $(date +%s) - start ))
+[ "$elapsed" -le 3 ]; ok "catastrophic PATTERN returns within 3 seconds (${elapsed}s)" $?
+grep -q '"deny"' <<<"$out" && grep -q 'IP address' <<<"$out"; ok "built-in detectors still deny after pattern budget" $?
+cp "$work/gate.conf.bak2" "$work/gate.conf"
+
 # --- plumbing ---
 check "command without git or gh allowed" allow "$(bp 'ls -la')"
 start=$(date +%s%N)
@@ -158,7 +282,10 @@ out="$(bp 'git commit -m "fakehost-01"' | CLAUDE_PUBLIC_TEXT_GATE=off $gate)"
 [ -z "$out" ]; ok "off switch allows silently" $?
 check "subagent payload also denied" deny "$(bp 'git commit -m "fakehost-01"' | jq '.agent_id="a1"')"
 check "non-Bash tool ignored" allow '{"tool_name":"Edit","tool_input":{"file_path":"/x"}}'
-check "unparseable command allowed" allow "$(bp "git commit -m 'unterminated fakehost-01")"
+check "unbalanced quote: raw text scanned, term denied" deny "$(bp "git commit -m 'unterminated fakehost-01")"
+check "unbalanced quote: clean text allowed" allow "$(bp "git commit -m 'unterminated clean")"
+check "unbalanced quote: IP denied" deny "$(bp "git commit -m 'unterminated 10.3.3.3")"
+check "unbalanced quote, no git/gh word allowed" allow "$(bp "echo 'unterminated 10.3.3.3")"
 
 # built-in detectors still run without a config file
 mv "$work/gate.conf" "$work/gate.conf.off"
@@ -177,7 +304,7 @@ check "config with \$(...) still enforces" deny "$(bp 'git commit -m "fakehost-0
 cp "$work/gate.conf.bak" "$work/gate.conf"
 
 # denial output
-nasty=$'say "hi" \\ and\nnewline fakehost-01 10.7.7.7 a@example.org nas.local'
+nasty=$'say "hi" \\ and\nnewline fakehost-01 10.7.7.7 a@mailhost.net nas.local'
 payload="$(jq -n --arg c "git commit -m '$nasty'" --arg d "$work/pub" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}')"
 out="$(printf '%s' "$payload" | $gate)"
 jq -e '.hookSpecificOutput | .hookEventName == "PreToolUse" and .permissionDecision == "deny"' <<<"$out" >/dev/null; ok "denial is valid PreToolUse JSON with quotes and newlines" $?

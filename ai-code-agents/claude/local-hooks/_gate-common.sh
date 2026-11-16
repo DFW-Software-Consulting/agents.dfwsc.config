@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Shared by delegate-gate.sh, delegate-reminder.sh and require-agent-model.sh.
+# Shared by delegate-gate.sh, delegate-reminder.sh, require-agent-model.sh and
+# worktree-gate.sh (which uses gate_off_file_state_for with its own off-file).
 # Sourced, not executed. Decides whether the delegation gate is switched off.
 #
 # Gate is off when CLAUDE_DELEGATE_GATE=off, or when the off-file exists AND
@@ -10,16 +11,20 @@
 GATE_OFF_TTL_SECONDS=$((12 * 60 * 60))
 GATE_OFF_FILE="${CLAUDE_DELEGATE_GATE_OFF_FILE:-$HOME/.claude/delegate-gate.off}"
 
-# Prints: none | fresh | stale
-gate_off_file_state() {
-  [ -e "$GATE_OFF_FILE" ] || { echo none; return; }
+# Prints: none | fresh | stale, for the off-file at path $1.
+gate_off_file_state_for() {
+  local f="$1"
+  [ -e "$f" ] || { echo none; return; }
   local mtime now
-  mtime="$(stat -c %Y "$GATE_OFF_FILE" 2>/dev/null)" || { echo none; return; }
+  mtime="$(stat -c %Y "$f" 2>/dev/null)" || { echo none; return; }
   now="$(date +%s)"
   local age=$((now - mtime))
   # A future mtime is not trusted: treat as gate ON (stale).
   if [ "$age" -ge 0 ] && [ "$age" -lt "$GATE_OFF_TTL_SECONDS" ]; then echo fresh; else echo stale; fi
 }
+
+# Prints: none | fresh | stale (delegation gate's off-file).
+gate_off_file_state() { gate_off_file_state_for "$GATE_OFF_FILE"; }
 
 gate_is_off() {
   [ "${CLAUDE_DELEGATE_GATE:-on}" = "off" ] && return 0

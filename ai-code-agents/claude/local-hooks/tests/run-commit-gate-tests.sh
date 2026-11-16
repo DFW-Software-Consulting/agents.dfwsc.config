@@ -290,6 +290,21 @@ newrepo; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000 > "$R/big.py"; yes 
 reason_has "two skipped files are counted" "$(bp 'git commit -m "feat: x"')" 'not-scanned.*2 file'
 newrepo; { printf 'k = "%s"\n' "$AWS"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 15000; } > "$R/mid.py"; git -C "$R" add mid.py
 check "a 1.5 MB file is still scanned (secret denied)" deny "$(bp 'git commit -m "feat: x"')"
+# --- large neighbours never starve a small file ---
+bigfile() {  # NAME MB: a file of about MB megabytes of added text
+  yes "$(printf 'a%.0s' $(seq 1 99))" | head -n $(( $2 * 10486 )) > "$R/$1"
+}
+newrepo; bigfile a_big.py 17; printf 'k = "%s"\n' "$AWS" > "$R/z_small.py"; git -C "$R" add -A
+check "a 17 MB file sorted before a small secret file: denied" deny "$(bp 'git commit -m "feat: x"')"
+reason_has "the small file is named" "$(bp 'git commit -m "feat: x"')" 'z_small\.py'
+newrepo; bigfile a_big.py 17; git -C "$R" add -A
+check "a 17 MB file alone is allowed with the warning" warn "$(bp 'git commit -m "feat: x"')"
+reason_has "the 17 MB warning counts one file" "$(bp 'git commit -m "feat: x"')" 'not-scanned.*1 file'
+newrepo; bigfile a1.py 5; bigfile a2.py 5; bigfile a3.py 5; printf 'k = "%s"\n' "$GHP" > "$R/b_small.py"; git -C "$R" add -A
+check "three large files plus one small secret file: denied" deny "$(bp 'git commit -m "feat: x"')"
+reason_has "the three large files are counted" "$(bp 'git commit -m "feat: x"')" 'b_small\.py'
+newrepo; bigfile a1.py 5; bigfile a2.py 5; bigfile a3.py 5; echo ok > "$R/b_small.py"; git -C "$R" add -A
+reason_has "three large files and a clean small file: three not scanned" "$(bp 'git commit -m "feat: x"')" 'not-scanned.*3 file'
 newrepo; printf 'k = "%s"\n' "$AWS" > "$R/small.py"; git -C "$R" add small.py
 check "same content in a small diff is denied" deny "$(bp 'git commit -m "feat: x"')"
 newrepo; { echo "<<<<<<< a"; echo ">>>>>>> b"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/big.py"; git -C "$R" add big.py
@@ -327,6 +342,44 @@ check "named directory holding a staged .env denied by name" deny "$(bp 'git com
 check "glob matching a staged .env denied by name" deny "$(bp "git commit -m 'feat: x' 'd/.env*'")"
 newrepo; mkdir "$R/d"; echo ok > "$R/d/s.js"; git -C "$R" add d/s.js; printf 'k = "%s"\n' "$AWS" > "$R/other.py"; git -C "$R" add other.py
 check "a clean named directory is allowed even if another staged file has a secret" allow "$(bp 'git commit -m "feat: x" d/')"
+
+# --- a commit that deletes a secret-named file is never denied for it ---
+tracked_secret() {  # R gets a tracked d/.env and d/.key.pem with clean content, plus d/keep.py
+  newrepo; mkdir "$R/d"; echo "v=1" > "$R/d/.env"; echo "k" > "$R/d/x.pem"; echo ok > "$R/d/keep.py"
+  git -C "$R" add -f d/.env d/x.pem d/keep.py; git -C "$R" commit -qm "feat: secrets by mistake"
+}
+tracked_secret; git -C "$R" rm -q d/.env d/x.pem
+check "staged deletion (git rm) allowed" allow "$(bp 'git commit -m "feat: x"')"
+tracked_secret; rm "$R/d/.env" "$R/d/x.pem"
+check "unstaged deletion with commit -a allowed" allow "$(bp 'git commit -am "feat: x"')"
+check "unstaged deletion with commit --all allowed" allow "$(bp 'git commit --all -m "feat: x"')"
+check "path-limited commit naming the deleted file allowed" allow "$(bp 'git commit -m "feat: x" d/.env')"
+check "path-limited commit naming a deleted .pem allowed" allow "$(bp 'git commit -m "feat: x" d/x.pem')"
+check "path-limited commit naming the directory allowed" allow "$(bp 'git commit -m "feat: x" d/')"
+check "path-limited commit naming a glob allowed" allow "$(bp "git commit -m 'feat: x' 'd/*'")"
+check "path-limited commit naming a narrower glob allowed" allow "$(bp "git commit -m 'feat: x' 'd/.env*'")"
+check "same-line git add -A of the deletion allowed" allow "$(bp "git add -A && git commit -m 'feat: x'")"
+check "same-line git add -u of the deletion allowed" allow "$(bp "git add -u && git commit -m 'feat: x'")"
+check "same-line git add of the deleted path allowed" allow "$(bp "git add d/.env d/x.pem && git commit -m 'feat: x'")"
+check "same-line git rm of the path allowed" allow "$(bp "git rm -q d/.env d/x.pem && git commit -m 'feat: x'")"
+check "same-line git add . of the deletion allowed" allow "$(bp "git add . && git commit -m 'feat: x'")"
+tracked_secret; git -C "$R" mv d/.env d/env.example; git -C "$R" mv d/x.pem d/x.txt
+check "rename away from secret names (staged) allowed" allow "$(bp 'git commit -m "feat: x"')"
+tracked_secret; mv "$R/d/.env" "$R/d/env.example"; mv "$R/d/x.pem" "$R/d/x.txt"
+check "rename away from secret names with add -A allowed" allow "$(bp "git add -A && git commit -m 'feat: x'")"
+check "rename away from secret names with commit -a allowed" allow "$(bp 'git commit -am "feat: x"')"
+check "rename away, path-limited on the directory, allowed" allow "$(bp "git add -A; git commit -m 'feat: x' d/")"
+tracked_secret; git -C "$R" mv d/keep.py d/.env.prod
+check "rename TO a secret name (staged) denied" deny "$(bp 'git commit -m "feat: x"')"
+tracked_secret; git -C "$R" mv d/keep.py d/server.key
+check "rename TO a .key name denied when the directory is named" deny "$(bp 'git commit -m "feat: x" d/')"
+tracked_secret; mv "$R/d/keep.py" "$R/d/.env.prod"
+check "rename TO a secret name with add -A denied" deny "$(bp "git add -A && git commit -m 'feat: x'")"
+tracked_secret; mv "$R/d/keep.py" "$R/d/.env.prod"
+check "rename TO a secret name with commit -a: untracked new name is not committed, allowed" allow "$(bp 'git commit -am "feat: x"')"
+tracked_secret; rm "$R/d/.env"; echo "v=2" > "$R/d/.env.local"
+check "deleting one secret file while adding another is denied for the new one" deny "$(bp "git add -A && git commit -m 'feat: x'")"
+reason_lacks "the denial does not name the deleted file" "$(bp "git add -A && git commit -m 'feat: x'")" 'd/.env ('
 
 # --- .npmrc details ---
 newrepo; printf '# //r.example.invalid/:_%s=fakefake\n; _%s=fakefake\n  # _%s=fakefake\n' authToken authToken authToken > "$R/.npmrc"; git -C "$R" add .npmrc

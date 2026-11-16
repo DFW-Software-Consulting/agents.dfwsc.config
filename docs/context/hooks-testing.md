@@ -13,7 +13,7 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 - `run-reply-cap-tests.sh` : enforce-response-cap and reply-cap-prompt.
 - `run-public-text-gate-tests.sh` : public-repo-text-gate and `_public-text-check.py`.
 - `run-checks-gate-tests.sh` : checks-gate; builds repos with a local bare origin and makes stamps with the real run-checks.sh.
-- `run-commit-gate-tests.sh` : commit-gate (408 passed when written): every secret file name by staged, `commit -a`, same-line add and `add -A`; content and message patterns with the 6-character rule; look-alike strings; path-limited commits; globs; subject warnings; escape and fail-open cases. Local bare origin, temp HOME and config.
+- `run-commit-gate-tests.sh` : commit-gate (438 passed when written): every secret file name by staged, `commit -a`, same-line add and `add -A`; content and message patterns with the 6-character rule; look-alike strings; path-limited commits; globs; subject warnings; escape and fail-open cases. Local bare origin, temp HOME and config.
 - `run-pr-gate-tests.sh` : pr-gate (319 passed when written): rule A including an upstream that is the default branch, secrets, template locations and letter case, modes and date, SOP repos, placeholders, size, issues, skipped forms, body from file and stdin. Local bare origin whose URL is a fake one rewritten to the local path.
 - `run-checks-tests.sh` : run-checks.sh, `_run_checks.py`, `_checks_stamp.py`; needs no toolchain or network.
 

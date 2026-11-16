@@ -99,8 +99,10 @@ def git_capped(d, cap, *args):
 
 def stream_added(d, args, per_file_cap, total_cap):
     """Run a `git diff` and collect added lines per file, streaming with bounded
-    memory. A file whose added text passes per_file_cap is dropped and listed as
-    skipped; reading stops after total_cap bytes (truncated). Returns
+    memory. A file whose added text passes per_file_cap is dropped, listed as
+    skipped and does not count toward total_cap (only scanned bytes do, so a
+    large neighbour never starves a small file); reading stops after total_cap
+    scanned bytes or the time budget (truncated). Returns
     ({path: [lines]}, [skipped paths], truncated), or (None, [], False) on
     failure, timeout or an exhausted budget."""
     import threading
@@ -118,7 +120,8 @@ def stream_added(d, args, per_file_cap, total_cap):
     cur, header, dead, read, truncated = None, False, False, 0, False
     try:
         for raw in proc.stdout:
-            read += len(raw)
+            if not dead:
+                read += len(raw)  # skipped (oversized) files do not use the budget
             if read > total_cap:
                 truncated = True
                 proc.kill()
@@ -139,6 +142,7 @@ def stream_added(d, args, per_file_cap, total_cap):
                 sizes[cur] += len(raw)
                 if sizes[cur] > per_file_cap:
                     dead = True
+                    read -= sizes[cur]  # refund what the dropped file used
                     files.pop(cur, None)
                     if cur not in skipped:
                         skipped.append(cur)

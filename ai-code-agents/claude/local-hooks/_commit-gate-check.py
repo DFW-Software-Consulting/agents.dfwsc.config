@@ -11,7 +11,8 @@ in the message. Warn only: subject format, where the repo already follows it.
 Limits (fail open): `bash -c '...'` bodies and shell aliases are not parsed; a
 same-line `git add` with a non-literal argument is treated like `git add -A`;
 a file with over 2 MB of added text (or an .npmrc over 64 KB) is not scanned and the
-warning says so. Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
+warning says so; skipped
+files do not use the scan budget. A path the commit deletes is never judged. Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
 extraction reuses commit_texts()/split_heredocs() from _public-text-check.py.
 """
 import fnmatch
@@ -28,7 +29,7 @@ SECRET_NAMES = [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
 ENV_EXAMPLES = {".env.example", ".env.sample", ".env.template", ".env.dist"}
 DOC_EXT = (".md", ".mdx", ".rst", ".txt")
 MAX_FILE = 2 * 1024 * 1024         # added text per file; larger files are not scanned
-MAX_TOTAL = 16 * 1024 * 1024   # bytes of diff read at all
+MAX_TOTAL = 16 * 1024 * 1024   # bytes of scanned (not skipped) diff text
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 SUBJECT_RE = re.compile(r"^(feat|fix|refactor|docs|test|chore|ci|perf|style|build|revert)(\([^)]+\))?!?: \S.*$")
 COMMITLINT = {"commitlint.config.js", "commitlint.config.cjs", "commitlint.config.mjs",
@@ -262,6 +263,9 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
     paths = {}  # rel path -> source label
 
     def put(p, src):
+        # A path the commit deletes (gone from disk, or removed by a rename) is never judged.
+        if src != "staged" and not os.path.lexists(os.path.join(top, p)):
+            return
         paths.setdefault(p, src)
 
     # `git commit <paths>` commits the working-tree content of those paths only,

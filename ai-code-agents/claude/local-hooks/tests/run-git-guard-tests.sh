@@ -420,6 +420,7 @@ check "assigned path of the repo: -u origin feat/x allowed" allow "$(bp "W=$R; c
 check "assigned path outside any repo: push origin main allowed" allow "$(bp "W=$X; git -C \"\$W\" push origin main" "$X")"
 check "assigned path via export: push origin main denied" deny "$(bp "export W=$R; cd \"\$W\" && git push origin main" "$X")"
 check "doubtful assignment is unknown: push origin main denied" deny "$(bp "true && W=$R; git -C \"\$W\" push origin main" "$X")"
+check "backtick reassignment drops the stale outside-repo value: push origin main denied" deny "$(bp "W=$X; W=\`pwd\`; git -C \"\$W\" push origin main" "$X")"
 check "assigned path then wrapper body judged in that repo" deny "$(bp "W=$R; eval 'cd \"\$W\" && git push origin main'" "$X")"
 
 # --- review round: escapes, prefixes, fed text, refspec spellings, directories not there yet, big lines ---

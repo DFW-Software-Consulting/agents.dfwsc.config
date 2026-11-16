@@ -17,7 +17,12 @@ resolved (`f=$(mktemp); cmd > "$f"`, an environment variable, a loop
 variable, an unquoted `${F}`) stays ALLOWED. This is deliberate: writing to a
 temporary file through a variable is an everyday pattern, and this gate does
 not deny on an unknown target. If _cmd_dirs.py cannot be imported, only
-literal targets in the line itself are judged, as before.
+literal targets in the line itself are judged, as before (one note on stderr).
+Limits: a relative target is judged as written (`cd <allowed dir> && echo > f` is
+denied, also in a body); cp, mv, install, dd, truncate, touch, mkdir and rm are not
+writes here; an unexported outer variable is assumed visible in a bash -c body.
+A name reassigned from a command, expansion, glob, brace or other non-literal
+value is unknown, never its old value (_cmd_dirs.certain_literal).
 
 Env: CMD (the command), GATE_HOME, GATE_SCRATCH. Allowlist mirrors the
 Edit/Write case statement in delegate-gate.sh.
@@ -261,6 +266,11 @@ def _cmd_dirs():
             _CD.append(mod)
         except Exception:
             _CD.append(None)
+            try:
+                sys.stderr.write("delegate-gate: shared walker (_cmd_dirs.py) not found or not importable; "
+                                 "judging literal write targets only\n")
+            except Exception:
+                pass
     return _CD[0]
 
 

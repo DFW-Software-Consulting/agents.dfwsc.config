@@ -171,6 +171,7 @@ check "GIT_DIR=\$W commit denied" deny "$(bp 'GIT_DIR="$W2" git commit -m x' "$p
 check "--git-dir=\$W commit denied" deny "$(bp 'git --git-dir="$W2" commit -m x' "$plain")"
 check "doubtful assignment is unknown: true && W=x; cd \$W denied" deny "$(bp "true && W=$wt; cd \"\$W\" && git commit -m x" "$plain")"
 check "conditional assignment is unknown denied" deny "$(bp "if true; then W=$wt; fi; cd \"\$W\" && git commit -m x" "$plain")"
+check "backtick reassignment drops the stale linked-worktree value: denied" deny "$(bp "W=$wt; W=\`echo $wt\`; cd \"\$W\" && git commit -m x" "$plain")"
 check "a directory is nonexistent so its nearest existing ancestor is judged: mkdir t && cd t && commit in primary denied" deny "$(bp 'mkdir t && cd t && git commit -m x' "$primary")"
 check "cd into a not yet existing subdirectory of primary denied" deny "$(bp "cd $P/newdir/deeper && git commit -m x" "$plain")"
 check "git -C a not yet existing path under primary denied" deny "$(bp "git -C $P/nothere commit -m x" "$plain")"

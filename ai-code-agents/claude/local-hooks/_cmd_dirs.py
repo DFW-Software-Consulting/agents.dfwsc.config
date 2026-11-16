@@ -42,7 +42,10 @@ analysis takes longer than BUDGET_SECS: the caller then applies only rules that
 need no directory (see cheap_commands). legacy=True is not bounded.
 
 A variable resolves only from a standalone, plain-literal assignment certain to
-have run (certain_env); anything doubtful is unknown. Command prefixes
+have run (certain_env); anything doubtful is unknown. A value counts as a plain
+literal only through certain_literal: no `$`, backtick, glob, brace, bracket,
+backslash escape or foreign tilde form; a later assignment of any other value makes
+the name unknown, never its earlier value. Command prefixes
 (`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
 effective(entry) is the one place that turns an entry into the directory to
 judge. Never runs anything and never touches a repository.
@@ -269,6 +272,15 @@ def prefix_env(toks, idx):
     return [tuple(toks[p][1].partition("=")[::2]) for p in sorted(idx) if scan.bwc.ASSIGN.match(toks[p][1])]
 
 
+def certain_literal(v):
+    """True when assigning v gives exactly the text v: no expansion of any kind
+    (`$`, backtick, glob, brace, bracket, a tilde form other than a bare `~` or
+    `~/...`). Anything else makes the name unknown."""
+    if not scan.literal(v) or any(c in v for c in "{}[]\\"):
+        return False
+    return not v.startswith("~") or v == "~" or v.startswith("~/")
+
+
 def certain_env(toks, i, temps=None, taint=False):
     """{NAME: literal value} for names certain to hold that value when the
     command at toks[i] expands its words. A name qualifies only through a
@@ -308,7 +320,7 @@ def certain_env(toks, i, temps=None, taint=False):
             for x in body:
                 k, _, v = x.partition("=")
                 fresh = k not in poison
-                if unsafe or not scan.literal(v) or k in poison:
+                if unsafe or not certain_literal(v) or k in poison:
                     bad(k)
                     if fresh and not unsafe and not taint and (mk == k or mktemp_word(v)):
                         temps.add(k)
@@ -342,16 +354,17 @@ def certain_env(toks, i, temps=None, taint=False):
             mk = None
             if t == "(":
                 ws = list(words)
-                if len(ws) >= 2 and ws[-1] == "$" and ws[-2].endswith("="):
+                if len(ws) >= 2 and ws[-1] == "$" and scan.bwc.ASSIGN.match(ws[-2]):
                     ws[-2:] = [ws[-2] + "$"]
-                m = re.fullmatch(r"([A-Za-z_]\w*)=\$", ws[-1])
+                m = re.fullmatch(r"([A-Za-z_]\w*)=.*\$", ws[-1], re.S)
                 if m and all(scan.bwc.ASSIGN.match(x) for x in (ws[1:-1] if ws[0] == "export" else ws[:-1])):
+                    words = ws  # NAME=`...` / NAME=$(...): a value made by a command, never a literal
                     q = n + 1
                     inner = []
                     while q < len(toks) and toks[q][0] == "w":
                         inner.append(toks[q][1])
                         q += 1
-                    if (q < len(toks) and toks[q] == ("o", ")") and inner
+                    if (q < len(toks) and toks[q] == ("o", ")") and inner and ws[-1] == m.group(1) + "=$"
                             and os.path.basename(inner[0]) == "mktemp"
                             and mktemp_word("$(" + " ".join(inner) + ")")):
                         mk = m.group(1)

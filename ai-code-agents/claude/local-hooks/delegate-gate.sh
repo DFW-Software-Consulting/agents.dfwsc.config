@@ -19,6 +19,12 @@
 # a loop variable) stays ALLOWED. This is deliberate: writing to a temporary
 # file through a variable is an everyday pattern, and this gate does not deny
 # on an unknown target. Without _cmd_dirs.py only literal targets are judged.
+# Limits: a relative write target is judged as written, so `cd <allowed dir> &&
+# echo hi > notes.md` is denied in the main session (also inside a body); cp,
+# mv, install, dd, truncate, touch, mkdir and rm are not treated as writes (with
+# a literal path or a variable); an unexported outer variable is assumed visible
+# inside a single-quoted body. If the shared walker cannot be loaded, one line
+# goes to standard error and only literal targets are judged.
 set -uo pipefail
 payload="$(cat)"
 
@@ -56,7 +62,7 @@ if [ "$tool_name" = "Bash" ] || [ -n "$command_str" ]; then
   printf '%s' "$command_str" | grep -qE '>|\btee\b|\b(sed|perl|awk|gawk)\b' || exit 0
   command -v python3 >/dev/null 2>&1 || exit 0
   target="$(CMD="$command_str" GATE_HOME="$HOME" GATE_SCRATCH="$scratch" \
-    python3 "$_gate_dir/_bash-write-check.py" 2>/dev/null)" || exit 0
+    python3 "$_gate_dir/_bash-write-check.py")" || exit 0
   [ -z "$target" ] && exit 0
   deny "Delegation gate: the main session does not write files, including through Bash. Writes go through a subagent (Agent tool, usually executor; pick the smallest model that fits). Escape hatch: touch ~/.claude/delegate-gate.off (expires after 12 hours) or launch with CLAUDE_DELEGATE_GATE=off. Blocked write target: $target"
 fi

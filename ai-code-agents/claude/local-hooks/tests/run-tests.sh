@@ -267,6 +267,46 @@ iso4="$(mktemp -d)"; mkdir "$iso4/cfg"; ln -s "$lh" "$iso4/cfg/local-hooks"; mkd
 check "linked file beside linked local-hooks: variable message denied" deny "python3 $iso4/cfg/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
 rm -rf "$iso" "$iso2" "$iso3" "$iso4"
 
+# --- reassignment to a command's output drops the old value (stays allowed: unknown target) ---
+for c in 'F=/abs/x; F=`mktemp`; echo hi > "$F"' 'F=/abs/x; F=$(mktemp); echo hi > "$F"' "F=$scratch/x; F=\`pwd\`/y; echo hi > \"\$F\"" \
+  'F=/abs/x; F=$((1+2)); echo hi > "$F"' 'F=/abs/x; F=$G; echo hi > "$F"' 'F=/abs/x; F=/abs/*; echo hi > "$F"'; do
+  check "allow: $c" allow "$gate" "$(bash_payload "$c")"
+done
+check "deny: assignment after the write does not hide it" deny "$gate" "$(bash_payload 'F=/abs/x; echo hi > "$F"; F=`mktemp`')"
+
+# --- commit message file with the option attached (-Fmsg.txt) ---
+for c in 'git commit -Fbad.txt' 'git commit -aFbad.txt' 'git commit -sF bad.txt' 'git commit -a -F bad.txt' 'git commit --file=bad.txt'; do
+  check "attached -F file with attribution denied: $c" deny "$mention" "$(prc "cd sub && $c" "$proj")"
+done
+for c in 'git commit -Fok.txt' 'git commit -aFok.txt' 'git commit -am "fix parser"' 'git commit -mFbad.txt' 'git commit -am"fix parser"'; do
+  check "clean or message form allowed: $c" allow "$mention" "$(prc "cd sub && $c" "$proj")"
+done
+check "attached -F unreadable file denied" deny "$mention" "$(prc "cd sub && git commit -Fmissing.txt" "$proj")"
+
+# --- fallbacks say so on standard error, never on the hook's output ---
+# check_err NAME SCRIPT PAYLOAD STDOUT-EXPECT(exact) STDERR-REGEX (empty regex: stderr must be empty)
+check_err() {
+  local name="$1" script="$2" payload="$3" want="$4" re="$5" out err rc ef; ef="$(mktemp)"
+  out="$(printf '%s' "$payload" | $script 2>"$ef")"; rc=$?; err="$(cat "$ef")"; rm -f "$ef"
+  if [ "$rc" -eq 0 ] && [ "$out" = "$want" ] && { [ -z "$re" ] && [ -z "$err" ] || { [ -n "$re" ] && grep -qE "$re" <<<"$err"; }; }; then
+    pass=$((pass + 1)); echo "ok   - $name"
+  else fail=$((fail + 1)); echo "FAIL - $name (rc=$rc out=[$out] err=[$err])"; fi
+}
+iso="$(mktemp -d)"; mkdir "$iso/hooks"; cp "$(dirname "$pyhook")/no-agent-mention.py" "$iso/hooks/"
+cp "$hooks/delegate-gate.sh" "$hooks/_gate-common.sh" "$hooks/_bash-write-check.py" "$iso/"
+vm="$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
+check_err "no walker: hook output unchanged and a note on stderr" "python3 $iso/hooks/no-agent-mention.py" "$vm" '{}' 'no-agent-mention: .*walker'
+mkdir "$iso/local-hooks"; echo 'raise RuntimeError("broken")' > "$iso/local-hooks/_cmd_dirs.py"
+check_err "broken walker: hook output unchanged and a note on stderr" "python3 $iso/hooks/no-agent-mention.py" "$vm" '{}' 'no-agent-mention: .*walker'
+check_err "no walker needed: plain commit is silent on stderr" "python3 $iso/hooks/no-agent-mention.py" "$(pr 'git commit -m "fix parser"')" '{}' ''
+check_err "working walker: no stderr" "$mention" "$vm" "$(printf '%s' "$vm" | $mention)" ''
+check_err "malformed input: allowed with a note" "$mention" 'not json' '{}' 'no-agent-mention: malformed'
+check_err "empty input: allowed with a note" "$mention" '' '{}' 'no-agent-mention: malformed'
+check_err "no walker: delegate gate allows a variable target with a note" "bash $iso/delegate-gate.sh" "$(bash_payload 'F=/abs/file; echo hi > "$F"')" '' 'delegate-gate: .*walker'
+check_err "no walker: delegate gate literal deny has no note" "bash $iso/delegate-gate.sh" "$(bash_payload 'echo hi > /abs/file')" "$(printf '%s' "$(bash_payload 'echo hi > /abs/file')" | bash "$hooks/delegate-gate.sh")" ''
+check_err "working walker: delegate gate is silent on stderr" "$gate" "$(bash_payload 'F=$(mktemp); echo hi > "$F"')" '' ''
+rm -rf "$iso"
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

@@ -32,7 +32,10 @@ repository and in the installed layout, through the link or its target):
   `gh pr` command are judged, files and variables included.
 A message that cannot be resolved (`-m "$(cat f)"`, an environment variable) is
 judged as written, as before. If the module cannot be found or fails, the hook
-behaves exactly as it did without it (fails open to the old behaviour). Read-only.
+behaves exactly as it did without it (fails open to the old behaviour) and writes
+one line to standard error; malformed input is allowed with a line on standard
+error too. `-F` with the file attached (`-Fmsg.txt`, `-aFmsg.txt`) is read as a
+file (it used to be read as a message). Read-only.
 """
 import json
 import os
@@ -161,6 +164,15 @@ def commit_texts(toks, read=None):
         elif t in ("-F", "--file") and i + 1 < len(toks):
             i += 1
             msgs.append(read(toks[i]))
+        elif (not t.startswith("--") and re.match(r"^-[a-zA-Z]*F", t)
+              and "m" not in t[1:t.index("F")]):
+            # -F with the file attached (-Fmsg.txt) or last in a cluster (-aF msg.txt)
+            rest = t[t.index("F") + 1:]
+            if rest:
+                msgs.append(read(rest))
+            elif i + 1 < len(toks):
+                i += 1
+                msgs.append(read(toks[i]))
         elif re.fullmatch(r"-[a-zA-Z]*m", t) and i + 1 < len(toks):
             i += 1  # -m and clustered forms like -am, -sm
             msgs.append(toks[i])
@@ -173,6 +185,14 @@ def commit_texts(toks, read=None):
 # Cheap test: does the line need the walker at all (a directory change, a
 # variable, a wrapper, or a message file)?
 NEEDS_WALK = re.compile(r"\$|`|\bcd\b|\bpushd\b|\s-C\b|\b(?:ba|z|da|k)?sh\b|\beval\b|\benv\b|\s-[a-zA-Z]*F|--file|--body-file")
+
+
+def note(msg):
+    """One line on standard error (never on the hook's output)."""
+    try:
+        sys.stderr.write("no-agent-mention: " + msg + "\n")
+    except Exception:
+        pass
 
 
 def load_cmd_dirs():
@@ -192,6 +212,8 @@ def load_cmd_dirs():
             return mod
         except Exception:
             continue
+    note("shared walker (local-hooks/_cmd_dirs.py) not found or not importable; "
+         "using the checks without variable, directory and command-body resolution")
     return None
 
 
@@ -262,6 +284,7 @@ def main():
         if not isinstance(cmd, str) or not isinstance(cwd, str):
             raise ValueError("bad field")
     except (ValueError, AttributeError):
+        note("malformed hook input; allowing")
         allow()  # malformed input: fail open (this used to end in a traceback)
     is_commit = "git" in cmd and "commit" in cmd
     is_pr = "gh" in cmd and "pr" in cmd
@@ -277,6 +300,7 @@ def main():
         try:
             extra = walked_texts(cmd, cwd)
         except Exception:
+            note("shared walker failed; using the checks without variable, directory and command-body resolution")
             extra = []  # any trouble with the walker: the old behaviour
 
     def hit(texts):

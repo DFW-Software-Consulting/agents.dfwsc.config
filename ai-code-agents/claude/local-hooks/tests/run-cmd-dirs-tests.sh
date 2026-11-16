@@ -59,6 +59,20 @@ case("unset variable is unknown", "cd \"$W\" && git commit", ["git:commit@unknow
 case("doubtful assignment is unknown", "true && W=/p; cd \"$W\" && git commit", ["git:commit@unknown"])
 case("conditional assignment is unknown", "if x; then W=/p; fi; cd \"$W\"; git commit", ["git:commit@unknown"])
 case("prefix assignment does not count", "W=/p cd \"$W\" && git commit", ["git:commit@unknown"])
+# A later assignment whose value is not a plain literal makes the name unknown, never the old value.
+for label, val in (("backticks", "`pwd`"), ("command substitution", "$(pwd)"), ("arithmetic", "$((1+2))"),
+                   ("parameter expansion", "${X:-/q}"), ("another variable", "$Y"), ("process substitution", "<(pwd)"),
+                   ("glob star", "/q/*"), ("glob question mark", "/q/?"), ("glob bracket", "/q/[ab]"),
+                   ("brace expansion", "/q/{a,b}"), ("other user's tilde", "~someone/q"), ("ANSI-C escape", "$'\\x2f'"),
+                   ("backticks after text", "/q/`pwd`"), ("backticks before text", "`pwd`/q"),
+                   ("export with backticks", "`pwd`")):
+    pre = "export W=" if label == "export with backticks" else "W="
+    for leg in (False, True):
+        case(f"stale value dropped after {label}{' (legacy)' if leg else ''}",
+             f"W=/p; {pre}{val}; cd \"$W\" && git commit", ["git:commit@unknown"], legacy=leg)
+case("unterminated quote in an assignment: nothing to judge", 'W=/p; W="/q; cd "$W" && git commit', [])
+case("bare tilde assignment still resolves", "W=~; cd \"$W\" && git commit", ["git:commit@/home/u"])
+case("tilde slash assignment still resolves", "W=~/r; cd \"$W\" && git commit", ["git:commit@/home/u/r"])
 case("cd - is unknown", "cd - && git commit", ["git:commit@unknown"])
 case("popd is unknown", "popd && git commit", ["git:commit@unknown"], why="popd")
 case("unknown then literal cd recovers", "cd \"$X\" && cd /p && git commit", ["git:commit@/p"])

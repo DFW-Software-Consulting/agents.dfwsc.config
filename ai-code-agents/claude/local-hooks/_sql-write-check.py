@@ -396,15 +396,24 @@ def handle_dml(verb, i, st, dep, ctx):
             set_i = next((j for j in top if isw(st[j], 'set')), None)
             if set_i is not None:
                 stop = min([j for j in top if j > set_i and isw(st[j], 'from', 'where', 'returning')] + [end])
-                tj = [j for j in top if set_i <= j < stop]
-                for a_, b_ in zip(tj, tj[1:]):
-                    if isw(st[a_], 'set') or isp(st[a_], ','):
-                        pass
-                    else:
+                acols = cfg['ATTRIBUTION_COLUMNS']
+                for i2 in range(set_i, stop):
+                    if dep[i2] != d or not (isw(st[i2], 'set') or isp(st[i2], ',')):
                         continue
-                    if isid(st[b_]) and st[b_][1] in cfg['ATTRIBUTION_COLUMNS'] and b_ + 1 < end \
-                            and isp(st[b_ + 1], '='):
-                        reassigns = True
+                    j = i2 + 1
+                    if j < stop and isp(st[j], '('):
+                        m = j + 1
+                        while m < stop and dep[m] > d:
+                            if dep[m] == d + 1 and isid(st[m]) and st[m][1] in acols \
+                                    and (isp(st[m - 1], '(') or isp(st[m - 1], ',')):
+                                reassigns = True
+                            m += 1
+                    else:
+                        m = j
+                        while m + 2 < stop and isid(st[m]) and isp(st[m + 1], '.') and isid(st[m + 2]):
+                            m += 2
+                        if m + 1 < stop and isid(st[m]) and st[m][1] in acols and isp(st[m + 1], '='):
+                            reassigns = True
         if reassigns:
             ctx.ask('Shared database gate: this UPDATE on %s assigns an attribution column, which changes '
                     'who owns the row. Confirm it is intended.' % full)

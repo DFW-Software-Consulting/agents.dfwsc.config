@@ -36,13 +36,13 @@ def show(e):
     return s
 
 
-def case(name, cmd, expect, cwd="/w", legacy=False, why=None):
+def case(name, cmd, expect, cwd="/w", why=None):
     global passed, failed
     SEEN.append(cmd)
-    got = [show(e) for e in cd.walk(cmd, cwd, home=H, legacy=legacy)]
+    got = [show(e) for e in cd.walk(cmd, cwd, home=H)]
     ok = got == expect
     if ok and why is not None:
-        ok = any(why in (e["why"] or "") for e in cd.walk(cmd, cwd, home=H, legacy=legacy))
+        ok = any(why in (e["why"] or "") for e in cd.walk(cmd, cwd, home=H))
     if ok:
         passed += 1; print(f"ok   - {name}")
     else:
@@ -70,9 +70,8 @@ for label, val in (("backticks", "`pwd`"), ("command substitution", "$(pwd)"), (
                    ("export with backticks", "`pwd`"), ("process substitution inside text", "/q/<(echo)"),
                    ("output process substitution inside text", "/q/>(cat)"), ("tilde after a colon", "/q/a:~/b"), ("two tildes", "~/x:~/y")):
     pre = "export W=" if label == "export with backticks" else "W="
-    for leg in (False, True):
-        case(f"stale value dropped after {label}{' (legacy)' if leg else ''}",
-             f"W=/p; {pre}{val}; cd \"$W\" && git commit", ["git:commit@unknown"], legacy=leg)
+    case(f"stale value dropped after {label}",
+         f"W=/p; {pre}{val}; cd \"$W\" && git commit", ["git:commit@unknown"])
 case("unterminated quote in an assignment: one body entry for the guards", 'W=/p; W="/q; cd "$W" && git commit', ["body:unknown"])
 case("bare tilde assignment still resolves", "W=~; cd \"$W\" && git commit", ["git:commit@/home/u"])
 case("tilde slash assignment still resolves", "W=~/r; cd \"$W\" && git commit", ["git:commit@/home/u/r"])
@@ -89,7 +88,6 @@ case("mktemp reassigned is unknown", "T=$(mktemp -d); T=$X; cd \"$T\"; git add .
 case("mktemp then absolute cd is known", "T=$(mktemp -d); cd \"$T\"; cd /p; git add .", ["git:add@/p"])
 case("env -C", "env -C /p git commit", ["git:commit@/p"])
 case("env -C variable", "env -C \"$X\" git commit", ["git:commit@unknown"])
-case("env -C is not followed in legacy mode", "env -C /p git commit", [], legacy=True)
 case("GIT_DIR literal", "GIT_DIR=x git push", ["git:push@/w[literal]"])
 case("GIT_DIR variable", "GIT_DIR=\"$V\" git push", ["git:push@/w[unknown]"])
 case("--git-dir and --work-tree", "git --git-dir=x --work-tree=\"$V\" push", ["git:push@/w[unknown]"])
@@ -853,8 +851,6 @@ if dt < 0.2:
 else:
     failed += 1; print(f"FAIL - runtime: _lex on 1 MB took {dt:.2f}s")
 
-# legacy mode (checks-gate) is frozen: the substitution prefix is not rewritten there
-case("legacy: substitution prefix unchanged", "GIT_DIR=$(pwd)/.git git commit -m x", [], legacy=True)
 # checks-gate's analyze() results (normal mode) are pinned; regenerate the fixture only from a deliberate change
 import importlib.util, json
 spec = importlib.util.spec_from_file_location("cgc", os.path.join(os.environ["HOOKS"], "_checks-gate-check.py"))

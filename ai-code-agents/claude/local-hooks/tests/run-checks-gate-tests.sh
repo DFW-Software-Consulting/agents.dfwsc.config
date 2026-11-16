@@ -223,7 +223,7 @@ for ex in 'git push --dry-run origin feat' 'git push -n origin feat' 'git push o
   check "unknown dir, text-only exemption silent: $ex" silent "$(bp "cd \"\$W\" && $ex")"
   check "unknown -C, text-only exemption silent: $ex" silent "$(bp "git -C \"\$W\" ${ex#git }")"
 done
-# a push behind a wrapper is judged like a bare push (the legacy walker did not see it)
+# a push behind a wrapper is judged like a bare push
 for w in 'timeout 5' 'timeout --signal=KILL 5' 'sudo' 'sudo -u root' 'nice' 'nice -n 5' 'env' 'env -u FOO' 'env FOO=1' 'ionice -c 3' 'stdbuf -oL' 'setsid' 'doas'; do
   check "wrapped push, unstamped repo denied: $w" deny "$(bp "$w git -C $p push origin feat")"
   check "wrapped push, passing record silent: $w" silent "$(bp "$w git -C $r push origin feat")"

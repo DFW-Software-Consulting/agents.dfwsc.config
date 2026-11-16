@@ -5,7 +5,9 @@
 #   SubagentStop: inspects last_assistant_message, blocks.
 # A report must have an "Acceptance check" section with no "not met" line, and a
 # "Context docs:" line. Each agent is sent back at most HANDBACK_SEND_BACK_CAP
-# times; after that the report goes through as is. Fails open on any error.
+# times; after that the report goes through as is. For every agent type, exempt
+# ones included, a report longer than handback_max_chars (default 4000, env
+# CLAUDE_HANDBACK_MAX_CHARS) is also sent back. Fails open on any error.
 set -uo pipefail
 payload="$(cat 2>/dev/null)" || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
@@ -15,6 +17,11 @@ _dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" 2>/dev/null && pwd)
 if ! source "$_dir/_handback-common.sh" 2>/dev/null; then
   HANDBACK_EXEMPT_TYPES="Explore codebase-locator codebase-analyzer context-synthesis check web-fetch claude-code-guide Plan statusline-setup antipattern-sniffer fork"
   HANDBACK_SEND_BACK_CAP=2
+  handback_max_chars() {
+    local v="${CLAUDE_HANDBACK_MAX_CHARS:-}"
+    case "$v" in ''|*[!0-9]*) echo 4000; return ;; esac
+    v=$((10#$v)); [ "$v" -gt 0 ] || v=4000; echo "$v"
+  }
   acceptance_gate_is_off() { [ "${CLAUDE_ACCEPTANCE_GATE:-on}" = "off" ]; }
   handback_is_exempt() {
     local t="$1" e; [ -n "$t" ] || return 1
@@ -27,7 +34,8 @@ event="$(jq -r '.hook_event_name // empty' <<<"$payload" 2>/dev/null)" || exit 0
 agent_id="$(jq -r '.agent_id // empty' <<<"$payload" 2>/dev/null)" || exit 0
 [ -n "$agent_id" ] || exit 0
 agent_type="$(jq -r '.agent_type // empty' <<<"$payload" 2>/dev/null)" || exit 0
-handback_is_exempt "$agent_type" && exit 0
+exempt=0
+handback_is_exempt "$agent_type" && exempt=1
 
 case "$event" in
   PreToolUse) field='.tool_input.message' ;;
@@ -65,8 +73,15 @@ finish() { if [ "$event" = "SubagentStop" ]; then rm -f "$state" 2>/dev/null; el
 [ "$count" -ge "$HANDBACK_SEND_BACK_CAP" ] && finish
 
 problems=()
+max_chars="$(handback_max_chars)"
+text_len="$(jq -r "$field | length" <<<"$payload" 2>/dev/null)" || text_len=0
+case "$text_len" in ''|*[!0-9]*) text_len=0 ;; esac
+if [ "$text_len" -gt "$max_chars" ]; then
+  problems+=("Your report is ${text_len} characters; the limit is ${max_chars} (a report of exactly ${max_chars} is fine). Shorten it by dropping detail and keeping the conclusions. If you can write files, put the detail in a file and give its path in the report.")
+fi
 # Parse the report. Prints NOSECTION, UNMET or OK.
-verdict="$(awk '
+verdict=SKIP
+if [ "$exempt" -eq 0 ]; then verdict="$(awk '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 # Status of a criterion line: "met" or "not"; "" when none found.
 function status(line,   t, n, f, i, w, nw, a, x, k) {
@@ -110,14 +125,14 @@ END {
     if (status(lines[i]) == "not") { print "UNMET"; exit }
   }
   print "OK"
-}' <<<"$text")"
+}' <<<"$text")"; fi
 case "$verdict" in
   NOSECTION)
     problems+=("Your report has no 'Acceptance check' section. Check every acceptance criterion from your brief against what you actually did, run the checks, fix what fails, and add a section headed 'Acceptance check' with one line per criterion: '<criterion> : met | not met : <evidence>'.") ;;
   UNMET)
     problems+=("Your Acceptance check has criteria marked 'not met'. Fix the unmet criteria, or if you are truly blocked say what blocks it, then hand back again.") ;;
 esac
-if ! grep -qiE '^[[:space:]]*(>[[:space:]]*)?([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)?(\*\*|__)?context docs(\*\*|__)?[[:space:]]*(:|-|–|—)' <<<"$text"; then
+if [ "$exempt" -eq 0 ] && ! grep -qiE '^[[:space:]]*(>[[:space:]]*)?([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)?(\*\*|__)?context docs(\*\*|__)?[[:space:]]*(:|-|–|—)' <<<"$text"; then
   problems+=("Your report has no 'Context docs:' line. End it with 'Context docs: updated <files>', 'Context docs: no change needed, <reason>' or 'Context docs: none in this repo' (update docs/context first if the repo has it).")
 fi
 

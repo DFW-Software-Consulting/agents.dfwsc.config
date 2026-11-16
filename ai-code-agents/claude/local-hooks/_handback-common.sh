@@ -18,3 +18,15 @@ handback_is_exempt() {
   for e in $HANDBACK_EXEMPT_TYPES; do [ "$e" = "$t" ] && return 0; done
   return 1
 }
+
+# Longest report (characters, code blocks included) that goes through unsent
+# back. Override with CLAUDE_HANDBACK_MAX_CHARS: digits only, read as decimal
+# (so 08 and 09 are 8 and 9, not octal); non-numeric or zero = default.
+HANDBACK_MAX_CHARS_DEFAULT=4000
+handback_max_chars() {
+  local v="${CLAUDE_HANDBACK_MAX_CHARS:-}"
+  case "$v" in ''|*[!0-9]*) echo "$HANDBACK_MAX_CHARS_DEFAULT"; return ;; esac
+  v=$((10#$v))
+  [ "$v" -gt 0 ] || v="$HANDBACK_MAX_CHARS_DEFAULT"
+  echo "$v"
+}

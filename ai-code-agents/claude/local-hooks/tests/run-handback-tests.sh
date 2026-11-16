@@ -201,6 +201,46 @@ expect "'Success criteria:' allowed" "$req" "$(ag $'Do it\nSuccess criteria:\n- 
 expect "'## Success criteria' allowed" "$req" "$(ag $'Do it\n## Success criteria' executor)" none
 expect "'success criteria' mid-sentence denied" "$req" "$(ag 'please define success criteria later' executor)" deny
 
+# --- report size cap ---
+unset CLAUDE_HANDBACK_MAX_CHARS
+filler() { head -c "$1" /dev/zero | tr '\0' 'y'; }
+longgood="$good"$'\n'"$(filler 4100)"
+expect "over-limit report from gated type sent back" "$hb" "$(pre "$longgood" "sz1-$run")" deny
+r="$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")"
+grep -q 'limit is 4000' <<<"$r" && grep -q 'path' <<<"$r" && grep -q 'file' <<<"$r" && ok "size reason names the limit and a file path" || bad "size reason" "$r"
+expect "over-limit report from exempt type sent back" "$hb" "$(pre "$(filler 4100)" "sz2-$run" Explore)" deny
+expect "under-limit report from exempt type allowed" "$hb" "$(pre "$(filler 3900)" "sz3-$run" Explore)" none
+expect "under-limit good report unaffected" "$hb" "$(pre "$good$(filler 3000)" "sz4-$run")" none
+expect "code blocks count toward the limit" "$hb" "$(pre "$good"$'\n```\n'"$(filler 4100)"$'\n```' "sz5-$run")" deny
+expect "SubagentStop over-limit exempt blocked" "$hb" "$(stp "$(filler 4100)" "sz6-$run" false Plan)" block
+expect "exactly at the limit allowed" "$hb" "$(pre "$(filler 4000)" "sz7-$run" Explore)" none
+expect "one over the limit sent back" "$hb" "$(pre "$(filler 4001)" "sz8-$run" Explore)" deny
+CLAUDE_HANDBACK_MAX_CHARS=100 call "$hb" "$(pre "$(filler 150)" "sz9-$run" Explore)"
+jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$out" >/dev/null 2>&1 && grep -q 'limit is 100' <<<"$out" && ok "env override lowers the limit" || bad "env override low" "$out"
+CLAUDE_HANDBACK_MAX_CHARS=9000 call "$hb" "$(pre "$(filler 5000)" "sz10-$run" Explore)"
+[ -z "$out" ] && [ "$rc" -eq 0 ] && ok "env override raises the limit" || bad "env override high" "$out"
+for badv in abc 0 -5 1.5 ''; do
+  CLAUDE_HANDBACK_MAX_CHARS="$badv" call "$hb" "$(pre "$(filler 4100)" "szb-${badv:-empty}-$run" Explore)"
+  jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$out" >/dev/null 2>&1 && grep -q 'limit is 4000' <<<"$out" && ok "bad CLAUDE_HANDBACK_MAX_CHARS '$badv' uses default" || bad "bad env '$badv'" "$out"
+done
+grep -q '4235 characters' <<<"$(CLAUDE_HANDBACK_MAX_CHARS= call "$hb" "$(pre "$longgood" "szlen-$run")"; echo "$out")" && ok "reason contains the actual length" || bad "reason length"
+call "$hb" "$(pre "$(filler 4100)" "szlen2-$run" Explore)"; grep -q 'is 4100 characters' <<<"$out" && grep -q 'exactly 4000 is fine' <<<"$out" && grep -q 'If you can write files' <<<"$out" && ok "reason has length, boundary and optional file hint" || bad "reason wording" "$out"
+emoji="$(jq -rn '[range(4000)|"😀"]|join("")')"
+LC_ALL=C call "$hb" "$(pre "$emoji" "szemo-$run" Explore)"; [ -z "$out" ] && [ "$rc" -eq 0 ] && ok "4000 emoji pass under LC_ALL=C (chars, not bytes)" || bad "emoji bytes counted" "$out"
+LC_ALL=C call "$hb" "$(pre "${emoji}😀" "szemo2-$run" Explore)"; grep -q 'is 4001 characters' <<<"$out" && ok "4001 emoji sent back with char count" || bad "emoji over" "$out"
+CLAUDE_HANDBACK_MAX_CHARS=08 call "$hb" "$(pre "$(filler 9)" "sz08-$run" Explore)"; grep -q 'limit is 8 ' <<<"$out" && ok "override 08 is decimal 8" || bad "override 08" "$out"
+CLAUDE_HANDBACK_MAX_CHARS=09 call "$hb" "$(pre "$(filler 9)" "sz09-$run" Explore)"; [ -z "$out" ] && ok "override 09 is decimal 9 (9 chars pass)" || bad "override 09" "$out"
+CLAUDE_HANDBACK_MAX_CHARS=09 call "$hb" "$(pre "$(filler 10)" "sz09b-$run" Explore)"; grep -q 'limit is 9 ' <<<"$out" && ok "override 09 limits at 9" || bad "override 09b" "$out"
+expect "combined: long and no Acceptance check" "$hb" "$(pre "$(filler 4100)"$'\nContext docs: none' "sz11-$run")" deny
+r="$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")"
+grep -q 'limit is 4000' <<<"$r" && grep -q 'Acceptance check' <<<"$r" && ok "combined reason has size and acceptance problems" || bad "combined size reason" "$r"
+id="szcap-$run"; lm="$(filler 4100)"
+expect "size attempt 1 sent back" "$hb" "$(pre "$lm" "$id" Explore)" deny
+expect "size attempt 2 sent back" "$hb" "$(pre "$lm" "$id" Explore)" deny
+expect "size attempt 3 passes by the cap" "$hb" "$(pre "$lm" "$id" Explore)" none
+CLAUDE_ACCEPTANCE_GATE=off call "$hb" "$(pre "$lm" "szoff-$run" Explore)"; [ -z "$out" ] && [ "$rc" -eq 0 ] && ok "off switch disables the size check" || bad "off switch size" "$out"
+CLAUDE_ACCEPTANCE_GATE=off call "$hb" "$(pre "$longgood" "szoff2-$run")"; [ -z "$out" ] && [ "$rc" -eq 0 ] && ok "off switch disables size check for gated type" || bad "off switch size gated" "$out"
+
 # --- fail open: malformed and empty stdin, every script ---
 for s in "$start" "$req" "$hb"; do
   n="$(basename "$s")"

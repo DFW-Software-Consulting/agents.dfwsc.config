@@ -16,6 +16,7 @@ Findings:
 - #21 Adds git-guard (no hook bypass, no force push, no push to the default branch); refactors `_git-cmd-scan.py` onto a `walk()` generator, old and new output matched on 460 combinations.
 - #22 Adds `run-checks.sh`, `_run_checks.py`, `_checks_stamp.py` and the `git-verify` skill: runs a repo's checks for the current commit and writes a stamp keyed by commit hash. On request only; not a hook. Refused on a dirty tree; a would-be pass becomes dirty_after if HEAD moved.
 - #23 Reply cap: adds "explain this more", "explain that more", "explain more", "tell me more", "elaborate" as one-shot approvals; a one-shot phrase no longer ends a session-long "limit off" approval.
+- Adds checks-gate (reads the run-checks stamps before push and PR create; warn or deny by config) and conditional `--force-with-lease` in git-guard (valid stamp, then ask).
 Lessons:
 - Test the whole `ai-code-agents/claude/` tree, not just `local-hooks/`.
 - Do not stack pull requests on a base that will be squash-merged.
@@ -25,3 +26,4 @@ Lessons:
 - When a shared scanner changes, compare old and new output on the same inputs.
 - Capture command output through a temporary file, not a pipe.
 - Verify tool names in command headers; wrong names pre-approve nothing.
+- A hook decision of "ask" is soft: keep judging the rest of the command line before answering.

@@ -1,0 +1,5 @@
+# ~/.claude/checks-gate.conf  (read as data, never executed)
+# MODE: warn (default) lets the push or PR through with a notice; deny blocks it.
+MODE=warn
+# From this local date on the mode is deny regardless of MODE.
+# DENY_AFTER=2026-12-01

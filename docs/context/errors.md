@@ -2,6 +2,12 @@
 
 Newest first. Check here before proposing a fix.
 
+## Force push runs after approving a lease push (git-guard.sh, `_git-guard-check.py` `judge`)
+- Signature: `git push --force-with-lease origin feat && git push -f origin other` produced only the ask; the second command was never judged.
+- Cause: `judge` returned the "ask" decision as soon as it found one, ending the scan of the command line.
+- Fix: treat ask as soft: judge every command, return the first deny, else one ask covering all lease pushes.
+- Date: 2026-11-15
+
 ## `null || true` in a listing of hook commands
 - Cause: in a listing that prints the last path segment of each hook command, a command ending in `2>/dev/null || true` shows as `null || true`. The hook is still registered; only the display misleads.
 - Fix: read the full command string, not its last path segment.

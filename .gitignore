@@ -2,3 +2,5 @@ memory-bank/
 ai-code-agents/opencode/.env
 
 ai-code-agents/codex/tmp/
+__pycache__/
+*.pyc

@@ -21,7 +21,7 @@ bad() { fail=$((fail + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$3], got [$2]"; fi; }
 
 T="$(mktemp -d "$HOME/t.XXXXXX")"
-lib() { python3 -I -c "
+lib() { python3 -I -B -c "
 import sys,json; sys.path.insert(0,'$hooks'); import _checks_stamp as c
 $1"; }
 detect() { lib "print(json.dumps(c.detect_commands('$1', $2)))"; }
@@ -301,7 +301,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do st="$(ps -o stat= -p "$pid" 2>/dev/null)"; if 
 eq "background child is gone" "$gone" yes
 r="$(mkrepo big $'yes some-output-line | head -c 50000000')"
 s0=$SECONDS
-out="$(python3 -I -c "
+out="$(python3 -I -B -c "
 import resource,subprocess,sys
 p=subprocess.run(['bash','$rc_script','--dir','$r'],capture_output=True,text=True)
 sys.stdout.write(p.stdout); sys.stderr.write(str(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss))" 2>"$T/rss")"

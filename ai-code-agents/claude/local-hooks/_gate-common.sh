@@ -16,7 +16,9 @@ gate_off_file_state() {
   local mtime now
   mtime="$(stat -c %Y "$GATE_OFF_FILE" 2>/dev/null)" || { echo none; return; }
   now="$(date +%s)"
-  if [ $((now - mtime)) -lt "$GATE_OFF_TTL_SECONDS" ]; then echo fresh; else echo stale; fi
+  local age=$((now - mtime))
+  # A future mtime is not trusted: treat as gate ON (stale).
+  if [ "$age" -ge 0 ] && [ "$age" -lt "$GATE_OFF_TTL_SECONDS" ]; then echo fresh; else echo stale; fi
 }
 
 gate_is_off() {

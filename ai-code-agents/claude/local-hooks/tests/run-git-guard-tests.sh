@@ -4,6 +4,7 @@
 # temp dir, and uses a temporary HOME so the real ~/.claude/git-guard.off is never read.
 # Usage: local-hooks/tests/run-git-guard-tests.sh   (set TMPDIR to pick the temp location)
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hooks="$(cd "$here/.." && pwd)"
 export HOME; HOME="$(mktemp -d)"
@@ -20,7 +21,8 @@ pass=0; fail=0
 check() {
   local name="$1" expect="$2" payload="$3" out rc got
   out="$(printf '%s' "$payload" | $gate 2>&1)"; rc=$?
-  if grep -q '"permissionDecision": *"deny"' <<<"$out" && jq -e '(.hookSpecificOutput | keys) == ["hookEventName","permissionDecision","permissionDecisionReason"] and .hookSpecificOutput.hookEventName=="PreToolUse" and (.hookSpecificOutput.permissionDecisionReason|type=="string")' <<<"$out" >/dev/null 2>&1; then got=deny; else got=allow; fi
+  if grep -q '"permissionDecision": *"ask"' <<<"$out" && jq -e '(.hookSpecificOutput | keys) == ["hookEventName","permissionDecision","permissionDecisionReason"] and .hookSpecificOutput.permissionDecision=="ask" and .hookSpecificOutput.hookEventName=="PreToolUse"' <<<"$out" >/dev/null 2>&1; then got=ask
+  elif grep -q '"permissionDecision": *"deny"' <<<"$out" && jq -e '(.hookSpecificOutput | keys) == ["hookEventName","permissionDecision","permissionDecisionReason"] and .hookSpecificOutput.hookEventName=="PreToolUse" and (.hookSpecificOutput.permissionDecisionReason|type=="string")' <<<"$out" >/dev/null 2>&1; then got=deny; else got=allow; fi
   if [ "$rc" -eq 0 ] && [ "$got" = "$expect" ]; then
     pass=$((pass + 1)); echo "ok   - $name"
   else
@@ -239,6 +241,73 @@ check "push --tags on main allowed (again)" allow "$(bp 'git push --tags')"
 check "push -d origin old-branch on main allowed" allow "$(bp 'git push -d origin old-branch')"
 check "push --del origin old-branch on main allowed" allow "$(bp 'git push --del origin old-branch')"
 check "push -d origin main denied" deny "$(bp 'git push -d origin main')"
+
+# --- conditional force-with-lease (needs a valid check stamp) ---
+rc="$hooks/run-checks.sh"
+# mklease NAME CHECKS: repo on branch lf with a bare origin (default main) and a committed .claude/git-checks
+mklease() {
+  mkrepo "$1" main
+  git -C "$T/$1" checkout -q -b lf; mkdir -p "$T/$1/.claude"; printf '%s\n' "$2" > "$T/$1/.claude/git-checks"
+  git -C "$T/$1" add -A; git -C "$T/$1" commit -qm checks
+}
+mklease lp true; mklease ln none; mklease lnone true; mklease lfail false; mklease lstale true
+bash "$rc" --dir "$T/lp" >/dev/null 2>&1
+bash "$rc" --dir "$T/ln" >/dev/null 2>&1
+bash "$rc" --dir "$T/lfail" >/dev/null 2>&1
+bash "$rc" --dir "$T/lstale" >/dev/null 2>&1
+echo more > "$T/lstale/more.txt"; git -C "$T/lstale" add -A; git -C "$T/lstale" commit -qm more
+lbefore="$(for d in lp ln lnone lfail lstale; do echo "$d $(git -C "$T/$d" rev-parse HEAD) $(git -C "$T/$d" status --porcelain | md5sum)"; done)"
+L="$T/lp"
+check "lease with a valid passed stamp asks" ask "$(bp 'git push --force-with-lease origin lf' "$L")"
+check "lease with a none_detected stamp asks" ask "$(bp 'git push --force-with-lease origin lf' "$T/ln")"
+check "lease with no stamp denied" deny "$(bp 'git push --force-with-lease origin lf' "$T/lnone")"
+check "lease with a failed stamp denied" deny "$(bp 'git push --force-with-lease origin lf' "$T/lfail")"
+check "lease with a stale stamp denied" deny "$(bp 'git push --force-with-lease origin lf' "$T/lstale")"
+check "lease to the default branch denied" deny "$(bp 'git push --force-with-lease origin lf:main' "$L")"
+check "lease to the default branch by name denied" deny "$(bp 'git push --force-with-lease origin main' "$L")"
+check "lease plus --force denied" deny "$(bp 'git push --force-with-lease --force origin lf' "$L")"
+check "lease plus -f denied" deny "$(bp 'git push --force-with-lease -f origin lf' "$L")"
+check "lease plus +refspec denied" deny "$(bp 'git push --force-with-lease origin +lf' "$L")"
+check "--force alone still denied with a valid stamp" deny "$(bp 'git push --force origin lf' "$L")"
+check "-f alone still denied with a valid stamp" deny "$(bp 'git push -f origin lf' "$L")"
+check "+refspec alone still denied with a valid stamp" deny "$(bp 'git push origin +lf' "$L")"
+check "--force-with-lease=branch:sha with a valid stamp asks" ask "$(bp "git push --force-with-lease=lf:abc123 origin lf" "$L")"
+check "abbreviated --force-with-l asks like the full flag" ask "$(bp 'git push --force-with-l origin lf' "$L")"
+check "abbreviated --force-with-l=x:y asks" ask "$(bp 'git push --force-with-l=lf:abc origin lf' "$L")"
+check "abbreviated --force-with-l denied without a stamp" deny "$(bp 'git push --force-with-l origin lf' "$T/lnone")"
+check "--force-if-includes alone with a valid stamp asks" ask "$(bp 'git push --force-if-includes origin lf' "$L")"
+check "lease plus --force-if-includes with a valid stamp asks" ask "$(bp 'git push --force-with-lease --force-if-includes origin lf' "$L")"
+check "abbreviated --force-i asks with a valid stamp" ask "$(bp 'git push --force-i origin lf' "$L")"
+check "abbreviated --forc (ambiguous) still denied" deny "$(bp 'git push --forc origin lf' "$L")"
+check "lease with no refspec on the current branch asks" ask "$(bp 'git push --force-with-lease' "$L")"
+check "lease HEAD refspec asks" ask "$(bp 'git push --force-with-lease origin HEAD' "$L")"
+check "lease with undeterminable directory denied" deny "$(bp 'cd "$X" && git push --force-with-lease origin lf' "$elsewhere")"
+check "lease from a non-repo directory denied" deny "$(bp 'git push --force-with-lease origin lf' "$elsewhere")"
+check "lease of a ref that is not the current branch denied" deny "$(bp 'git push --force-with-lease origin other' "$L")"
+check "lease with another source ref denied" deny "$(bp 'git push --force-with-lease origin other:lf' "$L")"
+check "lease -C <repo> from another cwd asks" ask "$(bp "git -C $L push --force-with-lease origin lf" "$elsewhere")"
+check "lease dry run allowed" allow "$(bp 'git push --force-with-lease -n origin lf' "$L")"
+check "lease asks for a subagent too" ask "$(bp 'git push --force-with-lease origin lf' "$L" | jq '.agent_id="a1"')"
+out="$(printf '%s' "$(bp 'git push --force-with-lease origin lf' "$L")" | $gate)"
+short="$(git -C "$L" rev-parse HEAD | cut -c1-10)"
+if jq -e --arg s "$short" '.hookSpecificOutput.permissionDecision=="ask" and (.hookSpecificOutput.permissionDecisionReason | test("origin") and test("lf") and test($s) and test("passed"))' <<<"$out" >/dev/null 2>&1; then
+  pass=$((pass + 1)); echo "ok   - ask reason names remote, branch, short sha and stamp status"
+else fail=$((fail + 1)); echo "FAIL - ask reason: $out"; fi
+out="$(printf '%s' "$(bp 'git push --force-with-lease origin lf' "$T/ln")" | $gate)"
+if jq -e '.hookSpecificOutput.permissionDecisionReason | test("none_detected")' <<<"$out" >/dev/null 2>&1; then
+  pass=$((pass + 1)); echo "ok   - ask reason for a none_detected stamp says none_detected"
+else fail=$((fail + 1)); echo "FAIL - none_detected reason: $out"; fi
+reason_has "lease denial without a stamp says to run git-verify" "$(bp 'git push --force-with-lease origin lf' "$T/lnone")" 'git-verify.*retry'
+reason_has "lease denial without a directory says own worktree" "$(bp 'cd "$X" && git push --force-with-lease origin lf' "$elsewhere")" "own worktree"
+touch "$off"
+check "fresh off-file allows a lease push without a stamp" allow "$(bp 'git push --force-with-lease origin lf' "$T/lnone")"
+rm -f "$off"
+export CLAUDE_GIT_GUARD=off
+check "env off allows a lease push without a stamp" allow "$(bp 'git push --force-with-lease origin lf' "$T/lnone")"
+unset CLAUDE_GIT_GUARD
+lafter="$(for d in lp ln lnone lfail lstale; do echo "$d $(git -C "$T/$d" rev-parse HEAD) $(git -C "$T/$d" status --porcelain | md5sum)"; done)"
+if [ "$lbefore" = "$lafter" ]; then pass=$((pass + 1)); echo "ok   - lease repos unchanged by the hook"
+else fail=$((fail + 1)); echo "FAIL - lease repos changed"; fi
 
 # --- escape ---
 export CLAUDE_GIT_GUARD=off

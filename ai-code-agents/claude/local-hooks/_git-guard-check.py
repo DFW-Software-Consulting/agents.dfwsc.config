@@ -24,14 +24,21 @@ import time
 
 sys.dont_write_bytecode = True
 _here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _here)
+try:
+    import _checks_stamp as cs  # noqa: E402
+except Exception:  # missing library: lease pushes stay denied, other rules work
+    cs = None
 _spec = importlib.util.spec_from_file_location(
     "_git_cmd_scan", os.path.join(_here, "_git-cmd-scan.py"))
 scan = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scan)
 
-# Denied force flags (long form). Drop "--force-with-lease" here to allow it.
-# A flag matches exactly or as "<flag>=<value>".
+# Force flags (long form). A flag matches exactly or as "<flag>=<value>".
+# Everything in FORCE_FLAGS is denied, except that a push whose force flags are
+# all in LEASE_FLAGS is decided by lease_rule (valid check stamp -> ask).
 FORCE_FLAGS = ("--force", "--force-with-lease", "--force-if-includes")
+LEASE_FLAGS = ("--force-with-lease", "--force-if-includes")
 
 NO_VERIFY_SUBS = {"commit", "push", "merge", "am", "rebase"}
 HOOK_SUBS = {"commit", "push"}
@@ -196,12 +203,34 @@ def is_dry(longs, shorts):
     return has_long("push", longs, "--dry-run") or "n" in shorts
 
 
+def force_kind(longs):
+    """"hard" if a long option is (or may be, when ambiguous) a non-lease force
+    flag, "lease" if the force flags are only lease flags, else None."""
+    kind = None
+    universe = LONG_OPTS["push"]
+    for a in longs:
+        name = a.split("=", 1)[0]
+        if len(name) <= 2:
+            continue
+        if name in FORCE_FLAGS:
+            this = "lease" if name in LEASE_FLAGS else "hard"
+        else:
+            cands = [o for o in universe if o.startswith(name)]
+            if not cands or not all(o in FORCE_FLAGS for o in cands):
+                continue
+            this = "lease" if all(o in LEASE_FLAGS for o in cands) else "hard"
+        if this == "hard":
+            return "hard"
+        kind = "lease"
+    return kind
+
+
 def force_rule(c):
     """Flag-only: needs no repository state, so it works without a directory."""
     longs, shorts, _remote, refspecs = push_parts(c)
     if is_dry(longs, shorts):
         return None
-    if has_long("push", longs, *FORCE_FLAGS):
+    if force_kind(longs) == "hard":
         return ("force-push", "a force flag on git push can overwrite remote history")
     if "f" in shorts:
         return ("force-push", "git push -f can overwrite remote history")
@@ -258,6 +287,60 @@ def default_rule(c):
     return None
 
 
+def stamp_info(d):
+    """Check-stamp state of the HEAD of directory d (read-only):
+    {"head", "tree", "detected" (None on DetectionError), "valid", "status"}
+    or None when the repository or HEAD cannot be read."""
+    if cs is None or not d or not os.path.isdir(d):
+        return None
+    root = git(d, "rev-parse", "--show-toplevel")
+    gd = git(d, "rev-parse", "--absolute-git-dir")
+    head = git(d, "rev-parse", "HEAD")
+    tree = git(d, "rev-parse", "HEAD^{tree}")
+    if not (root and gd and head and tree):
+        return None
+    try:
+        detected = cs.detect_commands(root)
+    except cs.DetectionError:
+        detected = None
+    stamp = cs.read_stamp(cs.stamp_path(gd, head))
+    valid = detected is not None and cs.stamp_valid(stamp, head, detected, tree=tree)
+    return {"head": head, "tree": tree, "detected": detected, "valid": valid,
+            "status": stamp.get("status") if valid else None}
+
+
+def lease_rule(c):
+    """A lease-only force push: needs a valid check stamp for HEAD, then asks."""
+    longs, shorts, remote, refspecs = push_parts(c)
+    if is_dry(longs, shorts) or force_kind(longs) != "lease":
+        return None
+    d = c["dir"]
+    own = ("force-push-lease", "a lease push can only be approved from the branch's own worktree")
+    if not d or not os.path.isdir(d):
+        return own
+    cur = git(d, "symbolic-ref", "--short", "-q", "HEAD")
+    if not cur:
+        return own
+    branch = cur
+    for r in refspecs:
+        src = r.split(":", 1)[0].lstrip("+")
+        if src not in (cur, "HEAD", "refs/heads/" + cur):
+            return own
+        if ":" in r:
+            branch = r.split(":", 1)[1].replace("refs/heads/", "", 1) or cur
+    info = stamp_info(d)
+    if not info:
+        return own
+    short = info["head"][:10]
+    if not info["valid"]:
+        return ("force-push-lease",
+                f"there is no valid check record for {short}; run git-verify (run-checks.sh) on this commit first, then retry")
+    if remote is None:
+        remote = git(d, "config", f"branch.{cur}.remote") or "origin"
+    return ("lease-ask",
+            f"force-with-lease push of {branch} to {remote} at {short} (check record: {info['status']}); confirm that you want to rewrite remote history")
+
+
 ADVICE = {
     "hook-bypass": "Fix what the repository hook reports instead of skipping it.",
     "force-push": "Push a new commit to a feature branch instead of rewriting history.",
@@ -272,7 +355,7 @@ def judge(cmd, cwd):
         if why:
             return "hook-bypass", why
         if c["sub"] == "push":
-            hit = force_rule(c) or default_rule(c)
+            hit = force_rule(c) or default_rule(c) or lease_rule(c)
             if hit:
                 return hit
     return None
@@ -284,7 +367,8 @@ def main():
     except Exception:
         return
     if hit:
-        print(f"{hit[0]}\t{hit[1]}. {ADVICE[hit[0]]}")
+        advice = ADVICE.get(hit[0])
+        print(f"{hit[0]}\t{hit[1]}" + (f". {advice}" if advice else "."))
 
 
 if __name__ == "__main__":

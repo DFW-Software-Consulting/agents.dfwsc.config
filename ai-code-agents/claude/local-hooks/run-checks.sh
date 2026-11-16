@@ -9,5 +9,6 @@
 # Stdout: one JSON object. Exit: 0 passed/none_detected, 1 failed,
 #         2 not a repo or no commits, 3 tracked files dirty.
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 exec python3 "$here/_run_checks.py" "$@"

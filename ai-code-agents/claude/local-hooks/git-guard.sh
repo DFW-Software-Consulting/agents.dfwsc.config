@@ -6,6 +6,8 @@
 #      "+" refspecs; the list lives in FORCE_FLAGS in _git-guard-check.py).
 #   3. No pushes to the default branch (explicit destination, bare push while
 #      on it, --all, --mirror).
+# A lease-only force push (--force-with-lease / --force-if-includes) is denied
+# without a valid check stamp for HEAD and otherwise answered with "ask".
 # Applies to the main session AND subagents.
 #
 # Register on PreToolUse with matcher `Bash`.
@@ -18,6 +20,7 @@
 # overridable with CLAUDE_GIT_GUARD_OFF_FILE); the off-file expires after 12
 # hours (see _gate-common.sh). If _gate-common.sh is missing the guard stays ON.
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 payload="$(cat)"
 command -v jq >/dev/null 2>&1 || exit 0
 jq -e 'type == "object"' >/dev/null 2>&1 <<<"$payload" || exit 0
@@ -46,6 +49,17 @@ hit="$(CMD="$command_str" CWD="$cwd" GATE_HOME="$HOME" \
 [ -n "$hit" ] || exit 0
 rule="${hit%%$'\t'*}"
 why="${hit#*$'\t'}"
+
+if [ "$rule" = "lease-ask" ]; then
+  jq -n --arg r "git-guard (force-with-lease): $why." '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
+      permissionDecisionReason: $r
+    }
+  }'
+  exit 0
+fi
 
 note=""
 [ "$off_state" = "stale" ] && note="Note: the git-guard.off escape hatch expired (older than 12 hours) and is being ignored; touch it again to re-enable."

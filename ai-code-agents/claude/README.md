@@ -91,7 +91,12 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 
 | Skill | What it does |
 |---|---|
-| `git-workflow` | Safe commit/push/PR lifecycle with pre-hook enforcement |
+| `git-workflow` | Stub that points at the five git skills below; the `git-workflow` agent sequences them |
+| `git-commit` | Group changes, propose messages for approval, commit what was approved |
+| `git-verify` | Run the project's checks for the current commit and record a stamp |
+| `git-push` | Publish the current branch with upstream tracking |
+| `git-pr` | Open a pull request from a pushed branch using the PR template |
+| `git-issue` | Create an issue from the issue template |
 | `worktree-hygiene` | Git worktree management scripts |
 | `codebase-research` | Structure map, symbol index, AST scan scripts |
 | `biome-autofix` | Run Biome linter and auto-fix issues |

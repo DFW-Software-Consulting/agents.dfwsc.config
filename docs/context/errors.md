@@ -7,6 +7,18 @@ Newest first. Check here before proposing a fix.
 - Fix: require `[ -f ]` (regular file, links followed; directories and dangling links count as no file) and read the time with `stat -L`, so a link is judged by its target.
 - Date: 2026-11-15
 
+## Branch created from the remote default branch reads as unpushed (git-facts.sh, git-push, git-pr)
+- Signature: `git worktree add -b x <path> origin/main` then `git-push` reports `new_branch: false`, or a branch pushed without `-u` is reported `unpushed` by git-pr.
+- Cause: the new branch's upstream is `origin/main`, so ahead/behind against it says nothing about the branch's own remote copy; a push without `-u` leaves no upstream at all.
+- Fix: judge pushed state from the same-name remote branch (`pushed`, `push_ref`, `push_ahead`, `push_behind` in git-facts.sh); use the upstream only when it is not the default branch.
+- Date: 2026-11-15
+
+## Subagent told to "use the X skill" never gets the skill (agents/git-workflow.md)
+- Signature: agent prose says "use the X skill", the agent has an explicit `tools:` list without `Skill`, and it improvises instead of following the skill.
+- Cause: such an agent cannot invoke skills, and prose delivers no skill content. Only names in the agent's `skills:` frontmatter list are injected, in full, at start. A wrong name is skipped with no error, and a skill with `disable-model-invocation: true` cannot be preloaded.
+- Fix: list the skills under `skills:` in the agent frontmatter; run `run-agent-skills-tests.sh` to catch a mistyped name.
+- Date: 2026-11-15
+
 ## Force push runs after approving a lease push (git-guard.sh, `_git-guard-check.py` `judge`)
 - Signature: `git push --force-with-lease origin feat && git push -f origin other` produced only the ask; the second command was never judged.
 - Cause: `judge` returned the "ask" decision as soon as it found one, ending the scan of the command line.

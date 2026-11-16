@@ -15,6 +15,9 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 - `run-checks-gate-tests.sh` : checks-gate; builds repos with a local bare origin and makes stamps with the real run-checks.sh.
 - `run-checks-tests.sh` : run-checks.sh, `_run_checks.py`, `_checks_stamp.py`; needs no toolchain or network.
 
+- `run-git-facts-tests.sh` : git-facts.sh and `_git_facts.py`; throwaway repos with local bare remotes, no network.
+- `run-agent-skills-tests.sh` : checks each skill in the `skills:` list of `agents/git-workflow.md` exists with a matching `name` and is preloadable; optional argument is another agent file.
+
 Known gap: `behavior-doc-reminder.sh` and `personal-hooks/sync-memory.sh` have no suite.
 
 ## How to run

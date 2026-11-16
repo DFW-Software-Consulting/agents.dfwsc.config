@@ -14,8 +14,9 @@
 # Register on PreToolUse with matcher `Bash`.
 #
 # Skips commands whose body cannot be judged (--web, --fill, --fill-first,
-# --template, unreadable body) and commands whose target repository (-R) is not
-# the one in the effective directory. Commands and directories come from the
+# --template, unreadable body). A repository override (-R/--repo, GH_REPO) naming
+# another repository gets the secret rule only; its branch, template and diff
+# rules read the directory's repository. An explicit GIT_DIR is judged. Commands and directories come from the
 # shared walker (_cmd_dirs.py). With a directory that cannot be established,
 # `gh pr create` is denied (write the directory literally) except in the skipped
 # forms and --head owner:branch/-R; secrets in the title or body are judged from

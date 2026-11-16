@@ -27,8 +27,11 @@ payload without a cwd are treated the same, minus the denial. A literal
 directory behaves exactly as before. Rule B also runs on any title or body text in the forms the gate
 skips (--web, --fill*, --template, -f, no body, unreadable body); -R=owner/repo reads like -R owner/repo.
 On a line over the analysis budget a wrapper body holding gh pr create is denied as unknown. Without
-_cmd_dirs.py the previous literal-directory scan runs and one line goes to standard error. Not judged:
-GIT_DIR=<repo>/.git gh pr create against that repository; a cd that would fail or not run is still
+_cmd_dirs.py the previous literal-directory scan runs and one line goes to standard error. A repository override (-R/--repo in any
+spelling, before or after the subcommand, or GH_REPO in the environment) naming another repository runs
+rule B only (A, C, D, E, F read this directory's repository); naming this one runs every rule.
+GIT_DIR=<repo>/.git gh pr create (also env, export, same-line variable) is judged against that
+repository, an unresolvable value as an unknown directory. Not judged: a cd that would fail or not run is still
 followed; nesting deeper than 3, lines over about 128 KB and text piped into a shell.
 """
 import datetime
@@ -390,7 +393,8 @@ def judge(o, d, cfg):
     hard, soft = [], []
     top = L.toplevel(d)
     if not top:
-        return hard, soft
+        # No repository to read; a repository override still gets the secret rule.
+        return (judge_text(o) if o["repo"] else hard), soft
     dir_slug = ""
     ptc = L.load_text_check()
     raw = L.git(top, "config", "--get", "remote.origin.url")
@@ -401,7 +405,9 @@ def judge(o, d, cfg):
     if o["repo"]:
         flag_slug = ptc.gh_repo_flag(["-R", o["repo"]])
         if not flag_slug or not dir_slug or flag_slug.lower() != dir_slug.lower():
-            return hard, soft  # target repository is not this directory's
+            # The target is not this directory's repository, so its branch, template and
+            # diff say nothing about the request: only the text rule applies.
+            return judge_text(o), soft
     body, title = o["body"], o["title"]
     if body is None:  # gh pr edit --title: only the title is judged
         for kind, first in L.find_secrets(title):
@@ -470,6 +476,32 @@ def judge(o, d, cfg):
     return hard, soft
 
 
+def lift_repo(args):
+    """args with a -R/--repo given before the subcommand (`gh pr -R o/r create`,
+    `gh -R o/r pr create`) moved after it, where parse_gh reads it."""
+    head, moved, i = [], [], 0
+    while i < len(args) and len(head) < 2:
+        t = args[i]
+        if t in ("-R", "--repo") and i + 1 < len(args):
+            moved += [t, args[i + 1]]
+            i += 2
+        elif t.startswith("--repo=") or (t.startswith("-R") and len(t) > 2):
+            moved.append(t)
+            i += 1
+        else:
+            head.append(t)
+            i += 1
+    return head + args[i:] + moved
+
+
+def env_repo(o, e):
+    """A GH_REPO in the command's environment is -R; the flag wins."""
+    if o is not None and not o["repo"]:
+        for k, v in e["env"]:
+            if k == "GH_REPO":
+                o["repo"] = v
+
+
 def judge_text(o):
     """Rule B alone, from the text: the denials for one parsed gh command."""
     hard = []
@@ -523,16 +555,19 @@ def walked_hits(cmd, cwd, ptc, cfg):
             continue
         if e["kind"] != "gh":
             continue
-        args = e["args"]
+        args = lift_repo(e["args"])
         if len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in ("create", "edit"):
             continue
         if args[0] == "issue" and args[1] != "create":
             continue
-        status, dirs, why = cd.gate_dirs(e)
+        status, dirs, why = cd.gh_gate_dirs(e)
         d = dirs[0] if status == "known" else None
-        if status == "known" and (not d or not os.path.isdir(d)):
+        missing = status == "known" and (not d or not os.path.isdir(d))
+        if missing and not any(a in ("-R", "--repo") or a.startswith(("--repo=", "-R")) for a in args) \
+                and not any(k == "GH_REPO" for k, _ in e["env"]):
             continue
         o, _why = parse_gh(args, d, bodies, used, ptc)
+        env_repo(o, e)
         if not o:
             # A form the gate skips (--web, --fill, --template, no body, an
             # unreadable body): the secret rule still runs on any text present.

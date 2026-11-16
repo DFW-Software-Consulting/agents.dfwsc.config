@@ -602,7 +602,13 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             d, w, tmp = move(d, w, tmp, v, env, temps, "an env -C to a path that is not written literally", tmp_ok)
         e_env = list(dict(list(inherit) + _session(toks, i) + prefix_env(toks, idx)).items())
         if name == "gh":
-            out.append(_entry("gh", d, w, tmp, args=args, env=e_env, depth=_depth))
+            # GIT_DIR/GIT_WORK_TREE reach the git commands gh runs. Kept apart from
+            # "redirect" (see gh_gate_dirs) so other consumers of gh entries see no change.
+            xr = {"redirect": None, "gitdir": None, "worktree": None}
+            if not legacy:
+                explicit_dirs(e_env, env, d, xr)
+            out.append(_entry("gh", d, w, tmp, args=args, env=e_env, depth=_depth, xredirect=xr["redirect"],
+                              xgitdir=xr["gitdir"], xworktree=xr["worktree"]))
             if "trace" in state:
                 state["trace"].append((out[-1], dict(env)))
         elif name == "git":
@@ -885,6 +891,15 @@ def explicit_work_dirs(e):
     if not dirs:
         return [], why
     return dirs, None
+
+
+def gh_gate_dirs(e):
+    """gate_dirs for a gh entry that also honours an explicit GIT_DIR/GIT_WORK_TREE
+    (prefix, `env`, `export`, a same-line variable): a literal one is resolved
+    like git's, an unresolvable one is "unknown"."""
+    if e.get("xredirect"):
+        return gate_dirs(dict(e, redirect=e["xredirect"], gitdir=e["xgitdir"], worktree=e["xworktree"]))
+    return gate_dirs(e)
 
 
 def gate_dirs(e):

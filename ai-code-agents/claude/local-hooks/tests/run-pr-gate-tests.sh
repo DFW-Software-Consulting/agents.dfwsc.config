@@ -363,13 +363,13 @@ git -C "$R" checkout -q feature
 newrepo plain4
 check "-R naming this repo is judged" deny "$(bp "gh pr create -R owner/plain4 --title x --body 'y $AWS'")"
 check "-R with a full URL naming this repo is judged" deny "$(bp "gh pr create --repo https://github.com/owner/plain4 --title x --body 'y $AWS'")"
-check "-R naming a different repo skipped" allow "$(bp "gh pr create -R owner/elsewhere --title x --body 'y $AWS'")"
-check "--repo= naming a different repo skipped" allow "$(bp "gh pr issue 2>/dev/null; gh issue create --repo=owner/elsewhere --title x --body 'y $AWS'")"
-check "-R in a directory that is not a repository skipped" allow "$(bp "gh pr create -R owner/plain4 --title x --body 'y $AWS'" "$elsewhere")"
+check "-R naming a different repo: the secret rule still runs" deny "$(bp "gh pr create -R owner/elsewhere --title x --body 'y $AWS'")"
+check "--repo= naming a different repo: the secret rule still runs" deny "$(bp "gh pr issue 2>/dev/null; gh issue create --repo=owner/elsewhere --title x --body 'y $AWS'")"
+check "-R in a directory that is not a repository: the secret rule still runs" deny "$(bp "gh pr create -R owner/plain4 --title x --body 'y $AWS'" "$elsewhere")"
 check "gh in a directory that is not a repository skipped" allow "$(bp "gh pr create --title x --body 'y $AWS'" "$elsewhere")"
-check "-R with an unparseable value skipped" allow "$(bp "gh pr create -R plain4 --title x --body 'y $AWS'")"
+check "-R with an unparseable value: the secret rule still runs" deny "$(bp "gh pr create -R plain4 --title x --body 'y $AWS'")"
 git init -q "$T/noorigin"
-check "repository without an origin and -R skipped" allow "$(bp "gh pr create -R owner/x --title x --body 'y $AWS'" "$T/noorigin")"
+check "repository without an origin and -R: the secret rule still runs" deny "$(bp "gh pr create -R owner/x --title x --body 'y $AWS'" "$T/noorigin")"
 
 # --- directory forms ---
 check "cd into the repo then gh is judged" deny "$(bp "cd $R && gh issue create --title x --body 'y $AWS'" "$elsewhere")"
@@ -509,12 +509,90 @@ check "gh issue create --web with a secret in the title denied" deny "$(bp "gh i
 # -R=owner/repo is -R owner/repo
 newrepo plain5
 check "-R=owner/repo naming this repo is judged" deny "$(bp "gh pr create -R=owner/plain5 --title x --body 'y $AWS'")"
-check "-R=owner/repo naming another repo skipped" allow "$(bp "gh pr create -R=owner/elsewhere --title x --body 'y $AWS'")"
+check "-R=owner/repo naming another repo: the secret rule still runs" deny "$(bp "gh pr create -R=owner/elsewhere --title x --body 'y $AWS'")"
 check "unknown directory: -R=owner/repo not denied as unknown" allow "$(bp 'cd "$W" && gh pr create -R=owner/elsewhere --title x --body y' "$PUSHED")"
 check "-t=title attached value with a secret denied" deny "$(bp "gh pr create -t=\"y $AWS\" --body y" "$PUSHED")"
 # a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
 check "W=<pushed repo>; W=\`pwd\`; cd \"\$W\" && gh pr create: unknown directory, denied" deny "$(bp 'W='"$PUSHED"'; W=`pwd`; cd "$W" && '"$(prc 'body text')" "$elsewhere")"
 reason_has "backtick reassignment: the denial says the directory is unknown" "$(bp 'W='"$PUSHED"'; W=`pwd`; cd "$W" && '"$(prc 'body text')" "$elsewhere")" "unknown-directory"
+# --- repo override (-R, --repo, GH_REPO): the secret rule never skips; repository rules need this repository ---
+RO=(-R\ owner/elsewhere -Rowner/elsewhere -R=owner/elsewhere --repo\ owner/elsewhere --repo=owner/elsewhere)
+for f in "${RO[@]}"; do
+  check "repo override [$f] after create: secret in body denied" deny "$(bp "cd $LOCAL && gh pr create $f --title x --body 'y $AWS'" "$elsewhere")"
+  check "repo override [$f] after create: secret in title denied" deny "$(bp "cd $LOCAL && gh pr create $f --title 'y $AWS' --body y" "$elsewhere")"
+  check "repo override [$f] before the title: secret denied" deny "$(bp "cd $LOCAL && gh pr create $f --title x --body 'y $AWS'" "$elsewhere")"
+  check "repo override [$f] between gh pr and create: secret denied" deny "$(bp "cd $LOCAL && gh pr $f create --title x --body 'y $AWS'" "$elsewhere")"
+  check "repo override [$f] right after gh: secret denied" deny "$(bp "cd $LOCAL && gh $f pr create --title x --body 'y $AWS'" "$elsewhere")"
+  check "repo override [$f] after create: payload cwd is the repo" deny "$(bp "gh pr create $f --title x --body 'y $AWS'" "$LOCAL")"
+  check "repo override [$f] with a secret in a heredoc body denied" deny "$(bp "cd $LOCAL && gh pr $f create --title x -F - <<'EOF'
+## Summary
+$AWS
+EOF" "$elsewhere")"
+  check "repo override [$f]: gh issue create secret denied" deny "$(bp "cd $LOCAL && gh issue $f create --title x --body 'y $AWS'" "$elsewhere")"
+  check "repo override [$f]: unpushed branch not judged (other repository)" allow "$(bp "cd $LOCAL && gh pr $f create --title x --body y" "$elsewhere")"
+  check "repo override [$f] before create: unpushed branch not judged" allow "$(bp "cd $LOCAL && gh pr create $f --title x --body y" "$elsewhere")"
+  check "repo override [$f]: template sections not judged (other repository)" allow "$(bp "cd $TMPLR && gh pr $f create --title x --body '$SHORT'" "$elsewhere")"
+  check "repo override [$f]: a clean title and body allowed" allow "$(bp "cd $PUSHED && gh pr create $f --title x --body y" "$elsewhere")"
+done
+reason_has "repo override: the denial is the secret rule" "$(bp "cd $LOCAL && gh pr -R owner/elsewhere create --title x --body 'y $AWS'" "$elsewhere")" "secret-in-text.*body.*${AWS:0:6}\.\.\."
+reason_lacks "repo override: the secret is never shown in full" "$(bp "cd $LOCAL && gh pr -R owner/elsewhere create --title x --body 'y $AWS'" "$elsewhere")" "$AWS"
+reason_lacks "repo override: the push rule did not run" "$(bp "cd $LOCAL && gh pr -R owner/elsewhere create --title x --body 'y $AWS'" "$elsewhere")" "not-pushed"
+conf 'PR_GATE_MODE=deny'
+check "repo override in deny mode: sections not judged" allow "$(bp "cd $TMPLR && gh pr create -R owner/elsewhere --title x --body '$SHORT'" "$elsewhere")"
+conf 'PR_GATE_MODE=warn'
+noconf
+check "repo override: nonexistent cd target still judges the secret" deny "$(bp "cd $T/does-not-exist && gh pr create -R owner/elsewhere --title x --body 'y $AWS'" "$elsewhere")"
+check "repo override: nonexistent cd target, clean text allowed" allow "$(bp "cd $T/does-not-exist && gh pr create -R owner/elsewhere --title x --body y" "$elsewhere")"
+# a repo override naming this repository is judged by every rule
+newrepo ownrepo; OWN="$R"; git -C "$OWN" checkout -q -b local-only
+for f in "-R owner/ownrepo" "-Rowner/ownrepo" "-R=owner/ownrepo" "--repo owner/ownrepo" "--repo=owner/ownrepo"; do
+  check "repo override [$f] naming this repo: unpushed branch denied" deny "$(bp "cd $OWN && gh pr create $f --title x --body y" "$elsewhere")"
+  check "repo override [$f] between gh pr and create naming this repo: unpushed branch denied" deny "$(bp "cd $OWN && gh pr $f create --title x --body y" "$elsewhere")"
+done
+reason_has "repo override naming this repo: the push rule runs" "$(bp "cd $OWN && gh pr -R owner/ownrepo create --title x --body y" "$elsewhere")" "not-pushed"
+check "repo override naming this repo: sections still warn" warn "$(bp "cd $TMPLR && gh pr -R owner/tmplrepo create --title x --body '$SHORT'" "$elsewhere")"
+# GH_REPO is the environment form of -R
+for pre in "GH_REPO=owner/elsewhere" "env GH_REPO=owner/elsewhere" "export GH_REPO=owner/elsewhere;"; do
+  check "[$pre] secret in body denied" deny "$(bp "cd $LOCAL && $pre gh pr create --title x --body 'y $AWS'" "$elsewhere")"
+  check "[$pre] unpushed branch not judged" allow "$(bp "cd $LOCAL && $pre gh pr create --title x --body y" "$elsewhere")"
+  check "[$pre] unknown directory: not denied as unknown" allow "$(bp "cd \"\$W\" && $pre gh pr create --title x --body y" "$PUSHED")"
+  check "[$pre] unknown directory: secret denied" deny "$(bp "cd \"\$W\" && $pre gh pr create --title x --body 'y $AWS'" "$PUSHED")"
+done
+check "GH_REPO naming this repo: unpushed branch denied" deny "$(bp "cd $OWN && GH_REPO=owner/ownrepo gh pr create --title x --body y" "$elsewhere")"
+check "-R wins over GH_REPO: other repo, secret denied" deny "$(bp "cd $LOCAL && GH_REPO=owner/localrepo gh pr create -R owner/elsewhere --title x --body 'y $AWS'" "$elsewhere")"
+check "-R wins over GH_REPO: other repo, unpushed not judged" allow "$(bp "cd $LOCAL && GH_REPO=owner/localrepo gh pr create -R owner/elsewhere --title x --body y" "$elsewhere")"
+# ordinary gh pr create in a literal directory: no new denials
+check "literal directory, pushed branch, clean text: allowed" allow "$(bp "cd $PUSHED && $(prc 'body text')" "$elsewhere")"
+check "literal directory, unpushed branch: still denied" deny "$(bp "cd $LOCAL && $(prc 'body text')" "$elsewhere")"
+check "literal directory, template sections: still warn" warn "$(bp "cd $TMPLR && $(prc "$SHORT")" "$elsewhere")"
+check "literal directory, secret: still denied" deny "$(bp "cd $PUSHED && $(prc "y $AWS")" "$elsewhere")"
+check "a word starting with -R in the title is not a repo override" deny "$(bp "cd $LOCAL && gh pr create --title '-R x' --body y" "$elsewhere")"
+
+# --- explicit git directory: GIT_DIR=<repo>/.git gh pr create is judged against that repository ---
+for pre in "GIT_DIR=PRE/.git" "env GIT_DIR=PRE/.git" "export GIT_DIR=PRE/.git;" "GIT_DIR=PRE/.git GIT_WORK_TREE=PRE"; do
+  l="${pre//PRE/$LOCAL}"; pu="${pre//PRE/$PUSHED}"; tm="${pre//PRE/$TMPLR}"
+  check "[$pre] unpushed repo denied" deny "$(bp "$l gh pr create --title x --body y" "$elsewhere")"
+  check "[$pre] pushed repo allowed" allow "$(bp "$pu gh pr create --title x --body y" "$elsewhere")"
+  check "[$pre] template sections warn" warn "$(bp "$tm gh pr create --title x --body '$SHORT'" "$elsewhere")"
+  check "[$pre] secret denied" deny "$(bp "$pu gh pr create --title x --body 'y $AWS'" "$elsewhere")"
+  check "[$pre] repo comes from the git dir, not the payload cwd" deny "$(bp "$l gh pr create --title x --body y" "$PUSHED")"
+  check "[$pre] pushed git dir, payload cwd is an unpushed repo: allowed" allow "$(bp "$pu gh pr create --title x --body y" "$LOCAL")"
+done
+reason_has "GIT_DIR: the push rule names the git dir's repository" "$(bp "GIT_DIR=$LOCAL/.git gh pr create --title x --body y" "$elsewhere")" "not-pushed"
+check "GIT_DIR with a same-line variable value judged" deny "$(bp "G=$LOCAL/.git; GIT_DIR=\$G gh pr create --title x --body y" "$elsewhere")"
+check "GIT_DIR in a bash -c body judged" deny "$(bp "bash -c 'GIT_DIR=$LOCAL/.git gh pr create --title x --body y'" "$elsewhere")"
+check "GIT_DIR with -R other repo: secret denied" deny "$(bp "GIT_DIR=$PUSHED/.git gh pr create -R owner/elsewhere --title x --body 'y $AWS'" "$elsewhere")"
+check "GIT_DIR with -R other repo: unpushed not judged" allow "$(bp "GIT_DIR=$LOCAL/.git gh pr create -R owner/elsewhere --title x --body y" "$elsewhere")"
+check "GIT_DIR with --web and a secret denied" deny "$(bp "GIT_DIR=$PUSHED/.git gh pr create --web --title x --body 'y $AWS'" "$elsewhere")"
+check "GIT_DIR gh issue create with a secret denied" deny "$(bp "GIT_DIR=$PUSHED/.git gh issue create --title x --body 'y $AWS'" "$elsewhere")"
+check "GIT_DIR gh pr view not judged" allow "$(bp "GIT_DIR=\"\$(pwd)/.git\" gh pr view 3" "$elsewhere")"
+for pre in 'GIT_DIR="$(pwd)/.git"' 'GIT_DIR="$X"' 'GIT_DIR="`pwd`/.git"' 'env GIT_DIR=$X' 'export GIT_DIR=$X;' "GIT_DIR=$T/nothing-here.git"; do
+  check "[$pre] unresolvable git dir denied" deny "$(bp "$pre gh pr create --title x --body y" "$PUSHED")"
+  check "[$pre] unresolvable git dir with a secret denied" deny "$(bp "$pre gh pr create --title x --body 'y $AWS'" "$PUSHED")"
+done
+reason_has "unresolvable GIT_DIR: the unknown-directory denial" "$(bp 'GIT_DIR=$X gh pr create --title x --body y' "$PUSHED")" "unknown-directory.*$UNK"
+check "unresolvable GIT_DIR with -R other repo: not denied as unknown" allow "$(bp 'GIT_DIR=$X gh pr create -R owner/elsewhere --title x --body y' "$PUSHED")"
+check "unresolvable GIT_DIR with --web: not denied as unknown" allow "$(bp 'GIT_DIR=$X gh pr create --web --title x --body y' "$PUSHED")"
 # without _cmd_dirs.py the gate falls back to the literal-directory scan
 iso3="$(mktemp -d "$HOME/iso3.XXXXXX")"; cp -r "$hooks" "$iso3/lh"; rm -f "$iso3/lh/_cmd_dirs.py"
 isocheck() {  # NAME EXPECT PAYLOAD

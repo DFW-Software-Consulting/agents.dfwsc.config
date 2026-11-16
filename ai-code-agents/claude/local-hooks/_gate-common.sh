@@ -14,9 +14,12 @@ GATE_OFF_FILE="${CLAUDE_DELEGATE_GATE_OFF_FILE:-$HOME/.claude/delegate-gate.off}
 # Prints: none | fresh | stale, for the off-file at path $1.
 gate_off_file_state_for() {
   local f="$1"
-  [ -e "$f" ] || { echo none; return; }
+  # Only a regular file, or a symlink resolving to one, can be an off-file; it
+  # is judged by the target's mtime (stat -L). A directory, a dangling link or
+  # any other file type counts as no file.
+  [ -f "$f" ] || { echo none; return; }
   local mtime now
-  mtime="$(stat -c %Y "$f" 2>/dev/null)" || { echo none; return; }
+  mtime="$(stat -L -c %Y "$f" 2>/dev/null)" || { echo none; return; }
   now="$(date +%s)"
   local age=$((now - mtime))
   # A future mtime is not trusted: treat as gate ON (stale).

@@ -2,6 +2,11 @@
 
 Newest first. Check here before proposing a fix.
 
+## Directory or fresh symlink counts as a fresh off-file (`gate_off_file_state_for`, `_gate-common.sh`)
+- Cause: the helper tested the path with `-e` and read `stat -c %Y`, which does not follow links. A recently modified directory at the off-file path, or a new link to an old file, reported `fresh` and switched the gate off.
+- Fix: require `[ -f ]` (regular file, links followed; directories and dangling links count as no file) and read the time with `stat -L`, so a link is judged by its target.
+- Date: 2026-11-15
+
 ## Force push runs after approving a lease push (git-guard.sh, `_git-guard-check.py` `judge`)
 - Signature: `git push --force-with-lease origin feat && git push -f origin other` produced only the ask; the second command was never judged.
 - Cause: `judge` returned the "ask" decision as soon as it found one, ending the scan of the command line.

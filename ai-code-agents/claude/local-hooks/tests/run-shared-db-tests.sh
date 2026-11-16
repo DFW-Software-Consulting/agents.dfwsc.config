@@ -265,6 +265,19 @@ if grep -q '"deny"' <<<"$out"; then pass=$((pass+1)); echo "ok   - no _gate-comm
 rm -f "$off"
 for v in CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE; do mkoff "$offd/$v" "1 hour ago"; export "$v=$offd/$v"; done
 check "other gates' fresh off-files do not switch it off" deny "$(P "$dq")"
+# off-file must be a regular file, or a link to one, judged by the target
+rm -rf "$off"; mkdir "$off"
+check "fresh directory at the off-file path is not an off-file" deny "$(P "$dq")"
+rm -rf "$off"; touch -d '13 hours ago' "$offd/old"; touch "$offd/new"
+ln -s "$offd/old" "$off"; touch -h "$off"
+check "fresh link to a stale file is stale (gate ON)" deny "$(P "$dq")"
+rm -f "$off"; ln -s "$offd/new" "$off"; touch -h -d '13 hours ago' "$off"
+check "stale link to a fresh file is fresh (gate off)" allow "$(P "$dq")"
+rm -f "$off"; mkdir "$offd/d"; ln -s "$offd/d" "$off"
+check "link to a directory is not an off-file" deny "$(P "$dq")"
+rm -f "$off"; ln -s "$offd/missing" "$off"
+check "dangling link is not an off-file" deny "$(P "$dq")"
+rm -f "$off"
 unset CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE CLAUDE_SHARED_DB_GATE_OFF_FILE
 
 echo

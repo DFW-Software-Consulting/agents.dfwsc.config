@@ -16,7 +16,7 @@ One job: prove the current commit passes the project's checks and record the sta
 
 1. Run `~/.claude/local-hooks/run-checks.sh --dir <path>` (add `--build` when asked) exactly once. Read the JSON it prints.
 2. Do not edit code, do not fix failures, do not retry, do not commit.
-3. Get the branch with `git -C <path> branch --show-current`.
+3. Get the branch with `git -C <path> branch --show-current`, and `pushed` and `push_ahead` from `~/.claude/local-hooks/git-facts.sh --dir <path>`.
 
 The script refuses to run on a dirty tree (modified tracked files, or untracked files that are not gitignored) because checks must describe the commit, not uncommitted edits.
 
@@ -28,8 +28,8 @@ Return exactly this envelope and nothing else of substance:
 {"skill":"git-verify","status":"ok","branch":"<branch>","head":"<sha>","blocked_by":[],"result":{"head":"<sha>","stamp":"<path>","status":"passed","results":[{"cmd":"...","exit":0,"tail":"..."}]},"next":["git-push"]}
 ```
 
-- `status` is `ok` when the script reports `passed` or `none_detected`. `next` is `["git-push"]`.
-- `status` is `blocked` when it reports `failed`: `blocked_by` lists the failing commands and `next` is `[]`.
+- `status` is `ok` when the script reports `passed` or `none_detected`. `next` is `["git-push"]` when the branch is not pushed or `push_ahead` is above 0, otherwise `["git-pr"]`. `next` is a hint; the router decides.
+- `status` is `blocked` when it reports `failed`: `blocked_by` is `["checks-failed"]`, the failing commands are in `result.failed`, and `next` is `[]`.
 - `status` is `blocked` when it reports `dirty` or `dirty_after`: `blocked_by` is `["dirty-tree"]`, `next` is `[]`, and say to commit, gitignore or remove the listed paths and run again. For `dirty_after`, report whichever the script gave: the paths, or the old and new head (when a check moved HEAD).
 - `status` is `blocked` when it reports `error` (exit 2): `blocked_by` is `["error"]`, `next` is `[]`, and include the script's message.
 

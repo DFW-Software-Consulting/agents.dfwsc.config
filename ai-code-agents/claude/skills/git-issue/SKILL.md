@@ -15,14 +15,15 @@ One job: create a GitHub issue from a template.
 ## Procedure
 
 1. Run `~/.claude/local-hooks/git-facts.sh --dir <path>`.
-2. Pick the template: the first `.md` file in `issue_templates` from the facts. A `.yml` issue form cannot be filled through `--body`, so if only forms exist, use `~/.claude/skills/git-issue/templates/issue-body.md`. Keep every heading exactly as written and leave no placeholder text behind.
+2. Pick the template from `issue_templates` in the facts: match the request's type (bug, feature, task) against each `.md` template's file name or front matter. With no clear match, or if only `.yml` issue forms exist (they cannot be filled through `--body`), use `~/.claude/skills/git-issue/templates/issue-body.md`. Never just take the first one.
 3. Fill the sections from the description. Do not invent facts: for anything the user did not give, write what is known and add it to `open_questions`.
-4. If there are no acceptance criteria, do not stop to ask. Put this line under that section and carry on: `TBD: acceptance criteria not provided (open question)`.
-5. Pick one size box from the description. If it is above 200 lines, fill the split plan section; otherwise remove that section.
-6. Create it: `gh issue create --title "<title>" --body-file <tmpfile>`, with the body written to a temporary file outside the repo.
-7. If `gh` is missing or not logged in (`gh auth status`), return `blocked` with `blocked_by: ["gh-missing"]`, the filled `body` and the exact `command` for the user to run by hand.
+4. Placeholder rule (same as git-pr): keep every heading in order, but remove a section the template marks as conditional ("only if ...") when it does not apply, such as the split plan. No angle-bracket placeholders or HTML comments may remain; write a `TBD:` line with the reason instead.
+5. If there are no acceptance criteria, do not stop to ask. Put this line under that section and carry on: `TBD: acceptance criteria not provided (open question)`.
+6. Size: pick one box from the description. If the size is unknown, leave the boxes unchecked and add it to `open_questions`. Above 200 lines, fill the split plan section.
+7. Create it: `gh issue create --title "<title>" --body-file <tmpfile>`, with the body written to a temporary file outside the repo.
+8. If `gh` is missing or not logged in (`gh auth status`), return `blocked` with `blocked_by: ["gh-missing"]`, the filled `body` and the exact `command` for the user to run by hand.
 
-Text that credits a coding agent is denied by a hook; write the issue as the developer would.
+Write the issue as the developer would, with no credit to any coding tool.
 
 ## Output
 
@@ -30,7 +31,7 @@ Text that credits a coding agent is denied by a hook; write the issue as the dev
 {"skill":"git-issue","status":"ok","branch":"<branch or null>","head":"<sha or null>","blocked_by":[],"result":{"issue_url":"<url>","number":0,"template_used":"repo|sop","open_questions":["..."]},"next":[]}
 ```
 
-- `blocked` with `gh-missing` returns `result: {"body":"...","command":"gh issue create ...","open_questions":[...]}`.
+- `blocked` with `gh-missing` returns `result: {"body":"...","command":"gh issue create ...","open_questions":[...]}`. `next` is a hint; the router decides.
 - The issue number can be passed to `git-pr` later as `Links to: #N`.
 
 ## Does not

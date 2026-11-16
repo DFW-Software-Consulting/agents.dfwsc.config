@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# Payload-driven tests for commit-gate.sh (and _commit-gate-check.py).
+# Builds throwaway repos, each with a local bare repository as `origin`, under a
+# temp dir, and uses a temporary HOME and config so no real ~/.claude file is read.
+# No network. Fake secrets are built by concatenation so this file holds no full token.
+# Usage: local-hooks/tests/run-commit-gate-tests.sh   (set TMPDIR to pick the temp location)
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+hooks="$(cd "$here/.." && pwd)"
+export HOME; HOME="$(mktemp -d)"
+trap 'rm -rf "$HOME"' EXIT
+mkdir -p "$HOME/.claude"
+unset CLAUDE_GIT_GUARD CLAUDE_GIT_GUARD_OFF_FILE
+export CLAUDE_GIT_GATES_CONF="$HOME/git-gates.conf"
+export GIT_CONFIG_GLOBAL="$HOME/gitconfig" GIT_CONFIG_NOSYSTEM=1
+git config --global user.name t; git config --global user.email t@example.invalid
+git config --global init.defaultBranch main
+off="$HOME/.claude/git-guard.off"
+gate="bash $hooks/commit-gate.sh"
+
+pass=0; fail=0
+ok() { pass=$((pass + 1)); echo "ok   - $1"; }
+bad() { fail=$((fail + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; }
+
+DENY_SHAPE='(.hookSpecificOutput | keys) == ["hookEventName","permissionDecision","permissionDecisionReason"] and .hookSpecificOutput.hookEventName=="PreToolUse" and .hookSpecificOutput.permissionDecision=="deny" and (.hookSpecificOutput.permissionDecisionReason|type=="string")'
+WARN_SHAPE='(keys == ["hookSpecificOutput","systemMessage"]) and (.hookSpecificOutput | keys) == ["additionalContext","hookEventName"] and .hookSpecificOutput.hookEventName=="PreToolUse" and (.systemMessage|type=="string") and (.hookSpecificOutput.additionalContext|type=="string")'
+# check NAME deny|allow|warn PAYLOAD: deny = deny JSON, allow = exit 0 and no output,
+# warn = exit 0 and one JSON object with systemMessage + additionalContext and no decision.
+check() {
+  local name="$1" expect="$2" payload="$3" out rc got
+  out="$(printf '%s' "$payload" | $gate 2>&1)"; rc=$?
+  if [ -z "$out" ]; then got=allow
+  elif jq -e "$DENY_SHAPE" <<<"$out" >/dev/null 2>&1; then got=deny
+  elif jq -e "$WARN_SHAPE" <<<"$out" >/dev/null 2>&1; then got=warn
+  else got="invalid"; fi
+  if [ "$rc" -eq 0 ] && [ "$got" = "$expect" ]; then ok "$name"
+  else bad "$name (expected $expect, got $got, rc=$rc)" "output: $out"; fi
+}
+silent() {  # NAME PAYLOAD: exit 0 and no output
+  local out rc; out="$(printf '%s' "$2" | $gate 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ] && [ -z "$out" ]; then ok "$1"; else bad "$1 (rc=$rc)" "output: $out"; fi
+}
+reason_has() {  # NAME PAYLOAD REGEX
+  local out; out="$(printf '%s' "$2" | $gate 2>&1)"
+  if jq -e --arg re "$3" '(.hookSpecificOutput.permissionDecisionReason // .systemMessage) | test($re)' <<<"$out" >/dev/null 2>&1; then ok "$1"
+  else bad "$1" "output: $out"; fi
+}
+reason_lacks() {  # NAME PAYLOAD LITERAL
+  local out; out="$(printf '%s' "$2" | $gate 2>&1)"
+  if [ -n "$out" ] && ! grep -qF -- "$3" <<<"$out"; then ok "$1"; else bad "$1" "output: $out"; fi
+}
+
+# --- fake secrets (obviously fake, pattern-valid; assembled so no full token sits in this file) ---
+AWS="AK""IAFAKEFAKEFAKEFAKE"                      # AKIA + 16
+GHP="gh""p_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE" # ghp_ + 36
+GHPAT="github""_pat_""FAKEFAKEFAKEFAKEFAKEFAKE"
+SLACK="xo""xb-""0000000000-FAKEFAKEFAKE"
+PRIV="-----BEGIN ""RSA PRIVATE KEY-----"
+SK="s""k-""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+[ "${#GHP}" -eq 40 ] || { echo "bad fake ghp length ${#GHP}"; exit 2; }
+
+# --- fixtures ---
+T="$(mktemp -d "$HOME/t.XXXXXX")"
+n=0
+# newrepo: sets R to a fresh repo with a bare local origin and one non-conventional commit.
+newrepo() {
+  n=$((n + 1)); R="$T/r$n"
+  git init -q --bare -b main "$T/r$n.git"
+  git init -q -b main "$R"
+  echo a > "$R/f"; git -C "$R" add -A; git -C "$R" commit -qm "init"
+  git -C "$R" remote add origin "$T/r$n.git"
+  git -C "$R" push -q origin main
+  git -C "$R" fetch -q origin
+  git -C "$R" remote set-head origin main >/dev/null
+}
+conv_history() {  # R gets 20 conventional commits on origin/main
+  local i
+  for i in $(seq 1 20); do echo "$i" >> "$R/f"; git -C "$R" commit -qam "feat: change $i"; done
+  git -C "$R" push -q origin main; git -C "$R" fetch -q origin
+}
+bp() { jq -n --arg c "$1" --arg d "${2:-$R}" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}'; }
+elsewhere="$T/elsewhere"; mkdir "$elsewhere"
+conf() { printf '%s\n' "$@" > "$CLAUDE_GIT_GATES_CONF"; }
+noconf() { rm -f "$CLAUDE_GIT_GATES_CONF"; }
+
+# --- secret file names: staged, commit -a, same-line add, add -A ---
+names=(.env .env.local .env.production server.pem tls.key id_rsa id_rsa_work id_ed25519 id_ed25519.pub credentials.json cert.p12 cert.pfx sub/dir/.env sub/x.pem)
+for f in "${names[@]}"; do
+  newrepo; mkdir -p "$(dirname "$R/$f")"; echo "v=1" > "$R/$f"; git -C "$R" add -f "$f"
+  check "staged $f denied" deny "$(bp 'git commit -m "feat: x"')"
+done
+newrepo; mkdir -p "$R/sub"; echo "v=1" > "$R/.env"; git -C "$R" add .env; git -C "$R" commit -qm "feat: add env"; git -C "$R" reset -q --hard
+for f in .env .env.local server.pem tls.key id_rsa id_ed25519 credentials.json cert.p12 cert.pfx; do
+  newrepo; echo "v=1" > "$R/$f"; git -C "$R" add -f "$f"; git -C "$R" commit -qm "feat: track $f"
+  echo "v=2" > "$R/$f"
+  check "commit -a with modified tracked $f denied" deny "$(bp 'git commit -am "feat: x"')"
+  check "commit --all with modified tracked $f denied" deny "$(bp 'git commit --all -m "feat: x"')"
+  check "commit -a without modifying $f is fine after revert" allow "$(git -C "$R" checkout -q -- "$f"; bp 'git commit -am "feat: x"')"
+  newrepo; echo "v=1" > "$R/$f"
+  check "same-line git add $f denied" deny "$(bp "git add $f && git commit -m 'feat: x'")"
+  check "git add -A denied with untracked $f" deny "$(bp "git add -A && git commit -m 'feat: x'")"
+  check "git add --all denied with untracked $f" deny "$(bp "git add --all && git commit -m 'feat: x'")"
+  check "git add . denied with untracked $f" deny "$(bp "git add . && git commit -m 'feat: x'")"
+done
+newrepo; echo x > "$R/ok.txt"; echo "v=1" > "$R/.env"
+silent "git add of another file does not pick up an untracked .env" "$(bp "git add ok.txt && git commit -m 'feat: x'")"
+newrepo; printf '//registry.example.invalid/:_%s=fakefake\n' "authToken" > "$R/.npmrc"; git -C "$R" add .npmrc
+check "staged .npmrc with a token denied" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; printf 'registry=https://registry.example.invalid/\n' > "$R/.npmrc"; git -C "$R" add .npmrc
+check "staged .npmrc without a token allowed" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; printf '_%s=fakefake\n' "authToken" > "$R/.npmrc"
+check "same-line add of an .npmrc with a token denied" deny "$(bp "git add .npmrc && git commit -m 'feat: x'")"
+reason_has "secret-file denial names rule, path and fix" "$(bp "git add .npmrc && git commit -m 'feat: x'")" 'secret-file.*\.npmrc.*(unstage|gitignore)'
+
+for f in .env.example .env.sample .env.template .env.dist; do
+  newrepo; echo "KEY=" > "$R/$f"; git -C "$R" add "$f"
+  check "staged $f allowed" allow "$(bp 'git commit -m "feat: x"')"
+done
+newrepo; echo ".env" > "$R/.gitignore"; echo "v=1" > "$R/.env"; echo y > "$R/g"; git -C "$R" add .gitignore g
+check "ignored .env not staged allowed" allow "$(bp 'git commit -m "feat: x"')"
+check "ignored .env with add -A allowed" allow "$(bp "git add -A && git commit -m 'feat: x'")"
+check "ignored .env named in add without -f allowed" allow "$(bp "git add .env g && git commit -m 'feat: x'")"
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env
+check "staged deletion of a tracked .env allowed" allow "$(git -C "$R" commit -qm "feat: env"; git -C "$R" rm -q .env; bp 'git commit -m "feat: x"')"
+
+# --- ALLOW_PATHS ---
+newrepo; mkdir -p "$R/tests/fixtures"; echo "v=1" > "$R/tests/fixtures/.env"; echo "k" > "$R/tests/fixtures/a.pem"; git -C "$R" add -A
+check "no config: fixture secret files denied" deny "$(bp 'git commit -m "feat: x"')"
+conf 'ALLOW_PATHS="tests/fixtures/*"'
+check "ALLOW_PATHS exempts the fixture files" allow "$(bp 'git commit -m "feat: x"')"
+printf '%s\n' "x = \"$AWS\"" > "$R/tests/fixtures/k.py"; git -C "$R" add -A
+check "ALLOW_PATHS exempts secret content too" allow "$(bp 'git commit -m "feat: x"')"
+printf '<<<<<<< a\nx\n=======\ny\n>>>>>>> b\n' > "$R/tests/fixtures/m.py"; git -C "$R" add -A
+check "ALLOW_PATHS exempts conflict markers too" allow "$(bp 'git commit -m "feat: x"')"
+echo "v=1" > "$R/.env"; git -C "$R" add .env
+check "ALLOW_PATHS does not exempt other paths" deny "$(bp 'git commit -m "feat: x"')"
+conf 'ALLOW_PATHS=".env other/*"'
+git -C "$R" reset -q; rm -rf "$R/tests"; git -C "$R" add .env
+check "ALLOW_PATHS with several globs exempts .env" allow "$(bp 'git commit -m "feat: x"')"
+check "ALLOW_PATHS exempts a same-line add" allow "$(git -C "$R" reset -q; bp "git add .env && git commit -m 'feat: x'")"
+noconf
+printf 'ALLOW_PATHS="*"; touch %s/pwned\n' "$T" > "$CLAUDE_GIT_GATES_CONF"
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env
+check "config is parsed as data, not sourced (denial still happens)" deny "$(bp 'git commit -m "feat: x"')"
+[ ! -e "$T/pwned" ] && ok "config text was never executed" || bad "config was executed"
+noconf
+
+# --- conflict markers ---
+newrepo; printf 'a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> branch\n' > "$R/a.py"; git -C "$R" add a.py
+check "conflict markers in a source file denied" deny "$(bp 'git commit -m "feat: x"')"
+reason_has "conflict denial names rule and path" "$(bp 'git commit -m "feat: x"')" 'conflict-markers.*a\.py'
+newrepo; printf 'a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> branch\n' > "$R/a.py"
+check "conflict markers staged by same-line add denied" deny "$(bp "git add a.py && git commit -m 'feat: x'" )"
+for ext in md mdx rst txt; do
+  newrepo; printf 'a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> branch\n' > "$R/a.$ext"; git -C "$R" add "a.$ext"
+  check "conflict markers in a .$ext file allowed" allow "$(bp 'git commit -m "feat: x"')"
+done
+newrepo; printf '<<<<<<< HEAD\nx\n' > "$R/a.py"; git -C "$R" add a.py
+check "opening marker alone allowed" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; printf 'x\n>>>>>>> branch\n' > "$R/a.py"; git -C "$R" add a.py
+check "closing marker alone allowed" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; printf '<<<<<<<HEAD\n>>>>>>>branch\n' > "$R/a.py"; git -C "$R" add a.py
+check "markers without the trailing space allowed" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; echo "a" > "$R/f"; printf '<<<<<<< HEAD\n=======\n>>>>>>> b\n' > "$R/a.py"; git -C "$R" add a.py; git -C "$R" commit -qm "feat: a"; echo b >> "$R/a.py"; git -C "$R" add a.py
+check "markers only in context, not in added lines, allowed" allow "$(bp 'git commit -m "feat: x"')"
+
+# --- secrets in staged content ---
+declare -A SECRETS=([aws]="$AWS" [ghp]="$GHP" [ghpat]="$GHPAT" [slack]="$SLACK" [priv]="$PRIV" [sk]="$SK")
+for k in aws ghp ghpat slack priv sk; do
+  v="${SECRETS[$k]}"
+  newrepo; printf 'token = "%s"\n' "$v" > "$R/app.py"; git -C "$R" add app.py
+  check "$k secret in staged content denied" deny "$(bp 'git commit -m "feat: x"')"
+  reason_has "$k content denial shows the first 6 characters" "$(bp 'git commit -m "feat: x"')" "secret-in-content.*app\\.py.*${v:0:6}\\.\\.\\."
+  reason_lacks "$k content denial never shows the full value" "$(bp 'git commit -m "feat: x"')" "$v"
+  reason_lacks "$k content denial shows no more than 6 characters" "$(bp 'git commit -m "feat: x"')" "${v:0:7}"
+  newrepo; printf 'token = "%s"\n' "$v" > "$R/app.py"
+  check "$k secret staged by add -A denied" deny "$(bp "git add -A && git commit -m 'feat: x'")"
+  newrepo; printf 'token = "x"\n' > "$R/app.py"; git -C "$R" add app.py; git -C "$R" commit -qm "feat: app"; printf 'token = "%s"\n' "$v" > "$R/app.py"
+  check "$k secret in an unstaged change caught by commit -a" deny "$(bp 'git commit -am "feat: x"')"
+  newrepo
+  check "$k secret in the message denied" deny "$(bp "git commit -m \"feat: add $v\"")"
+  reason_has "$k message denial shows the first 6 characters" "$(bp "git commit -m \"feat: add $v\"")" "secret-in-message.*${v:0:6}\\.\\.\\."
+  reason_lacks "$k message denial never shows the full value" "$(bp "git commit -m \"feat: add $v\"")" "$v"
+done
+newrepo
+check "secret in the second -m paragraph denied" deny "$(bp "git commit -m 'feat: x' -m 'body $AWS'")"
+check "secret in --message= form denied" deny "$(bp "git commit --message='feat: x $AWS'")"
+check "secret in a heredoc message denied" deny "$(bp "git commit -m \"\$(cat <<'EOF'
+feat: x
+
+body $AWS
+EOF
+)\"")"
+printf 'feat: x\n\nbody %s\n' "$AWS" > "$T/msg.txt"
+check "secret in a -F message file denied" deny "$(bp "git commit -F $T/msg.txt")"
+printf 'feat: x\n' > "$T/clean.txt"
+check "clean -F message file allowed" allow "$(bp "git commit -F $T/clean.txt")"
+check "key-like text that is too short allowed" allow "$(bp 'git commit -m "feat: AKIA is a prefix, sk-short, xoxb- and ghp_ are prefixes"')"
+newrepo; printf 'AKIA and sk-short and ghp_ here\n' > "$R/n.py"; git -C "$R" add n.py
+check "short prefixes in content allowed" allow "$(bp 'git commit -m "feat: x"')"
+
+# --- 3 MB staged diff skips the content scan ---
+newrepo
+{ printf 'k = "%s"\n' "$AWS"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/big.py"
+git -C "$R" add big.py
+[ "$(git -C "$R" diff --cached | wc -c)" -gt 2097152 ] && ok "fixture diff is over 2 MB" || bad "fixture diff too small"
+check "3 MB staged diff skips the content scan" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; printf 'k = "%s"\n' "$AWS" > "$R/small.py"; git -C "$R" add small.py
+check "same content in a small diff is denied" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; { echo "<<<<<<< a"; echo ">>>>>>> b"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/big.py"; git -C "$R" add big.py
+check "3 MB staged diff skips the conflict marker scan" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; { yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/.env.big"; git -C "$R" add .env.big
+check "3 MB .env.* file still denied by name" deny "$(bp 'git commit -m "feat: x"')"
+check "3 MB secret in the message still denied" deny "$(bp "git commit -m \"feat: $AWS\"")"
+
+# --- subject format: warn only ---
+newrepo; echo x >> "$R/f"; git -C "$R" add f
+check "no convention: bad subject is silent" allow "$(bp 'git commit -m "Fixed stuff."')"
+newrepo; touch "$R/commitlint.config.js"; echo x >> "$R/f"; git -C "$R" add f
+check "commitlint config: non-matching subject warns" warn "$(bp 'git commit -m "Fixed stuff"')"
+reason_has "subject warning names the rule and the subject" "$(bp 'git commit -m "Fixed stuff"')" "subject-format.*Fixed stuff"
+check "commitlint config: matching subject silent" allow "$(bp 'git commit -m "fix(api): handle nulls"')"
+check "commitlint config: breaking marker allowed" allow "$(bp 'git commit -m "feat!: drop v1"')"
+check "commitlint config: trailing period warns" warn "$(bp 'git commit -m "fix: a thing."')"
+check "commitlint config: 73-character subject warns" warn "$(bp "git commit -m 'feat: $(printf 'a%.0s' $(seq 1 67))'")"
+check "commitlint config: 72-character subject silent" allow "$(bp "git commit -m 'feat: $(printf 'a%.0s' $(seq 1 66))'")"
+for rc in .commitlintrc .commitlintrc.json .commitlintrc.yml commitlint.config.ts; do
+  newrepo; touch "$R/$rc"; echo x >> "$R/f"; git -C "$R" add f
+  check "$rc activates the subject check" warn "$(bp 'git commit -m "Fixed stuff"')"
+done
+newrepo; conv_history; echo x >> "$R/f"; git -C "$R" add f
+check "conventional history: non-matching subject warns" warn "$(bp 'git commit -m "Fixed stuff"')"
+check "conventional history: matching subject silent" allow "$(bp 'git commit -m "docs: update readme"')"
+check "conventional history: warn on -m after other flags" warn "$(bp 'git commit -S -a -m "bad subject"')"
+check "fixup! subject skipped" allow "$(bp 'git commit -m "fixup! feat: change 1"')"
+check "squash! subject skipped" allow "$(bp 'git commit -m "squash! feat: change 1"')"
+check "amend! subject skipped" allow "$(bp 'git commit -m "amend! feat: change 1"')"
+check "--fixup flag skipped" allow "$(bp 'git commit --fixup=HEAD')"
+check "merge subject skipped" allow "$(bp 'git commit -m "Merge branch topic into main"')"
+check "--no-edit skipped" allow "$(bp 'git commit --amend --no-edit')"
+check "--amend without a new message skipped" allow "$(bp 'git commit --amend')"
+check "--amend with a bad new message warns" warn "$(bp 'git commit --amend -m "bad subject"')"
+check "unreadable -F message skipped" allow "$(bp 'git commit -F /nonexistent/msg.txt')"
+check "message from the editor (no -m) skipped" allow "$(bp 'git commit')"
+check "-C reuse skipped" allow "$(bp 'git commit -C HEAD')"
+printf 'Fixed stuff\n' > "$T/badsubj.txt"
+check "-F file with a bad subject warns" warn "$(bp "git commit -F $T/badsubj.txt")"
+check "heredoc message with a good subject silent" allow "$(bp "git commit -m \"\$(cat <<'EOF'
+feat: good one
+
+body
+EOF
+)\"")"
+check "heredoc message with a bad subject warns" warn "$(bp "git commit -m \"\$(cat <<'EOF'
+Bad one
+
+body
+EOF
+)\"")"
+newrepo; for i in $(seq 1 20); do echo "$i" >> "$R/f"; git -C "$R" commit -qam "$([ $((i % 5)) -eq 0 ] && echo "stuff $i" || echo "feat: c $i")"; done
+git -C "$R" push -q origin main; git -C "$R" fetch -q origin; echo x >> "$R/f"; git -C "$R" add f
+check "history at exactly 80% conventional activates the check" warn "$(bp 'git commit -m "Fixed stuff"')"
+newrepo; for i in $(seq 1 20); do echo "$i" >> "$R/f"; git -C "$R" commit -qam "$([ $((i % 4)) -eq 0 ] && echo "stuff $i" || echo "feat: c $i")"; done
+git -C "$R" push -q origin main; git -C "$R" fetch -q origin; echo x >> "$R/f"; git -C "$R" add f
+check "history below 80% conventional is silent" allow "$(bp 'git commit -m "Fixed stuff"')"
+newrepo; conv_history; echo "v=1" > "$R/.env"; git -C "$R" add .env
+check "a denial wins over a subject warning" deny "$(bp 'git commit -m "Fixed stuff"')"
+reason_lacks "the denial carries no subject warning text" "$(bp 'git commit -m "Fixed stuff"')" "subject-format"
+
+# --- dry-run ---
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env
+check "--dry-run with a staged .env skipped" allow "$(bp 'git commit --dry-run -m "feat: x"')"
+check "--dry-run after add -A skipped" allow "$(bp "git add -A && git commit --dry-run -m x")"
+check "the same commit without --dry-run is denied" deny "$(bp 'git commit -m "feat: x"')"
+
+# --- directory forms ---
+check "cd into the repo then commit is judged" deny "$(bp "cd $R && git commit -m 'feat: x'" "$elsewhere")"
+check "git -C repo commit is judged" deny "$(bp "git -C $R commit -m 'feat: x'" "$elsewhere")"
+check "(cd repo; commit) is judged" deny "$(bp "(cd $R && git commit -m 'feat: x')" "$elsewhere")"
+check "cd into the repo then add -A and commit is judged" deny "$(bp "cd $R && git add -A && git commit -m 'feat: x'" "$elsewhere")"
+check "commit after leaving the repo with cd is not judged against it" allow "$(bp "cd $R && cd $elsewhere && git commit -m 'feat: x'" "$elsewhere")"
+check "commit in a directory that is not a repository allowed" allow "$(bp "git commit -m 'feat: x'" "$elsewhere")"
+check "undeterminable directory (variable) allowed" allow "$(bp 'cd "$SOMEWHERE" && git commit -m "feat: x"' "$elsewhere")"
+check "undeterminable -C (substitution) allowed" allow "$(bp 'git -C "$(pwd)" commit -m "feat: x"' "$elsewhere")"
+check "missing payload cwd with a plain commit allowed" allow "$(jq -n '{tool_input:{command:"git commit -m x"}}')"
+check "nonexistent directory allowed" allow "$(bp "git -C $T/nope commit -m 'feat: x'" "$elsewhere")"
+check "-c option before commit is judged" deny "$(bp "git -C $R -c user.name=x commit -m 'feat: x'" "$elsewhere")"
+check "git status mentioning commit is not a commit" allow "$(bp 'git status # git commit -m x')"
+check "echo of a git commit is not a commit" allow "$(bp 'echo "git commit -m x"')"
+check "git log --grep=commit is not a commit" allow "$(bp 'git log --grep=commit')"
+
+# --- escape ---
+export CLAUDE_GIT_GUARD=off
+check "CLAUDE_GIT_GUARD=off allows" allow "$(bp 'git commit -m "feat: x"')"
+unset CLAUDE_GIT_GUARD
+touch "$off"
+check "fresh off-file allows" allow "$(bp 'git commit -m "feat: x"')"
+touch -d '13 hours ago' "$off"
+check "13-hour-old off-file ignored" deny "$(bp 'git commit -m "feat: x"')"
+reason_has "stale off-file denial says expired" "$(bp 'git commit -m "feat: x"')" 'expired'
+touch -d '11 hours ago' "$off"
+check "11-hour-old off-file allows" allow "$(bp 'git commit -m "feat: x"')"
+touch -d '+2 hours' "$off"
+check "future-dated off-file ignored" deny "$(bp 'git commit -m "feat: x"')"
+rm -f "$off"
+CLAUDE_GIT_GUARD_OFF_FILE="$HOME/other.off"; export CLAUDE_GIT_GUARD_OFF_FILE
+touch "$CLAUDE_GIT_GUARD_OFF_FILE"
+check "off-file path override honoured" allow "$(bp 'git commit -m "feat: x"')"
+unset CLAUDE_GIT_GUARD_OFF_FILE
+iso="$(mktemp -d "$HOME/iso.XXXXXX")"
+cp "$hooks/commit-gate.sh" "$hooks/_commit-gate-check.py" "$hooks/_git_gates_lib.py" "$hooks/_secret_patterns.py" "$hooks/_git-cmd-scan.py" "$hooks/_bash-write-check.py" "$hooks/_public-text-check.py" "$iso/"
+mkdir -p "$iso/../hooks.tmp" 2>/dev/null; rmdir "$iso/../hooks.tmp" 2>/dev/null
+touch "$off"
+out="$(printf '%s' "$(bp 'git commit -m "feat: x"')" | bash "$iso/commit-gate.sh" 2>&1)"
+if grep -q '"permissionDecision": *"deny"' <<<"$out"; then ok "missing shared file keeps the gate ON even with a fresh off-file"
+else bad "missing shared file: $out"; fi
+rm -f "$off"; rm -rf "$iso"
+
+# --- fail open on bad input ---
+silent "empty stdin exits 0 silently" ''
+silent "malformed JSON exits 0 silently" '{not json'
+silent "JSON non-object exits 0 silently" '[1,2]'
+silent "JSON string exits 0 silently" '"git commit -m x"'
+silent "empty object exits 0 silently" '{}'
+silent "payload with non-string command exits 0 silently" '{"tool_input":{"command":123}}'
+silent "unterminated quote exits 0 silently" "$(bp "git commit -m 'oops")"
+silent "no git word exits 0 silently" "$(bp 'ls -la')"
+silent "path-less hook environment (no python3 helper break) still silent on non-git" "$(bp 'echo hi')"
+
+# --- output shape with awkward text ---
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env
+nasty=$'git commit -m "q\\"uote \'s\' \ttab"\n# newline'
+check "denial with quotes, tabs and newlines is valid JSON" deny "$(bp "$nasty")"
+newrepo; touch "$R/commitlint.config.js"; echo x >> "$R/f"; git -C "$R" add f
+check "warning with quotes in the subject is valid JSON" warn "$(bp "git commit -m 'Bad \"quoted\" subject'")"
+
+# --- the hook never changes a repo ---
+newrepo; touch "$R/commitlint.config.js"; echo "v=1" > "$R/.env"; echo n > "$R/new.txt"; echo m >> "$R/f"; git -C "$R" add .env commitlint.config.js
+snap() { echo "$(git -C "$R" rev-parse HEAD) $(git -C "$R" status --porcelain | md5sum) $(git -C "$R" ls-files -s | md5sum) $(stat -c %Y-%s "$R/.git/index") $(git -C "$R" for-each-ref | md5sum) $(find "$R/.git" -type f -newer "$R/.git/index" | wc -l)"; }
+before="$(snap)"
+for c in 'git commit -m "feat: x"' 'git commit -am "Fixed stuff."' "git add -A && git commit -m x" 'git commit --amend --no-edit' 'git commit --dry-run -m x'; do
+  printf '%s' "$(bp "$c")" | $gate >/dev/null 2>&1
+done
+after="$(snap)"
+if [ "$before" = "$after" ]; then ok "HEAD, index, refs and working tree unchanged after the hook ran"
+else bad "repo state changed" "$before / $after"; fi
+if [ -z "$(git -C "$T/r$n.git" for-each-ref refs/heads | grep -v main)" ]; then ok "nothing was pushed to origin"
+else bad "origin gained refs"; fi
+if [ -z "$(find "$hooks" -name __pycache__ -o -name '*.pyc' | head -1)" ]; then ok "no bytecode written next to the hook"
+else bad "bytecode written in the hooks directory"; fi
+
+echo
+echo "passed: $pass  failed: $fail"
+[ "$fail" -eq 0 ]

@@ -19,11 +19,13 @@ prompt="$(jq -r '.prompt' <<<"$payload" 2>/dev/null)" || exit 0
 sid="$(jq -r '.session_id // empty | strings' <<<"$payload" 2>/dev/null)"
 sdir="$(jq -r '.scratchpad_dir // empty | strings' <<<"$payload" 2>/dev/null)"
 
-# A new prompt ends any one-shot approval left by an interrupted turn.
+# A new prompt ends any one-shot approval left by an interrupted turn. A
+# session-long approval is left alone; only "limit on" ends it.
 [ "$(reply_cap_state "$sid" "$sdir")" = oneshot ] && reply_cap_clear "$sid" "$sdir"
+before="$(reply_cap_state "$sid" "$sdir")"
 
 case "$(reply_cap_classify "$prompt")" in
-  oneshot) reply_cap_set "$sid" "$sdir" oneshot ;;
+  oneshot) [ "$before" = session ] || reply_cap_set "$sid" "$sdir" oneshot ;;
   session) reply_cap_set "$sid" "$sdir" session ;;
   clear) reply_cap_clear "$sid" "$sdir" ;;
 esac

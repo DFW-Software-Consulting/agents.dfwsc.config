@@ -10,7 +10,8 @@ Hard rules (deny): secret files, conflict markers, secrets in staged content or
 in the message. Warn only: subject format, where the repo already follows it.
 Limits (fail open): `bash -c '...'` bodies and shell aliases are not parsed; a
 same-line `git add` with a non-literal argument is treated like `git add -A`;
-the content scan is skipped when the diff passes 2 MB. Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
+a file with over 2 MB of added text (or an .npmrc over 64 KB) is not scanned and the
+warning says so. Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
 extraction reuses commit_texts()/split_heredocs() from _public-text-check.py.
 """
 import fnmatch
@@ -26,7 +27,9 @@ SECRET_NAMES = [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
                 "credentials.json", "*.p12", "*.pfx"]
 ENV_EXAMPLES = {".env.example", ".env.sample", ".env.template", ".env.dist"}
 DOC_EXT = (".md", ".mdx", ".rst", ".txt")
-MAX_DIFF = 2 * 1024 * 1024
+MAX_FILE = 2 * 1024 * 1024         # added text per file; larger files are not scanned
+MAX_TOTAL = 16 * 1024 * 1024   # bytes of diff read at all
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 SUBJECT_RE = re.compile(r"^(feat|fix|refactor|docs|test|chore|ci|perf|style|build|revert)(\([^)]+\))?!?: \S.*$")
 COMMITLINT = {"commitlint.config.js", "commitlint.config.cjs", "commitlint.config.mjs",
               "commitlint.config.ts", "commitlint.config.cts", "commitlint.config.mts",
@@ -97,26 +100,32 @@ def secret_name(path):
 
 
 NPMRC_CAP = 65536
-SAFE_TOKEN = re.compile(r"""^["']?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?["']?$""")
+SAFE_TOKEN = re.compile(r"""^["']?(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)+["']?$""")
 
 
 def read_text(top, path, staged):
+    """(text, truncated): at most NPMRC_CAP bytes of the file."""
     if staged:
-        out, _ = L.git_capped(top, NPMRC_CAP, "show", ":" + path)
+        out, trunc = L.git_capped(top, NPMRC_CAP, "show", ":" + path)
         if out is not None:
-            return out
+            return out, trunc
     try:
-        with open(os.path.join(top, path), encoding="utf-8", errors="replace") as f:
-            return f.read(NPMRC_CAP)
+        with open(os.path.join(top, path), "rb") as f:
+            raw = f.read(NPMRC_CAP + 1)
     except OSError:
-        return ""
+        return "", False
+    return raw[:NPMRC_CAP].decode("utf-8", errors="replace"), len(raw) > NPMRC_CAP
 
 
 def npmrc_has_token(text):
-    """True when an _authToken has a literal value (not an env var reference)."""
-    for m in re.finditer(r"_authToken\s*=\s*(\S+)", text):
-        if not SAFE_TOKEN.match(m.group(1)):
-            return True
+    """True when an _authToken has a literal value (not variable references).
+    Comment lines (# or ; at the start) are ignored."""
+    for line in text.split("\n"):
+        if line.lstrip().startswith(("#", ";")):
+            continue
+        for m in re.finditer(r"_authToken\s*=\s*(\S+)", line):
+            if not SAFE_TOKEN.match(m.group(1)):
+                return True
     return False
 
 
@@ -202,6 +211,8 @@ def named_paths(top, d, named):
         if has_glob(p):
             out.extend(lines_z(L.git(d, "ls-files", "-z", "-m", "-o", "--exclude-standard",
                                      "--full-name", "--", p)))
+            out.extend(lines_z(L.git(d, "diff", "--cached", "--name-only", "-z",
+                                     "--diff-filter=d", "--", p)))
             continue
         ab = os.path.realpath(p if os.path.isabs(p) else os.path.join(d, p))
         rel = os.path.relpath(ab, real_top)
@@ -209,29 +220,11 @@ def named_paths(top, d, named):
             continue
         if os.path.isdir(ab):
             out.extend(lines_z(L.git(top, "ls-files", "-z", "-m", "-o", "--exclude-standard", "--", rel)))
+            out.extend(lines_z(L.git(top, "diff", "--cached", "--name-only", "-z",
+                                     "--diff-filter=d", "--", rel)))
         elif os.path.isfile(ab):
             out.append(rel)
     return out
-
-
-def added_by_file(diff):
-    files, cur, header = {}, None, False
-    for line in diff.split("\n"):
-        if line.startswith("diff --git "):
-            header, cur = True, None
-        elif header and line.startswith("+++ "):
-            p = line[4:]
-            if p == "/dev/null":
-                cur = None
-            else:
-                p = p.strip('"')
-                cur = p[2:] if p.startswith("b/") else p
-                files.setdefault(cur, [])
-        elif line.startswith("@@"):
-            header = False
-        elif not header and cur is not None and line.startswith("+"):
-            files[cur].append(line[1:])
-    return files
 
 
 def follows_convention(top):
@@ -300,6 +293,8 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
             for p in lines_z(L.git(top, "diff", "--name-only", "-z", "--diff-filter=d")):
                 put(p, "git add -u")
 
+    unscanned = []  # files left unscanned (too large); reported in a warning
+
     # Rule 1: secret files
     for p, src in paths.items():
         if L.glob_any(p, allow):
@@ -309,72 +304,77 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
             denials.append(
                 f"commit-gate (secret-file): {p} ({src}) matches the secret-file name pattern {pat}. "
                 f"Unstage it (git restore --staged {p}) or add it to .gitignore.")
-        elif os.path.basename(p).lower() == ".npmrc" and npmrc_has_token(read_text(top, p, p in staged)):
-            denials.append(
-                f"commit-gate (secret-file): {p} ({src}) is an .npmrc with a literal _authToken. "
-                f"Unstage it (git restore --staged {p}) or add it to .gitignore.")
+        elif os.path.basename(p).lower() == ".npmrc":
+            text, trunc = read_text(top, p, p in staged)
+            if npmrc_has_token(text):
+                denials.append(
+                    f"commit-gate (secret-file): {p} ({src}) is an .npmrc with a literal _authToken. "
+                    f"Unstage it (git restore --staged {p}) or add it to .gitignore.")
+            elif trunc:
+                unscanned.append(p)
 
-    # Rules 2 and 3 on content, read with a 2 MB cap in total
-    diff_args = ["-U0", "--no-color", "--no-ext-diff", "--no-textconv",
+    # Rules 2 and 3 on content: streamed, a file over MAX_FILE of added text is skipped
+    diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
                  "--src-prefix=a/", "--dst-prefix=b/"]
-    used, over = [0], [False]
+    files, truncated = {}, False
 
     def gd(*extra):
-        if over[0]:
-            return ""
-        out, trunc = L.git_capped(top, MAX_DIFF + 1 - used[0], "diff", *diff_args, *extra)
-        if trunc:
-            over[0] = True
-        used[0] += len(out or "")
-        return out or ""
+        nonlocal truncated
+        got, skipped, trunc = L.stream_added(top, [*diff_args, *extra], MAX_FILE, MAX_TOTAL)
+        truncated = truncated or trunc
+        for sp in skipped:
+            if sp not in unscanned:
+                unscanned.append(sp)
+        for fp, lines in (got or {}).items():
+            files.setdefault(fp, []).extend(lines)
 
-    diffs = []
+    has_head = L.git(top, "rev-parse", "-q", "--verify", "HEAD") is not None
+    base = "HEAD" if has_head else EMPTY_TREE
     if not only_mode:
-        diffs.append(gd("--cached"))
+        gd("--cached")
     if o["all"]:
-        diffs.append(gd())
+        gd()
     # Files a same-line `git add` or a path-limited commit takes from the working tree.
     wt_paths = [p for p, src in paths.items() if src.startswith("git add") or src == "named on the commit"]
-    extra = {}
     if wt_paths:
         tracked = set(lines_z(L.git(top, "ls-files", "-z")))
         tr = [p for p in wt_paths if p in tracked]
         if tr:
-            if only_mode:
-                diffs.append(gd("HEAD", "--", *tr))
-            else:
-                diffs.append(gd("--", *tr))
+            gd(base, "--", *tr) if only_mode else gd("--", *tr)
         for p in wt_paths:
-            if p not in tracked and not over[0]:
-                try:
-                    with open(os.path.join(top, p), "rb") as f:
-                        raw = f.read(MAX_DIFF + 1 - used[0])
-                except OSError:
-                    continue
-                used[0] += len(raw)
-                if used[0] > MAX_DIFF:
-                    over[0] = True
-                elif b"\0" not in raw[:8000]:
-                    extra[p] = raw.decode("utf-8", errors="replace").split("\n")
-    diff = "\n".join(diffs)
-    if not over[0]:
-        files = added_by_file(diff)
-        for p, lines in extra.items():
-            files.setdefault(p, []).extend(lines)
-        for path, lines in files.items():
-            if L.glob_any(path, allow):
+            if p in tracked:
                 continue
-            if not path.lower().endswith(DOC_EXT) and \
-                    any(l.startswith("<<<<<<< ") for l in lines) and \
-                    any(l.startswith(">>>>>>> ") for l in lines):
-                denials.append(
-                    f"commit-gate (conflict-markers): {path} has unresolved conflict markers "
-                    f"(<<<<<<< and >>>>>>>) in staged lines. Resolve the conflict, restage the file, "
-                    f"or add the path to ALLOW_PATHS if the markers are deliberate.")
-            for kind, first in L.find_secrets("\n".join(lines)):
-                denials.append(
-                    f"commit-gate (secret-in-content): {path} adds a {kind} ({first}...). "
-                    f"Remove it, restage the file and rotate the credential if it was real.")
+            try:
+                with open(os.path.join(top, p), "rb") as f:
+                    raw = f.read(MAX_FILE + 1)
+            except OSError:
+                continue
+            if len(raw) > MAX_FILE:
+                if p not in unscanned:
+                    unscanned.append(p)
+            elif b"\0" not in raw[:8000]:
+                files.setdefault(p, []).extend(raw.decode("utf-8", errors="replace").split("\n"))
+    if truncated:
+        unscanned.append("(the rest of a diff over %d MB)" % (MAX_TOTAL >> 20))
+    for path, lines in files.items():
+        if L.glob_any(path, allow):
+            continue
+        if not path.lower().endswith(DOC_EXT) and \
+                any(l.startswith("<<<<<<< ") for l in lines) and \
+                any(l.startswith(">>>>>>> ") for l in lines):
+            denials.append(
+                f"commit-gate (conflict-markers): {path} has unresolved conflict markers "
+                f"(<<<<<<< and >>>>>>>) in staged lines. Resolve the conflict, restage the file, "
+                f"or add the path to ALLOW_PATHS if the markers are deliberate.")
+        for kind, first in L.find_secrets("\n".join(lines)):
+            denials.append(
+                f"commit-gate (secret-in-content): {path} adds a {kind} ({first}...). "
+                f"Remove it, restage the file and rotate the credential if it was real.")
+
+    if unscanned:
+        warns.append(f"commit-gate (not-scanned): {len(unscanned)} file(s) were too large to scan for "
+                     f"secrets and conflict markers: {', '.join(unscanned[:3])}"
+                     f"{' and more' if len(unscanned) > 3 else ''}. Check them by hand.")
 
     # Message text
     stdin_text = "\n".join(bodies)

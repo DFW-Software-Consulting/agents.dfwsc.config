@@ -2,6 +2,12 @@
 
 Newest first. Check here before proposing a fix.
 
+## commit-gate misses a secret in a staged file when named by directory or glob, or when a big file is staged (`_commit-gate-check.py`)
+- Signature: `git commit -m x d/` or `"d/*.js"` passes with an access key in a newly staged `d/s.js`; a small file with a secret passes when a 3 MB file is staged alongside; a path-limited first commit in an empty repository scans nothing.
+- Cause: the directory and glob listing asked only for modified or untracked files; the whole content scan was skipped over 2 MB; the comparison against HEAD fails with no commits.
+- Fix: also list index entries under the path; skip only files over 2 MB of added text and warn how many were not scanned; compare against the empty tree when HEAD does not exist.
+- Date: 2026-11-15
+
 ## Directory or fresh symlink counts as a fresh off-file (`gate_off_file_state_for`, `_gate-common.sh`)
 - Cause: the helper tested the path with `-e` and read `stat -c %Y`, which does not follow links. A recently modified directory at the off-file path, or a new link to an old file, reported `fresh` and switched the gate off.
 - Fix: require `[ -f ]` (regular file, links followed; directories and dangling links count as no file) and read the time with `stat -L`, so a link is judged by its target.
@@ -17,6 +23,7 @@ Newest first. Check here before proposing a fix.
 - Signature: agent prose says "use the X skill", the agent has an explicit `tools:` list without `Skill`, and it improvises instead of following the skill.
 - Cause: such an agent cannot invoke skills, and prose delivers no skill content. Only names in the agent's `skills:` frontmatter list are injected, in full, at start. A wrong name is skipped with no error, and a skill with `disable-model-invocation: true` cannot be preloaded.
 - Fix: list the skills under `skills:` in the agent frontmatter; run `run-agent-skills-tests.sh` to catch a mistyped name.
+
 ## pr-gate denies a pushed branch as "not pushed" (pr-gate.sh, `_pr-gate-check.py` `rule_a`)
 - Signature: `pr-gate (not-pushed): branch <name> has <N> unpushed commits (ahead of origin/main)` right after `git push origin <name>`, for a branch made with `git worktree add -b <name> <path> origin/main`.
 - Cause: that branch tracks `origin/main`, and a plain push (no `-u`) leaves the upstream unchanged, so counting `<name>@{u}..HEAD` counted the whole branch.

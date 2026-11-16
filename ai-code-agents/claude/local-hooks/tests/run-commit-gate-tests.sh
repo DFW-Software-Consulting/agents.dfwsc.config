@@ -280,14 +280,77 @@ newrepo
 { printf 'k = "%s"\n' "$AWS"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/big.py"
 git -C "$R" add big.py
 [ "$(git -C "$R" diff --cached | wc -c)" -gt 2097152 ] && ok "fixture diff is over 2 MB" || bad "fixture diff too small"
-check "3 MB staged diff skips the content scan" allow "$(bp 'git commit -m "feat: x"')"
+check "a 3 MB staged file alone is allowed with a not-scanned warning" warn "$(bp 'git commit -m "feat: x"')"
+reason_has "the warning names how many files were not scanned" "$(bp 'git commit -m "feat: x"')" 'not-scanned.*1 file'
+newrepo; { printf 'k = "%s"\n' "$AWS"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/big.py"; printf 'k = "%s"\n' "$GHP" > "$R/small.py"; git -C "$R" add big.py small.py
+check "a 3 MB file plus a small file with a secret: denied" deny "$(bp 'git commit -m "feat: x"')"
+reason_has "the small file is the one named" "$(bp 'git commit -m "feat: x"')" 'small\.py'
+reason_lacks "the skipped big file's secret is not reported" "$(bp 'git commit -m "feat: x"')" 'big.py adds'
+newrepo; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000 > "$R/big.py"; yes "$(printf 'b%.0s' $(seq 1 99))" | head -n 30000 > "$R/big2.py"; echo ok > "$R/small.py"; git -C "$R" add big.py big2.py small.py
+reason_has "two skipped files are counted" "$(bp 'git commit -m "feat: x"')" 'not-scanned.*2 file'
+newrepo; { printf 'k = "%s"\n' "$AWS"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 15000; } > "$R/mid.py"; git -C "$R" add mid.py
+check "a 1.5 MB file is still scanned (secret denied)" deny "$(bp 'git commit -m "feat: x"')"
 newrepo; printf 'k = "%s"\n' "$AWS" > "$R/small.py"; git -C "$R" add small.py
 check "same content in a small diff is denied" deny "$(bp 'git commit -m "feat: x"')"
 newrepo; { echo "<<<<<<< a"; echo ">>>>>>> b"; yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/big.py"; git -C "$R" add big.py
-check "3 MB staged diff skips the conflict marker scan" allow "$(bp 'git commit -m "feat: x"')"
+check "a 3 MB file with conflict markers is skipped with a warning" warn "$(bp 'git commit -m "feat: x"')"
 newrepo; { yes "$(printf 'a%.0s' $(seq 1 99))" | head -n 30000; } > "$R/.env.big"; git -C "$R" add .env.big
 check "3 MB .env.* file still denied by name" deny "$(bp 'git commit -m "feat: x"')"
 check "3 MB secret in the message still denied" deny "$(bp "git commit -m \"feat: $AWS\"")"
+
+# --- repositories with no commits yet ---
+nocommit() { n=$((n + 1)); R="$T/nc$n"; git init -q -b main "$R"; }
+nocommit; printf 'k = "%s"\n' "$AWS" > "$R/app.py"; git -C "$R" add app.py
+check "no commits: staged secret content denied" deny "$(bp 'git commit -m "feat: x"')"
+nocommit; echo "v=1" > "$R/.env"; git -C "$R" add .env
+check "no commits: staged .env denied" deny "$(bp 'git commit -m "feat: x"')"
+nocommit; echo ok > "$R/app.py"; git -C "$R" add app.py
+check "no commits: clean first commit allowed" allow "$(bp 'git commit -m "feat: x"')"
+nocommit; printf 'k = "%s"\n' "$AWS" > "$R/app.py"; echo ok > "$R/b.py"; git -C "$R" add b.py
+check "no commits: path-limited first commit of an untracked secret file denied" deny "$(bp 'git commit -m "feat: x" app.py')"
+nocommit; printf 'k = "%s"\n' "$AWS" > "$R/app.py"; git -C "$R" add app.py
+check "no commits: path-limited first commit of a staged secret file denied" deny "$(bp 'git commit -m "feat: x" app.py')"
+nocommit; mkdir "$R/d"; printf 'k = "%s"\n' "$AWS" > "$R/d/s.js"; git -C "$R" add d/s.js
+check "no commits: path-limited first commit of a directory denied" deny "$(bp 'git commit -m "feat: x" d/')"
+nocommit; echo ok > "$R/app.py"; git -C "$R" add app.py
+check "no commits: clean path-limited first commit allowed" allow "$(bp 'git commit -m "feat: x" app.py')"
+
+# --- path-limited commit of a directory or glob: staged files unmodified since staging ---
+newrepo; mkdir "$R/d"; printf 'k = "%s"\n' "$AWS" > "$R/d/s.js"; git -C "$R" add d/s.js
+check "named directory holding a newly staged secret file denied" deny "$(bp 'git commit -m "feat: x" d/')"
+check "named directory without a trailing slash denied" deny "$(bp 'git commit -m "feat: x" d')"
+check "glob matching a newly staged secret file denied" deny "$(bp "git commit -m 'feat: x' 'd/*.js'")"
+check "the file named directly is denied too" deny "$(bp 'git commit -m "feat: x" d/s.js')"
+reason_has "the directory denial names the file" "$(bp 'git commit -m "feat: x" d/')" 'secret-in-content.*d/s\.js'
+newrepo; mkdir "$R/d"; echo "v=1" > "$R/d/.env"; git -C "$R" add -f d/.env
+check "named directory holding a staged .env denied by name" deny "$(bp 'git commit -m "feat: x" d/')"
+check "glob matching a staged .env denied by name" deny "$(bp "git commit -m 'feat: x' 'd/.env*'")"
+newrepo; mkdir "$R/d"; echo ok > "$R/d/s.js"; git -C "$R" add d/s.js; printf 'k = "%s"\n' "$AWS" > "$R/other.py"; git -C "$R" add other.py
+check "a clean named directory is allowed even if another staged file has a secret" allow "$(bp 'git commit -m "feat: x" d/')"
+
+# --- .npmrc details ---
+newrepo; printf '# //r.example.invalid/:_%s=fakefake\n; _%s=fakefake\n  # _%s=fakefake\n' authToken authToken authToken > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc with the token only in comment lines allowed" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; printf '# note\n//r.example.invalid/:_%s=fakefake\n' authToken > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc with a comment line and a literal token denied" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; printf '//r.example.invalid/:_%s=${NPM_A}${NPM_B}\n' authToken > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc value made of several variable references allowed" allow "$(bp 'git commit -m "feat: x"')"
+newrepo; printf '//r.example.invalid/:_%s=${NPM_A}literal\n' authToken > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc value mixing a variable and literal text denied" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; { yes '# padding line to push the token past the read cap' | head -n 2000; printf '//r.example.invalid/:_%s=fakefake\n' authToken; } > "$R/.npmrc"; git -C "$R" add .npmrc
+[ "$(wc -c < "$R/.npmrc")" -gt 65536 ] && ok "fixture .npmrc is over 64 KB" || bad "fixture .npmrc too small"
+check ".npmrc over the cap with a token beyond it: warned as not scanned" warn "$(bp 'git commit -m "feat: x"')"
+reason_has "the not-scanned warning names the .npmrc" "$(bp 'git commit -m "feat: x"')" 'not-scanned.*\.npmrc'
+newrepo; { printf '//r.example.invalid/:_%s=fakefake\n' authToken; yes '# padding line to push past the read cap' | head -n 2000; } > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc over the cap with a token inside it denied" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; yes '# padding line to push past the read cap' | head -n 2000 > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc over the cap with nothing in it is warned about" warn "$(bp 'git commit -m "feat: x"')"
+
+# --- payment prefixes after an underscore (kept as a boundary on purpose) ---
+newrepo; printf 'k = "x_%s"\n' "$SKLIVE" > "$R/app.py"; git -C "$R" add app.py
+check "sk_live_ after an underscore still denied (a live key pasted after a name must not slip through)" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; printf 'k = "x%s"\n' "$SKLIVE" > "$R/app.py"; git -C "$R" add app.py
+check "sk_live_ in the middle of a word is not a boundary" allow "$(bp 'git commit -m "feat: x"')"
 
 # --- subject format: warn only ---
 newrepo; echo x >> "$R/f"; git -C "$R" add f

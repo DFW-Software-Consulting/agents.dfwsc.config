@@ -97,6 +97,68 @@ def git_capped(d, cap, *args):
     return data[:cap].decode("utf-8", errors="replace"), truncated
 
 
+def stream_added(d, args, per_file_cap, total_cap):
+    """Run a `git diff` and collect added lines per file, streaming with bounded
+    memory. A file whose added text passes per_file_cap is dropped and listed as
+    skipped; reading stops after total_cap bytes (truncated). Returns
+    ({path: [lines]}, [skipped paths], truncated), or (None, [], False) on
+    failure, timeout or an exhausted budget."""
+    import threading
+    left = BUDGET - (time.monotonic() - _START)
+    if left <= 0 or not d:
+        return None, [], False
+    try:
+        proc = subprocess.Popen(["git", "-C", d, "-c", "core.quotepath=off", *args],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=GIT_ENV)
+    except Exception:
+        return None, [], False
+    timer = threading.Timer(min(PER_CALL, left), proc.kill)
+    timer.start()
+    files, skipped, sizes = {}, [], {}
+    cur, header, dead, read, truncated = None, False, False, 0, False
+    try:
+        for raw in proc.stdout:
+            read += len(raw)
+            if read > total_cap:
+                truncated = True
+                proc.kill()
+                break
+            if raw.startswith(b"diff --git "):
+                header, cur, dead = True, None, False
+            elif header and raw.startswith(b"+++ "):
+                p = raw[4:].rstrip(b"\n").decode("utf-8", errors="replace").strip('"')
+                if p == "/dev/null":
+                    cur = None
+                else:
+                    cur = p[2:] if p.startswith("b/") else p
+                    files.setdefault(cur, [])
+                    sizes.setdefault(cur, 0)
+            elif raw.startswith(b"@@"):
+                header = False
+            elif not header and cur is not None and not dead and raw.startswith(b"+"):
+                sizes[cur] += len(raw)
+                if sizes[cur] > per_file_cap:
+                    dead = True
+                    files.pop(cur, None)
+                    if cur not in skipped:
+                        skipped.append(cur)
+                else:
+                    files[cur].append(raw[1:].rstrip(b"\n").decode("utf-8", errors="replace"))
+        proc.stdout.close()
+        rc = proc.wait()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return None, [], False
+    finally:
+        timer.cancel()
+    if not truncated and rc != 0:
+        return None, [], False
+    return files, skipped, truncated
+
+
 def toplevel(d):
     if not d or not os.path.isdir(d):
         return None

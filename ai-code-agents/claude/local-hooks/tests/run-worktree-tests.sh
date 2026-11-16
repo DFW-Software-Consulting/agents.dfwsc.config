@@ -11,7 +11,7 @@ export HOME; HOME="$(mktemp -d)"
 # location may be inside one, which makes `mktemp -d` directories unknown).
 safetmp=""
 for c in /tmp /var/tmp /dev/shm "${XDG_RUNTIME_DIR:-/nonexistent}"; do
-  if [ -d "$c" ] && [ ! -e "$c/.git" ] && ! git -C "$c" rev-parse --is-inside-work-tree >/dev/null 2>&1; then safetmp="$(mktemp -d "$c/wtg-tests.XXXXXX")"; break; fi
+  if [ -d "$c" ] && ! git -C "$c" rev-parse --is-inside-work-tree >/dev/null 2>&1; then safetmp="$(mktemp -d "$c/wtg-tests.XXXXXX")"; break; fi
 done
 [ -n "$safetmp" ] || safetmp="$(mktemp -d)"
 trap 'rm -rf "$HOME" "$safetmp"' EXIT
@@ -278,6 +278,17 @@ check "other variable than the temporary one denied" deny "$(bp 'T=$(mktemp -d);
 check "mktemp assignment after && following a command is doubtful, denied" deny "$(bp 'true && T=$(mktemp -d) && cd "$T" && git commit -m x' "$primary")"
 check "temporary directory scoped by a subshell: commit after it judged in cwd" deny "$(bp '(cd "$(mktemp -d)" && git init -q); git commit -m x' "$primary")"
 check "mktemp -d .. escape denied" deny "$(bp 'T=$(mktemp -d); cd "$T/../x" && git commit -m x' "$primary")"
+# nothing on the line may redirect a mktemp path
+for f in 'T=$(mktemp -d) && ln -s @P@ "$T/l" && cd "$T/l" && git commit -am x' \
+  'T=$(mktemp -d); rmdir "$T" && ln -s @P@ "$T" && cd "$T" && git commit -am x' \
+  ': ${TMPDIR:=@P@}; cd $(mktemp -d) && git commit -am x' 'T=$(mktemp -d) && mv @P@ "$T/l" && cd "$T/l" && git commit -am x' \
+  'T=$(mktemp -d) && rm -rf "$T" && cd "$T" && git commit -am x' 'T=$(mktemp -d) && mount --bind @P@ "$T" && cd "$T" && git commit -am x' \
+  "bash -c 'T=\$(mktemp -d); ln -s @P@ \"\$T/l\"; cd \"\$T/l\" && git commit -am x'"; do
+  check "mktemp redirect denied: $f" deny "$(bp "${f//@P@/$P}" "$plain")"
+done
+check "git clone into a mktemp directory then commit allowed" allow "$(bp 'T=$(mktemp -d) && git clone https://example.invalid/r.git "$T/c" && cd "$T/c" && git commit -m x' "$primary")"
+mkdir -p "$T/stray/.git" "$T/stray/tmp"
+silent_tmp "stray empty .git above the temp root: plain mktemp allowed" "$T/stray/tmp" "$(bp 'T=$(mktemp -d) && cd "$T" && git init -q && git add . && git commit -m x' "$primary")"
 # read-only commands with an unknown directory stay silent
 for c in 'cd "$X" && git status' 'git -C "$X" log --oneline' 'git -C "$X" stash list' 'git -C "$X" add -n .' \
   'cd "$X" && git diff' 'cd - && git fetch origin' 'git -C "$X" commit --dry-run' 'git -C "$X" clean -n' \

@@ -21,7 +21,9 @@ that is certain to have run (see certain_env); anything doubtful is unknown.
 The walker (variables, `bash -c`/`eval` bodies, explicit git directories) is
 the shared library _cmd_dirs.py, used here in its legacy mode (this gate's
 behaviour is unchanged); a `mktemp -d` directory counts as unknown here.
-Known limits: an unparseable top-level command line is not judged; a `cd` to a
+A line with more than about 300 git/gh/cd/shell words is not walked: a push or
+`gh pr create` anywhere on it counts as an unknown directory, otherwise it is
+silent. Known limits: an unparseable top-level command line is not judged; a `cd` to a
 missing directory or after `false &&` is followed as if it ran (as on main);
 `bash -c`/`eval` nesting deeper than 3, git aliases and command lines over
 about 128 KB are not followed; word splitting under a changed IFS is not modelled.
@@ -188,6 +190,7 @@ def targets(cmd, cwd):
 # The walker lives in _cmd_dirs.py (shared with git-guard and worktree-gate);
 # legacy=True keeps this gate's own command-prefix handling unchanged.
 
+WORDS_RE = re.compile(r"\b(?:git|gh|cd|pushd|popd|eval|bash|sh|zsh|dash|ksh)\b")
 BODY_RE = re.compile(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+pr\s+create\b")
 
 
@@ -248,10 +251,19 @@ def main():
     scan.HOME = os.environ.get("GATE_HOME", "")
     msg = None
     seen, unknown = set(), []
-    jobs = targets(cmd, cwd)
-    if cwd:
-        known, unknown = resolved_targets(cmd, cwd)
-        jobs += known
+    if len(WORDS_RE.findall(cmd)) > cd.MAX_CMDS:
+        # Too many commands to analyse (the walker is quadratic): a push or a
+        # pull-request creation on the line counts as an unknown directory.
+        m = BODY_RE.search(cmd)
+        if not m:
+            return
+        jobs = []
+        unknown = [("pr" if m.group(0).startswith("gh") else "push", "a line with too many commands to analyse")]
+    else:
+        jobs = targets(cmd, cwd)
+        if cwd:
+            known, unknown = resolved_targets(cmd, cwd)
+            jobs += known
     for d, remote in jobs:
         if (d, remote) in seen:
             continue

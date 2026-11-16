@@ -18,9 +18,9 @@ levels deep, at the position of the wrapper, in the directory in effect there,
             "temp"     the result of a bare `mktemp -d` on the same line
                        (`T=$(mktemp -d); cd "$T"` or `cd "$(mktemp -d)"`), or a
                        relative path below one; see mktemp_word for the strict
-                       rule (no -p, template, --tmpdir, -u, ...; TMPDIR never
-                       touched on the line; the process's own temp root is not
-                       inside a git work tree);
+                       rule (no -p, template, --tmpdir, -u, ...; no TMPDIR, ln, mv,
+                       rm, rmdir or mount anywhere on the line; the process's
+                       own temp root is not inside a git work tree);
             "unknown"  anything else (a variable or substitution that is not
                        certain, `cd -`, popd, no working directory); "why" says
                        which
@@ -51,6 +51,7 @@ missing directory or after `false &&` is followed as if it ran.
 import importlib.util
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -110,17 +111,25 @@ def subst(word, env):
     return VAR_RE.sub(one, word)
 
 
+_ROOT_CACHE = {}
+# A line that could redirect a path made by mktemp (a symlink, a move, a mount,
+# or TMPDIR in any form, `: ${TMPDIR:=...}` included) never yields a temporary directory.
+REDIRECTING = re.compile(r"(?:^|[\s;&|(`])(?:ln|mv|rmdir|rm|mount)(?:\s|$)")
+
+
 def temp_root_ok():
     """True when the temp root a bare `mktemp -d` would use (this process's own
-    TMPDIR, else /tmp) is not inside a git work tree."""
+    TMPDIR, else /tmp) is not inside a git work tree. Asked of git (a stray
+    empty .git directory is not a repository); any error means fine."""
     p = os.path.abspath(os.environ.get("TMPDIR") or "/tmp")
-    while True:
-        if os.path.exists(os.path.join(p, ".git")):
-            return False
-        q = os.path.dirname(p)
-        if q == p:
-            return True
-        p = q
+    if p not in _ROOT_CACHE:
+        try:
+            r = subprocess.run(["git", "-C", p, "rev-parse", "--is-inside-work-tree"],
+                               capture_output=True, text=True, timeout=3)
+            _ROOT_CACHE[p] = not (r.returncode == 0 and r.stdout.strip() == "true")
+        except Exception:
+            _ROOT_CACHE[p] = True
+    return _ROOT_CACHE[p]
 
 
 def mktemp_word(word):
@@ -528,8 +537,8 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
         cwd, _why = None, NO_CWD
     cwd = cwd or None
     why, temp, inherit = _why, _temp, _inherit or []
-    first_tmp = next((n for n, (k, t) in enumerate(toks) if k == "w" and "TMPDIR" in t), None)
-    root_ok = legacy or temp_root_ok()
+    # Anything on the line that could redirect a mktemp path makes it unknown.
+    line_taint = _taint or "TMPDIR" in cmd or bool(REDIRECTING.search(cmd)) or not (legacy or temp_root_ok())
     stack = []
     for i, (kind, t) in enumerate(toks):
         if kind == "o":
@@ -550,7 +559,7 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             if state["count"] > MAX_CMDS or time.monotonic() - state["start"] > BUDGET_SECS:
                 raise Budget()
         args = scan.bwc.args_until_op(toks, i + 1) if legacy else words_after(toks, i + 1)
-        taint = _taint or not root_ok or (first_tmp is not None and first_tmp < i)
+        taint = line_taint
         tmp_ok = not taint
         # Arithmetic (`(( ))`, `$(( ))`) may assign; the tokenizer hides its text,
         # so any `((` in the line makes every name unknown.
@@ -588,7 +597,7 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             body = shell_body(name, args)
             if body:
                 inh = list(inherit) + _session(toks, i) + prefix_env(toks, idx)
-                tainted = _taint or not root_ok or (first_tmp is not None and first_tmp < i + 1 + len(args))
+                tainted = line_taint
                 out.extend(_body(body, cmd, d, w, tmp, env, temps, name == "eval", inh, _depth + 1, legacy,
                                  tainted, state))
     return out

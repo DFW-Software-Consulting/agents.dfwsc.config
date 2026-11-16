@@ -334,6 +334,17 @@ check "deny with quotes and newlines in the command is valid JSON" deny "$(push 
 mode_warn
 check "warn with quotes and newlines in the command is valid JSON" warn "$(push "$nasty")"
 
+# --- a line with too many commands is not walked ---
+big="$(for k in $(seq 400); do printf 'git status; '; done)"
+mode_deny
+check "400 commands then a push is an unknown directory, denied" deny "$(bp "${big}git push origin feat" "$p")"
+check "400 commands then gh pr create is denied" deny "$(bp "${big}gh pr create --title x" "$p")"
+check "400 commands, no push, is silent" silent "$(bp "${big}git log" "$p")"
+mode_warn
+check "400 commands then a push warns in warn mode" warn "$(bp "${big}git push origin feat" "$p")"
+mode_deny
+check "the same push on an ordinary line is still judged by its repository" deny "$(push 'git status; git push origin feat')"
+
 # --- never modifies a repository ---
 before="$(snap)"
 for i in 1 2 3; do printf '%s' "$(push)" | $gate >/dev/null; printf '%s' "$(bp 'gh pr create' "$T/stale")" | $gate >/dev/null; done

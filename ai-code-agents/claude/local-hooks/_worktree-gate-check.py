@@ -14,8 +14,9 @@ deep, escaped quotes unescaped). A directory that does not exist yet is judged
 by its nearest existing ancestor. Not printed (allowed): read-only forms
 (--help, dry runs, inspect-only apply, `stash list|show`, `am`/`rebase
 --show-current-patch`), a directory that is the result of a bare `mktemp -d` on
-the same line (see _cmd_dirs.mktemp_word: any -p/template/--tmpdir, a TMPDIR
-touched on the line, or a temp root inside a git work tree makes it unknown),
+the same line (see _cmd_dirs.mktemp_word: any option other than -q, a template,
+TMPDIR named on the line, an ln/mv/rm/rmdir/mount on the line, or a temp root
+that git says is inside a work tree makes it unknown, so those forms deny),
 a git directory of a linked worktree, and a payload without a cwd.
 An explicit literal --git-dir/--work-tree/GIT_DIR=/GIT_WORK_TREE= is judged by
 its work tree: the --work-tree value, the parent of a git directory named
@@ -26,6 +27,7 @@ holds a checkout-changing git command, and a line over the analysis budget
 (see _cmd_dirs.Budget) that holds one, are "unknown". Any other parse problem
 prints nothing (allow).
 
+A bare repository given as GIT_DIR is denied for a checkout-changing command.
 Documented gaps (all fail open): `bash -c` nesting deeper than 3, aliases,
 xargs/find -exec/ssh wrappers, text fed to a shell (`| bash`) and lines over
 about 128 KB are not followed.

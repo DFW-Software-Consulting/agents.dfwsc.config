@@ -110,13 +110,33 @@ for f in ("cd $(mktemp -d -p /P)", "T=$(mktemp -d --tmpdir=/P); cd \"$T\"", "T=$
         passed += 1; print(f"ok   - not temporary: {f}")
     else:
         failed += 1; print(f"FAIL - not temporary: {f}: {[(e['state'], e['dir']) for e in got]}")
-import shutil, tempfile
+import shutil, subprocess, tempfile
 work = tempfile.mkdtemp(dir=SAFE_TMP)
-os.mkdir(os.path.join(work, ".git"))
+os.mkdir(os.path.join(work, ".git"))          # a stray empty .git: not a repository
 os.mkdir(os.path.join(work, "tmp"))
 os.environ["TMPDIR"] = os.path.join(work, "tmp")
-case("temp root inside a work tree: not temporary", "T=$(mktemp -d); cd \"$T\"; git add .", ["git:add@unknown"])
+case("stray empty .git above the temp root: still temporary", "T=$(mktemp -d); cd \"$T\"; git add .", ["git:add@temp"])
 shutil.rmtree(work)
+work = tempfile.mkdtemp(dir=SAFE_TMP)
+subprocess.run(["git", "init", "-q", work], check=True, capture_output=True)
+os.mkdir(os.path.join(work, "tmp"))
+os.environ["TMPDIR"] = os.path.join(work, "tmp")
+case("real repository above the temp root: not temporary", "T=$(mktemp -d); cd \"$T\"; git add .", ["git:add@unknown"])
+shutil.rmtree(work)
+os.environ["TMPDIR"] = SAFE_TMP
+for f in ('T=$(mktemp -d) && ln -s /p "$T/l" && cd "$T/l" && git add .',
+          'T=$(mktemp -d); rmdir "$T" && ln -s /p "$T" && cd "$T" && git add .',
+          ': ${TMPDIR:=/p}; cd $(mktemp -d) && git add .',
+          'T=$(mktemp -d) && mv /p "$T/l" && cd "$T/l" && git add .',
+          'T=$(mktemp -d) && rm -rf "$T" && cd "$T" && git add .',
+          'T=$(mktemp -d) && mount --bind /p "$T" && cd "$T" && git add .',
+          "bash -c 'T=$(mktemp -d); ln -s /p \"$T/l\"; cd \"$T/l\" && git add .'"):
+    got = [e for e in cd.walk(f, "/w", home=H) if e["sub"] == "add"]
+    if got and all(e["state"] != "temp" for e in got):
+        passed += 1; print(f"ok   - not temporary: {f}")
+    else:
+        failed += 1; print(f"FAIL - not temporary: {f}: {[(e['state'], e['dir']) for e in got]}")
+case("git clone into a mktemp directory stays temporary", "T=$(mktemp -d) && git clone x \"$T/c\" && cd \"$T/c\" && git add .", ["git:clone@/w", "git:add@temp"])
 os.environ["TMPDIR"] = SAFE_TMP
 case("cd newdir below a known directory stays known", "cd /p/new/deeper && git add .", ["git:add@/p/new/deeper"])
 case("escaped quotes in a double-quoted body", 'bash -c "cd \\"/p\\" && git commit"', ["git:commit@/p^1"])

@@ -5,6 +5,11 @@ run-checks.sh, read through _checks_stamp.py). Read-only: never runs checks
 and never changes a repository. Prints one JSON object (warn or deny) or
 nothing; any problem prints nothing (allow).
 
+Imports helpers from _git-guard-check.py (git lookups, stamp_info, push parsing)
+and _public-text-check.py (find_hits, to locate gh commands); if either fails
+to import, the gate is disabled (fail open). `git push --all` is judged as the
+current HEAD only (git-guard already denies --all).
+
 Env: CMD, CWD, GATE_HOME, CLAUDE_CHECKS_GATE_CONF, CHECKS_GATE_TODAY.
 """
 import datetime
@@ -43,7 +48,8 @@ def parse_conf(path):
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                out[k.strip()] = v.strip().strip("\"'")
+                v = re.sub(r"\s+#.*$", "", v.strip()).strip().strip("\"'")
+                out[k.strip()] = v
     except OSError:
         pass
     return out
@@ -66,14 +72,21 @@ def deny_mode(conf):
 
 
 def docs_only(d, remote):
-    """True when every path changed between the base and HEAD is a doc."""
-    base = gg.git(d, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if not base:
-        default = gg.default_branch(d, remote)
-        if not default:
-            return False
-        base = f"{remote}/{default}"
-    out = gg.git(d, "diff", "--name-only", f"{base}...HEAD")
+    """True when every path on the branch (since its merge base with the
+    remote's default branch) is a doc. The upstream is only the fallback when
+    no default branch is known: after a push it equals HEAD, which would hide
+    the branch's real changes. With no remote and no upstream there is no base,
+    so the change is not treated as docs-only and a stamp is required."""
+    default = gg.default_branch(d, remote)
+    out = None
+    if default:
+        mb = gg.git(d, "merge-base", "HEAD", f"{remote}/{default}")
+        if mb:
+            out = gg.git(d, "diff", "--name-only", mb, "HEAD")
+    else:
+        up = gg.git(d, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        if up:
+            out = gg.git(d, "diff", "--name-only", f"{up}...HEAD")
     if not out:
         return False
     return all(DOC_PATTERN.search(p) for p in out.splitlines())
@@ -82,13 +95,20 @@ def docs_only(d, remote):
 def judge(d, remote):
     """-> message or None for the HEAD of directory d."""
     info = gg.stamp_info(d)
-    if not info or info["detected"] is None or not info["detected"]:
-        return None  # unreadable, DetectionError, or no checks in this repo
-    if info["valid"]:
-        return None
+    if not info:
+        return None  # repository or HEAD unreadable
+    short = info["head"][:10]
+    if info["detected"] is None:
+        # Checks are configured but broken: not the same as "no checks".
+        if docs_only(d, remote):
+            return None
+        return (f"checks-gate: the check configuration could not be read ({info['detect_error']}), "
+                f"so there is no passing check record for {short}. Run git-verify "
+                f"(run-checks.sh) to see the details.")
+    if not info["detected"] or info["valid"]:
+        return None  # no checks in this repo, or a valid stamp
     if docs_only(d, remote):
         return None
-    short = info["head"][:10]
     return (f"checks-gate: there is no passing check record for {short}. Run git-verify "
             f"(run-checks.sh) on this commit, then retry. Detected checks: "
             f"{'; '.join(info['detected'])}.")

@@ -113,13 +113,25 @@ check "mixed docs and code change not allowed" deny "$(push 'git push origin fea
 # upstream present: base is the upstream
 git -C "$T/up" push -q -u origin feat
 echo '# more' > "$T/up/NOTES.md"; git -C "$T/up" add -A; git -C "$T/up" commit -qm notes
-check "upstream present, docs-only since upstream allowed" silent "$(push 'git push' "$T/up")"
+check "upstream present, docs commit on top of pushed code is NOT docs-only" deny "$(push 'git push' "$T/up")"
 echo z > "$T/up/z.txt"; git -C "$T/up" add -A; git -C "$T/up" commit -qm z
 check "upstream present, code since upstream not allowed" deny "$(push 'git push' "$T/up")"
+# docs-only branch that has been pushed: gh pr create is still docs-only
+mkrepo pd "true"; git -C "$T/pd" reset -q --hard HEAD~1; echo '# d' > "$T/pd/README.md"; git -C "$T/pd" add -A; git -C "$T/pd" commit -qm docs
+git -C "$T/pd" push -q -u origin feat
+check "pushed docs-only branch: gh pr create silent" silent "$(bp 'gh pr create --title x' "$T/pd")"
+check "pushed docs-only branch: bare push silent" silent "$(push 'git push' "$T/pd")"
+check "unpushed docs-only branch: gh pr create silent" silent "$(bp 'gh pr create --title x' "$T/docs")"
+# pushed code, then docs on top: the branch contains code, so a stamp is needed
+mkrepo pc "true"; git -C "$T/pc" push -q -u origin feat
+echo '# n' > "$T/pc/NOTES.md"; git -C "$T/pc" add -A; git -C "$T/pc" commit -qm notes
+check "pushed code then docs on top: gh pr create denied" deny "$(bp 'gh pr create --title x' "$T/pc")"
 # no base: no remote default branch
 git init -q "$T/nobase"; mkdir "$T/nobase/.claude"; echo true > "$T/nobase/.claude/git-checks"; echo '# x' > "$T/nobase/README.md"
 git -C "$T/nobase" add -A; git -C "$T/nobase" commit -qm i
 check "no base found: docs-only not assumed" deny "$(push 'git push origin main' "$T/nobase")"
+# no remote at all and no upstream: no base, so not docs-only (a stamp is required)
+check "no remote: docs-only not assumed for gh pr create" deny "$(bp 'gh pr create --title x' "$T/nobase")"
 
 # --- which pushes count ---
 git -C "$p" tag v9
@@ -156,7 +168,14 @@ check "subagent payload judged too" deny "$(push | jq '.agent_id="a1"')"
 
 # --- broken checks file, escape, config as data ---
 git -C "$T/broken" reset -q --hard HEAD; printf 'none\ntrue\n' > "$T/broken/.claude/git-checks"; git -C "$T/broken" commit -qam brk
-check "DetectionError allowed silently" silent "$(push 'git push origin feat' "$T/broken")"
+check "DetectionError (broken checks file) denied in deny mode" deny "$(push 'git push origin feat' "$T/broken")"
+out="$(printf '%s' "$(push 'git push origin feat' "$T/broken")" | $gate)"
+jq -e '.hookSpecificOutput.permissionDecisionReason | test("could not be read") and test("none") and test("git-verify")' <<<"$out" >/dev/null && ok "broken-config message says it could not be read, includes the error and git-verify" || bad "broken-config message" "$out"
+mode_warn
+check "DetectionError (broken checks file) warns in warn mode" warn "$(push 'git push origin feat' "$T/broken")"
+mode_deny
+printf '{bad json' > "$T/broken/package.json"; rm "$T/broken/.claude/git-checks"; git -C "$T/broken" add -A; git -C "$T/broken" commit -qm pj
+check "malformed package.json warns or denies, not silent" deny "$(push 'git push origin feat' "$T/broken")"
 CLAUDE_CHECKS_GATE=off check "CLAUDE_CHECKS_GATE=off allows" silent "$(push)"
 touch_marker="$T/pwned"
 printf 'MODE=deny\ntouch %s\n$(touch %s)\n`touch %s`\n' "$touch_marker" "$touch_marker" "$touch_marker" > "$CLAUDE_CHECKS_GATE_CONF"
@@ -165,6 +184,10 @@ check "config with shell syntax still parsed as data" deny "$(push)"
 printf 'MODE=deny; touch %s\n' "$touch_marker" > "$CLAUDE_CHECKS_GATE_CONF"
 check "MODE value with shell syntax is not deny" warn "$(push)"
 [ ! -e "$touch_marker" ] && ok "MODE value with shell syntax executed nothing" || bad "MODE value executed something"
+printf 'MODE=deny # reason\n' > "$CLAUDE_CHECKS_GATE_CONF"
+check "trailing comment stripped: MODE=deny # reason is deny" deny "$(push)"
+printf 'MODE = warn   # fine\nDENY_AFTER=2026-12-01 # soon\n' > "$CLAUDE_CHECKS_GATE_CONF"
+CHECKS_GATE_TODAY=2026-12-05 check "trailing comment stripped from DENY_AFTER" deny "$(push)"
 mode_deny
 
 # --- shapes and robustness ---

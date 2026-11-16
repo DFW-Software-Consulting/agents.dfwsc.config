@@ -299,18 +299,22 @@ def stamp_info(d):
     tree = git(d, "rev-parse", "HEAD^{tree}")
     if not (root and gd and head and tree):
         return None
+    err = None
     try:
         detected = cs.detect_commands(root)
-    except cs.DetectionError:
-        detected = None
+    except cs.DetectionError as e:
+        detected, err = None, str(e)
     stamp = cs.read_stamp(cs.stamp_path(gd, head))
     valid = detected is not None and cs.stamp_valid(stamp, head, detected, tree=tree)
-    return {"head": head, "tree": tree, "detected": detected, "valid": valid,
-            "status": stamp.get("status") if valid else None}
+    return {"head": head, "tree": tree, "detected": detected, "detect_error": err,
+            "valid": valid, "status": stamp.get("status") if valid else None}
 
 
 def lease_rule(c):
-    """A lease-only force push: needs a valid check stamp for HEAD, then asks."""
+    """A lease-only force push: needs a valid check stamp for HEAD, then asks.
+    Note: a stamp is not signed, so a hand-written stamp consistent with the
+    commit would be accepted. This is a guardrail against skipping checks, not
+    a tamper-proof seal."""
     longs, shorts, remote, refspecs = push_parts(c)
     if is_dry(longs, shorts) or force_kind(longs) != "lease":
         return None
@@ -338,7 +342,7 @@ def lease_rule(c):
     if remote is None:
         remote = git(d, "config", f"branch.{cur}.remote") or "origin"
     return ("lease-ask",
-            f"force-with-lease push of {branch} to {remote} at {short} (check record: {info['status']}); confirm that you want to rewrite remote history")
+            f"force-with-lease push of {branch} to {remote} at {short} (check record: {info['status']})")
 
 
 ADVICE = {
@@ -349,6 +353,9 @@ ADVICE = {
 
 
 def judge(cmd, cwd):
+    """First deny on the line wins; otherwise one ask covering every lease push
+    (an ask is soft: later commands are still judged); otherwise None."""
+    asks = []
     for c in scan.commands(cmd, cwd):
         # Flag rules need no repository; only the default-branch rule does.
         why = hook_bypass(c)
@@ -356,8 +363,12 @@ def judge(cmd, cwd):
             return "hook-bypass", why
         if c["sub"] == "push":
             hit = force_rule(c) or default_rule(c) or lease_rule(c)
-            if hit:
+            if hit and hit[0] == "lease-ask":
+                asks.append(hit[1])
+            elif hit:
                 return hit
+    if asks:
+        return "lease-ask", "; ".join(asks) + "; confirm that you want to rewrite remote history"
     return None
 
 

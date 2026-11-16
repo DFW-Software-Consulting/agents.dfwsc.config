@@ -6,12 +6,13 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 - `run-tests.sh` : delegate-gate, delegate-reminder, require-agent-model, `../hooks/no-agent-mention.py`.
 - `run-handback-tests.sh` : context-docs-start, require-acceptance-criteria, handback-gate.
 - `run-worktree-tests.sh` : worktree-gate and `_git-cmd-scan.py`.
-- `run-git-guard-tests.sh` : git-guard and the git parts of `_git-cmd-scan.py`.
+- `run-git-guard-tests.sh` : git-guard (including the lease and ask cases) and the git parts of `_git-cmd-scan.py`.
 - `run-shared-db-tests.sh` : shared-db-write-gate and `_sql-write-check.py`.
 - `run-read-gate-tests.sh` : read-size-gate.
 - `run-clock-reminder-tests.sh` : clock-reminder.
 - `run-reply-cap-tests.sh` : enforce-response-cap and reply-cap-prompt.
 - `run-public-text-gate-tests.sh` : public-repo-text-gate and `_public-text-check.py`.
+- `run-checks-gate-tests.sh` : checks-gate; builds repos with a local bare origin and makes stamps with the real run-checks.sh.
 - `run-checks-tests.sh` : run-checks.sh, `_run_checks.py`, `_checks_stamp.py`; needs no toolchain or network.
 
 Known gap: `behavior-doc-reminder.sh` and `personal-hooks/sync-memory.sh` have no suite.

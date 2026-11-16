@@ -297,6 +297,20 @@ out="$(printf '%s' "$(bp 'git push --force-with-lease origin lf' "$T/ln")" | $ga
 if jq -e '.hookSpecificOutput.permissionDecisionReason | test("none_detected")' <<<"$out" >/dev/null 2>&1; then
   pass=$((pass + 1)); echo "ok   - ask reason for a none_detected stamp says none_detected"
 else fail=$((fail + 1)); echo "FAIL - none_detected reason: $out"; fi
+# --- an ask is soft: the rest of the line is still judged ---
+check "lease then push -f denied" deny "$(bp 'git push --force-with-lease origin lf && git push -f origin other' "$L")"
+check "lease then commit --no-verify denied" deny "$(bp 'git push --force-with-lease origin lf && git commit --no-verify -m x' "$L")"
+check "lease then push origin main denied" deny "$(bp 'git push --force-with-lease origin lf && git push origin main' "$L")"
+check "commit --no-verify then lease denied" deny "$(bp 'git commit --no-verify -m x && git push --force-with-lease origin lf' "$L")"
+check "lease then git status asks" ask "$(bp 'git push --force-with-lease origin lf && git status' "$L")"
+check "two lease pushes on one line give one ask" ask "$(bp "git push --force-with-lease origin lf; git -C $T/ln push --force-with-lease origin lf" "$L")"
+out="$(printf '%s' "$(bp "git push --force-with-lease origin lf; git -C $T/ln push --force-with-lease origin lf" "$L")" | $gate)"
+if jq -e '.hookSpecificOutput.permissionDecisionReason | ([match("force-with-lease push of";"g")] | length) == 2 and test("passed") and test("none_detected")' <<<"$out" >/dev/null 2>&1; then
+  pass=$((pass + 1)); echo "ok   - the single ask reason covers both lease pushes"
+else fail=$((fail + 1)); echo "FAIL - two-lease reason: $out"; fi
+if jq -e '.hookSpecificOutput.permissionDecisionReason | test("\\.\\.") | not' <<<"$(printf '%s' "$(bp 'git push --force-with-lease origin lf' "$L")" | $gate)" >/dev/null 2>&1; then
+  pass=$((pass + 1)); echo "ok   - ask reason has no doubled period"
+else fail=$((fail + 1)); echo "FAIL - doubled period in ask reason"; fi
 reason_has "lease denial without a stamp says to run git-verify" "$(bp 'git push --force-with-lease origin lf' "$T/lnone")" 'git-verify.*retry'
 reason_has "lease denial without a directory says own worktree" "$(bp 'cd "$X" && git push --force-with-lease origin lf' "$elsewhere")" "own worktree"
 touch "$off"

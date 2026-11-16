@@ -51,7 +51,7 @@ rule="${hit%%$'\t'*}"
 why="${hit#*$'\t'}"
 
 if [ "$rule" = "lease-ask" ]; then
-  jq -n --arg r "git-guard (force-with-lease): $why." '{
+  jq -n --arg r "git-guard (force-with-lease): $why" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "ask",

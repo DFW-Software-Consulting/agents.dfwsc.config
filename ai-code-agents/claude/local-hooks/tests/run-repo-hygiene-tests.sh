@@ -23,6 +23,20 @@ fi
 hits="$(markers "$root")"
 if [ -z "$hits" ]; then ok "no conflict markers in tracked docs or Markdown files"; else bad "conflict markers found" "$(printf '%s' "$hits" | head -5 | tr '\n' ' ')"; fi
 
+# tables ROOT: print "file:line: n pipes, header m" for each tracked docs/context Markdown table row
+# whose count of unescaped pipes differs from its header row (fenced code blocks ignored).
+tables() {
+  (cd "$1" && git ls-files -z -- 'docs/context/*.md' 'docs/context/**/*.md' | xargs -0 -r awk '
+    FNR == 1 { fence = 0; hdr = -1 }
+    /^```/ { fence = !fence; next }
+    fence { next }
+    /^\|/ { l = $0; gsub(/\\\|/, "", l); n = gsub(/\|/, "", l)
+             if (hdr < 0) hdr = n; else if (n != hdr) print FILENAME ":" FNR ": " n " pipes, header " hdr; next }
+    { hdr = -1 }')
+}
+bad_rows="$(tables "$root")"
+if [ -z "$bad_rows" ]; then ok "every docs/context table row has its header's column count"; else bad "table rows with a wrong column count" "$(printf '%s' "$bad_rows" | head -5 | tr '\n' ' ')"; fi
+
 # The check must catch a marker (scratch repository, never the real one).
 scratch="$(mktemp -d)"; trap 'rm -rf "$scratch"' EXIT
 git init -q "$scratch/r"; mkdir -p "$scratch/r/docs/x"
@@ -36,6 +50,15 @@ printf 'x\n>>>>>>> abc123 (msg)\n' >> "$scratch/r/README.md"; git -C "$scratch/r
 [ -n "$(markers "$scratch/r")" ] && ok "marker in a tracked Markdown file is caught" || bad "markdown marker missed"
 printf '# t\nsetext\n=======\n' > "$scratch/r/README.md"; git -C "$scratch/r" add -A
 [ -z "$(markers "$scratch/r")" ] && ok "a Markdown heading underline is not a marker" || bad "underline falsely flagged"
+
+# ... and a broken table row (an unescaped `||` inside a cell), but not an escaped one or one in a code fence.
+mkdir -p "$scratch/r/docs/context"
+printf '| A | B |\n|---|---|\n| x | y |\n' > "$scratch/r/docs/context/t.md"; git -C "$scratch/r" add -A
+[ -z "$(tables "$scratch/r")" ] && ok "well-formed table passes" || bad "well-formed table flagged"
+printf '| A | B |\n|---|---|\n| x `a||b` | y |\n' > "$scratch/r/docs/context/t.md"; git -C "$scratch/r" add -A
+[ -n "$(tables "$scratch/r")" ] && ok "table row with an unescaped pipe in a cell is caught" || bad "broken row missed"
+printf '| A | B |\n|---|---|\n| x `a\\|\\|b` | y |\n\n```\n| a | b | c |\n```\n' > "$scratch/r/docs/context/t.md"; git -C "$scratch/r" add -A
+[ -z "$(tables "$scratch/r")" ] && ok "escaped pipes and fenced code are ignored" || bad "escaped pipe or fence flagged"
 
 echo
 echo "passed: $pass  failed: $fail"

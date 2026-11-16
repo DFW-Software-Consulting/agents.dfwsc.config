@@ -19,7 +19,7 @@
 # Known limits: an unparseable command line, bash -c/eval nesting over 3 levels,
 # git aliases, xargs/find -exec/ssh wrappers and lines over ~128 KB are not
 # followed; a `cd` to a missing directory or after `false &&` is followed as if
-# it ran (as before).
+# it ran (as before); word splitting under a changed IFS is not modelled.
 #
 # Mode (data file, never sourced): ${CLAUDE_CHECKS_GATE_CONF:-~/.claude/checks-gate.conf}
 #   MODE=warn|deny (default warn), DENY_AFTER=YYYY-MM-DD (deny from that date).

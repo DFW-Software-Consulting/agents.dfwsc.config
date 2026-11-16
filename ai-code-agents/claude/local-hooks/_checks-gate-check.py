@@ -23,7 +23,7 @@ the variable handling is meant to move into the shared scanner in a follow-up.
 Known limits: an unparseable top-level command line is not judged; a `cd` to a
 missing directory or after `false &&` is followed as if it ran (as on main);
 `bash -c`/`eval` nesting deeper than 3, git aliases and command lines over
-about 128 KB are not followed.
+about 128 KB are not followed; word splitting under a changed IFS is not modelled.
 
 Env: CMD, CWD, GATE_HOME, CLAUDE_CHECKS_GATE_CONF, CHECKS_GATE_TODAY.
 """
@@ -212,7 +212,7 @@ COMPOUND = {"if", "then", "elif", "else", "fi", "while", "until", "do", "done", 
             "case", "esac", "select", "function", "{", "}", "[[", "coproc"}
 MODIFIERS = {"unset", "read", "local", "declare", "typeset", "readonly", "export", "let",
              "mapfile", "readarray", "getopts", "printf"}
-SOURCERS = {"eval", ".", "source", "exec", "trap"}
+SOURCERS = {"eval", ".", "source", "exec", "trap", "let"}
 ANY_ASSIGN = re.compile(r"^([A-Za-z_]\w*)(\+=|\[|=)")
 
 
@@ -226,7 +226,8 @@ def certain_env(toks, i):
     on the command at i is never used. Any other way a name may change
     (conditional or nested assignment, non-literal value, +=, read, unset,
     declare/local/typeset/readonly, eval/source, ...) makes it unknown for the
-    rest of the line; a compound command makes every name unknown."""
+    rest of the line; a compound command or arithmetic command (`(( ))`, `let`)
+    makes every name unknown."""
     env, poison, depth, clean, prev, words = {}, set(), 0, True, None, []
     frozen = False
 
@@ -238,7 +239,7 @@ def certain_env(toks, i):
         nonlocal clean, frozen
         if frozen:
             return
-        if w[0] in COMPOUND:
+        if w[0] in COMPOUND or any("(())" in x for x in w):  # (( )) / $(( )) may assign
             frozen = True
             env.clear()
             return
@@ -364,7 +365,9 @@ def analyze(cmd, cwd, depth=0, why=None):
         if name not in ("cd", "pushd", "popd", "git", "gh", "eval") and name not in SHELLS:
             continue
         args = scan.bwc.args_until_op(toks, i + 1)
-        env = certain_env(toks, i)
+        # Arithmetic (`(( ))`, `$(( ))`) may assign; the tokenizer hides its text,
+        # so any `((` in the line makes every name unknown.
+        env = {} if "((" in cmd else certain_env(toks, i)
         if name in ("cd", "pushd"):
             args = [a for a in args if not (a.startswith("-") and a != "-")]
             if not args:

@@ -136,40 +136,111 @@ def git_hit(args, cwd):
     return d, sub
 
 
-def scan(cmd, cwd):
+def walk(cmd, cwd):
+    """Yield (toks, i, args, cwd) for every `git` word in command position,
+    with args the words after it and cwd the directory in effect (literal `cd`
+    followed, parentheses scoped). Raises Stop when the directory becomes
+    undeterminable (after yielding everything found before that point) and
+    ValueError when the command cannot be tokenized. GIT_DIR / GIT_WORK_TREE
+    assignments on the command skip it."""
     toks = bwc.tokenize(bwc.strip_heredocs(cmd))
-    hits, stack = [], []
+    stack = []
+    for i, (kind, t) in enumerate(toks):
+        if kind == "o":
+            if t == "(":
+                stack.append(cwd)
+            elif t == ")" and stack:
+                cwd = stack.pop()
+            continue
+        if not cmd_position(toks, i):
+            continue
+        name = os.path.basename(t)
+        args = bwc.args_until_op(toks, i + 1)
+        if name in ("cd", "pushd"):
+            args = [a for a in args if not (a.startswith("-") and a != "-")]
+            if not args:
+                if not HOME:
+                    raise Stop
+                cwd = HOME
+            else:
+                cwd = join(cwd, args[0])
+        elif name == "popd":
+            raise Stop
+        elif name == "git":
+            if env_redirected(toks, i):
+                continue
+            yield toks, i, args, cwd
+
+
+def scan(cmd, cwd):
+    hits = []
     try:
-        for i, (kind, t) in enumerate(toks):
-            if kind == "o":
-                if t == "(":
-                    stack.append(cwd)
-                elif t == ")" and stack:
-                    cwd = stack.pop()
-                continue
-            if not cmd_position(toks, i):
-                continue
-            name = os.path.basename(t)
-            args = bwc.args_until_op(toks, i + 1)
-            if name in ("cd", "pushd"):
-                args = [a for a in args if not (a.startswith("-") and a != "-")]
-                if not args:
-                    if not HOME:
-                        raise Stop
-                    cwd = HOME
-                else:
-                    cwd = join(cwd, args[0])
-            elif name == "popd":
-                raise Stop
-            elif name == "git":
-                if env_redirected(toks, i):
-                    continue
-                hit = git_hit(args, cwd)
-                if hit:
-                    hits.append(hit)
+        for _toks, _i, args, d in walk(cmd, cwd):
+            hit = git_hit(args, d)
+            if hit:
+                hits.append(hit)
     except Stop:
         pass
     return hits
+
+
+def leading_env(toks, i):
+    """NAME=value words (as (name, value)) on the command whose `git` word is toks[i]."""
+    out = []
+    j = i - 1
+    while j >= 0 and toks[j][0] == "w" and (
+            bwc.ASSIGN.match(toks[j][1]) or toks[j][1] in PREFIX or toks[j][1].startswith("-")):
+        if bwc.ASSIGN.match(toks[j][1]):
+            k, _, v = toks[j][1].partition("=")
+            out.append((k, v))
+        j -= 1
+    out.reverse()
+    return out
+
+
+def git_command(toks, i, args, cwd):
+    """Describe one git command: {"dir", "sub", "args" (words after the
+    subcommand), "env" ([(name, value)]), "config" ([(key, value)] from -c)}.
+    Returns None when there is no subcommand or --git-dir / --work-tree is
+    used (target cannot be judged). Raises Stop on an undeterminable -C."""
+    j, d, config = 0, cwd, []
+    while j < len(args):
+        a = args[j]
+        if a == "-C":
+            if j + 1 >= len(args):
+                raise Stop
+            d = join(d, args[j + 1])
+            j += 2
+        elif a.startswith(UNJUDGEABLE):
+            return None
+        elif a == "-c":
+            if j + 1 < len(args):
+                k, _, v = args[j + 1].partition("=")
+                config.append((k, v))
+            j += 2
+        elif a in OPT_WITH_VALUE:
+            j += 2
+        elif a.startswith("-"):
+            j += 1
+        else:
+            break
+    if j >= len(args):
+        return None
+    return {"dir": d, "sub": args[j], "args": args[j + 1:],
+            "env": leading_env(toks, i), "config": config}
+
+
+def commands(cmd, cwd):
+    """All judgeable git commands in a command line (see git_command)."""
+    out = []
+    try:
+        for toks, i, args, d in walk(cmd, cwd):
+            c = git_command(toks, i, args, d)
+            if c:
+                out.append(c)
+    except (Stop, ValueError):
+        pass
+    return out
 
 
 def main():

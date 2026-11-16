@@ -244,12 +244,26 @@ def user_pattern_matches(patterns, text):
     return found
 
 
+SCP_REMOTE = re.compile(r"(?<![\w.+@-])[\w.+-]+@([\w.-]+):(\S+)")
+URL_REMOTE = re.compile(r"(?<![\w.+@-])((?:git\+)?ssh://)[\w.+-]+@([\w.-]+(?::\d+)?/)")
+
+
+def strip_remote_users(line):
+    """Drop `user@` from recognised git remotes so the email detector skips
+    them; the host stays in the line for the IP and hostname detectors.
+    Remotes: user@host:<path with / or ending .git> and ssh://user@host[:port]/..."""
+    def scp(m):
+        path = m.group(2).rstrip(".,;:)'\"")
+        if "/" in path or path.endswith(".git"):
+            return m.group(1) + ":" + m.group(2)
+        return m.group(0)
+    return URL_REMOTE.sub(lambda m: m.group(1) + m.group(2), SCP_REMOTE.sub(scp, line))
+
+
 def email_ok(addr, tail):
     local, _, domain = addr.lower().rpartition("@")
     if "noreply" in local or addr.lower().endswith("users.noreply.github.com"):
         return True
-    if tail.startswith(":") and len(tail) > 1 and not tail[1].isspace():
-        return True  # scp-style remote user@host:path
     if re.fullmatch(r"[\d.]+", domain):
         return True  # pkg@1.2.3.4: an address, judged by the IP detector
     return bool(RESERVED_DOMAIN.search(domain))
@@ -270,6 +284,7 @@ def find_matches(text, cfg):
         if words and re.search(r"(?<!\w)" + r"\s+".join(map(re.escape, words)) + r"(?!\w)", text, re.I):
             add("configured term", " ".join(words))
     for line in text.split("\n"):
+        line = strip_remote_users(line)
         for m in IP_RE.finditer(line):
             try:
                 ip = ipaddress.ip_address(m.group(0))

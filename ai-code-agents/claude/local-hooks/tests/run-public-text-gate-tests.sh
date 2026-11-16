@@ -273,6 +273,29 @@ elapsed=$(( $(date +%s) - start ))
 grep -q '"deny"' <<<"$out" && grep -q 'IP address' <<<"$out"; ok "built-in detectors still deny after pattern budget" $?
 cp "$work/gate.conf.bak2" "$work/gate.conf"
 
+# --- git remote forms: user@ skipped, host still judged ---
+check "remote scp github.com:owner/repo.git allowed" allow "$(bp 'git commit -m "origin git@github.com:owner-x/repo-y.git"')"
+check "remote ssh:// github.com allowed" allow "$(bp 'git commit -m "origin ssh://git@github.com/owner-x/repo-y.git"')"
+check "remote ssh:// with port allowed" allow "$(bp 'git commit -m "origin ssh://git@github.com:22/owner-x/repo-y.git"')"
+check "remote git+ssh:// allowed" allow "$(bp 'git commit -m "origin git+ssh://git@github.com/owner-x/repo-y.git"')"
+check "remote on ordinary other host allowed" allow "$(bp 'git commit -m "mirror git@gitlab.example-host.io:grp/proj.git"')"
+check "remote path ending .git without slash allowed" allow "$(bp 'git commit -m "mirror git@gitlab.example-host.io:proj.git"')"
+check "remote on .lan host denied" deny "$(bp 'git commit -m "mirror git@internal-box.lan:grp/repo.git"')"
+out="$(bp 'git commit -m "mirror git@internal-box.lan:grp/repo.git"' | $gate)"
+grep -q 'internal hostname: internal-box.lan' <<<"$out"; ok "remote .lan host named in denial" $?
+! grep -q 'email' <<<"$out"; ok "remote host not also reported as an email" $?
+check "ssh:// remote on .local host denied" deny "$(bp 'git commit -m "mirror ssh://git@nas.local/srv/repo.git"')"
+check "ssh:// remote on .ts.net host denied" deny "$(bp 'git commit -m "mirror ssh://git@box.example-tail.ts.net:2222/srv/repo.git"')"
+check "remote on private IP denied" deny "$(bp 'git commit -m "mirror git@10.0.0.5:grp/repo.git"')"
+out="$(bp 'git commit -m "mirror git@10.0.0.5:grp/repo.git"' | $gate)"
+grep -q 'IP address: 10.0.0.5' <<<"$out"; ok "remote private IP named in denial" $?
+check "ssh:// remote on private IP denied" deny "$(bp 'git commit -m "mirror ssh://git@192.168.1.9/srv/repo.git"')"
+check "remote on configured term host denied" deny "$(bp 'git commit -m "mirror deploy@fakehost-01:apps/site.git"')"
+check "bob@corp.com:note judged as an email, denied" deny "$(bp 'git commit -m "ping bob@corp.com:note"')"
+check "bob@corp.com: see note judged as an email, denied" deny "$(bp 'git commit -m "ping bob@corp.com: see note"')"
+out="$(bp 'git commit -m "ping bob@corp.com:note"' | $gate)"
+grep -q 'email: bob@corp.com' <<<"$out"; ok "non-remote reported as email" $?
+
 # --- plumbing ---
 check "command without git or gh allowed" allow "$(bp 'ls -la')"
 start=$(date +%s%N)

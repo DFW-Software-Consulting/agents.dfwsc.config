@@ -38,9 +38,11 @@ deny() {
 
 scratch="$(jq -r '.scratchpad_dir // empty' <<<"$payload")"
 
-# Bash payloads carry tool_input.command (Edit/Write/NotebookEdit never do).
+# Bash calls: tool_name is "Bash" (fall back to tool_input.command being present).
+tool_name="$(jq -r '.tool_name // empty' <<<"$payload")"
 command_str="$(jq -r '.tool_input.command // empty' <<<"$payload")"
-if [ -n "$command_str" ]; then
+if [ "$tool_name" = "Bash" ] || [ -n "$command_str" ]; then
+  [ -z "$command_str" ] && exit 0
   # Cheap prefilter so ordinary read-only commands skip python startup.
   printf '%s' "$command_str" | grep -qE '>|\btee\b|\b(sed|perl|awk|gawk)\b' || exit 0
   command -v python3 >/dev/null 2>&1 || exit 0

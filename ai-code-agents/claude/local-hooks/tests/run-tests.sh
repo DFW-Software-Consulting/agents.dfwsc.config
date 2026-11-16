@@ -71,6 +71,24 @@ if bash "$hooks/delegate-gate.sh" <<<"$(bash_payload 'echo hi > somefile')" | jq
   pass=$((pass + 1)); echo "ok   - Bash denial message names subagent and escape hatch"
 else fail=$((fail + 1)); echo "FAIL - Bash denial message"; fi
 
+# --- scanner regressions (mid-word quotes, arithmetic, escapes, comments) ---
+for c in "git log --format='%h => %s'" 'git log --pretty="format:%h > %s" | head' 'git commit -m"a > b"' \
+  'echo $((3>2))' 'echo $(( 1 > 0 ))' '(( x > y )) && echo y' 'echo a \> b' 'echo hi # > x' \
+  "jq --arg q 'a>b' -n '\$q'" 'gh pr list --search "created:>2026-01-01"' \
+  "gh pr view 1 --jq '.[] | select(.n > 3)'" 'psql -c "select 1 where 2 > 1"' \
+  '[[ $x > $y ]] && echo y' '[[ a > b ]] && echo y' 'echo x >&-' 'echo x 2>&1 | cat'; do
+  check "allow: $c" allow "$gate" "$(bash_payload "$c")"
+done
+check "Bash payload with empty command allowed" allow "$gate" '{"tool_name":"Bash","tool_input":{"command":""}}'
+check "Bash payload with no command allowed" allow "$gate" '{"tool_name":"Bash","tool_input":{}}'
+for c in 'X=1 tee f' 'echo x >out.txt' 'echo x >"my file.txt"' 'echo x 1>out.txt' 'make &>> build.log' \
+  'ls && echo x > out.txt' 'echo "a > b" > out.txt' 'FOO=a BAR=b sed -i s/a/b/ f' 'echo $(echo x > out.txt)' 'echo x >| out.txt'; do
+  check "deny: $c" deny "$gate" "$(bash_payload "$c")"
+done
+touch -d '+2 hours' "$off"
+check "future-mtime off-file means gate ON" deny "$gate" "$edit"
+rm -f "$off"
+
 # --- Escape hatch: off-file TTL and env ---
 touch "$off"
 check "fresh off-file disables gate" allow "$gate" "$edit"

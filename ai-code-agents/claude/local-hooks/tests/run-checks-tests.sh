@@ -224,6 +224,30 @@ r="$(mkrepo commentchecks $'# only\n\n# comments')"; statuscheck "comment-only g
 r="$(mkrepo optout $'# no checks here\nnone')"; statuscheck "git-checks with none" "$r" none_detected 0
 eq "none opt-out stamp has no commands" "$(jq -c '.detected' "$r"/.git/claude-checks/*.json)" '[]'
 
+# --- non-regular git-checks ---
+r="$(mkrepo gcdir 'true')"; git -C "$r" rm -q .claude/git-checks; mkdir -p "$r/.claude/git-checks"; touch "$r/.claude/git-checks/x"; git -C "$r" add -A; git -C "$r" commit -qm d
+statuscheck "git-checks is a directory" "$r" error 2
+r="$(mkrepo gcdirpkg)"; echo '{"scripts":{"lint":"true"}}' > "$r/package.json"; mkdir -p "$r/.claude/git-checks"; touch "$r/.claude/git-checks/x"; git -C "$r" add -A; git -C "$r" commit -qm d
+statuscheck "git-checks directory beside package.json" "$r" error 2
+r="$(mkrepo gclink)"; mkdir -p "$r/.claude"; ln -s nowhere "$r/.claude/git-checks"; git -C "$r" add -A; git -C "$r" commit -qm l
+statuscheck "dangling git-checks symlink" "$r" error 2
+r="$(mkrepo gclinkpkg)"; echo '{"scripts":{"lint":"true"}}' > "$r/package.json"; mkdir -p "$r/.claude"; ln -s nowhere "$r/.claude/git-checks"; git -C "$r" add -A; git -C "$r" commit -qm l
+statuscheck "dangling symlink beside package.json" "$r" error 2
+
+# --- none keyword variants ---
+nonerepo() {  # NAME CONTENT(printf format)
+  local d; d="$(mkrepo "$1")"; mkdir -p "$d/.claude"; printf "$2" > "$d/.claude/git-checks"; git -C "$d" add -A; git -C "$d" commit -qm n; echo "$d"
+}
+for v in 'None\n' 'NONE\n' 'none # reason\n' '\xef\xbb\xbfnone\n' '  none  \n' '# c\n\nnone\n'; do
+  r="$(nonerepo "nv-$RANDOM" "$v")"; statuscheck "opt-out variant [$v]" "$r" none_detected 0
+done
+r="$(nonerepo nonemix 'none\ntrue\n')"; statuscheck "none combined with a command" "$r" error 2
+out="$(run --dir "$r")"; eq "  message says none cannot be combined" "$(jq -r .error <<<"$out" | grep -c 'cannot be combined')" 1
+r="$(nonerepo nonecmd 'nonexistent-tool --check\n')"
+out="$(run --dir "$r")"; rc=$?
+eq "command starting with none runs as a command" "$(jq -r .status <<<"$out")" failed; eq "  exit 1" "$rc" 1
+eq "  tool exit 127" "$(jq -r '.results[0].exit' <<<"$out")" 127
+
 # --- stamp_valid strictness ---
 sv() { lib "
 ok=lambda **k: dict({'head':'h','tree':'t','status':'passed','detected':['a','b'],'results':[{'cmd':'a','exit':0},{'cmd':'b','exit':0}]},**k)

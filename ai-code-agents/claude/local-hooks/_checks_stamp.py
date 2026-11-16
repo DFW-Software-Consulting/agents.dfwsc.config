@@ -15,6 +15,7 @@ CLI (for tests and scripts):
 """
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -25,10 +26,13 @@ class DetectionError(Exception):
     """Detection could not decide what the checks are (not the same as none)."""
 
 
+_NONE_RE = re.compile(r"^none\s*(#.*)?$", re.IGNORECASE)
+
+
 def _read_lines(path):
     try:
         with open(path, "rb") as fh:
-            text = fh.read().decode("utf-8")
+            text = fh.read().decode("utf-8").lstrip("\ufeff")
     except (OSError, UnicodeDecodeError) as e:
         raise DetectionError(f".claude/git-checks cannot be read: {e}")
     out = []
@@ -41,7 +45,12 @@ def _read_lines(path):
             ".claude/git-checks has no commands; add commands, or make its only "
             "non-comment line the word 'none' to opt out of checks"
         )
-    if out == ["none"]:
+    nones = [ln for ln in out if _NONE_RE.match(ln)]
+    if nones:
+        if len(nones) != len(out):
+            raise DetectionError(
+                ".claude/git-checks: 'none' cannot be combined with commands"
+            )
         return []
     return out
 
@@ -60,7 +69,11 @@ def _package_manager(root):
 
 def detect_commands(repo_root, build=False):
     explicit = os.path.join(repo_root, ".claude", "git-checks")
-    if os.path.isfile(explicit):
+    if os.path.lexists(explicit):
+        if not os.path.isfile(explicit):
+            raise DetectionError(
+                ".claude/git-checks exists but is not a readable regular file"
+            )
         return _read_lines(explicit)
     pkg = os.path.join(repo_root, "package.json")
     if not os.path.isfile(pkg):

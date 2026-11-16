@@ -18,7 +18,7 @@ One job: prove the current commit passes the project's checks and record the sta
 2. Do not edit code, do not fix failures, do not retry, do not commit.
 3. Get the branch with `git -C <path> branch --show-current`.
 
-The script refuses to run on a dirty tree (tracked files only) because checks must describe the commit, not uncommitted edits.
+The script refuses to run on a dirty tree (modified tracked files, or untracked files that are not gitignored) because checks must describe the commit, not uncommitted edits.
 
 ## Output
 
@@ -30,7 +30,7 @@ Return exactly this envelope and nothing else of substance:
 
 - `status` is `ok` when the script reports `passed` or `none_detected`. `next` is `["git-push"]`.
 - `status` is `blocked` when it reports `failed`: `blocked_by` lists the failing commands and `next` is `[]`.
-- `status` is `blocked` when it reports `dirty` or `dirty_after`: `blocked_by` is `["dirty-tree"]`, `next` is `[]`, and say to commit, gitignore or remove the listed paths and run again.
+- `status` is `blocked` when it reports `dirty` or `dirty_after`: `blocked_by` is `["dirty-tree"]`, `next` is `[]`, and say to commit, gitignore or remove the listed paths and run again. For `dirty_after`, report whichever the script gave: the paths, or the old and new head (when a check moved HEAD).
 - `status` is `blocked` when it reports `error` (exit 2): `blocked_by` is `["error"]`, `next` is `[]`, and include the script's message.
 
 ## Notes
@@ -39,3 +39,5 @@ Return exactly this envelope and nothing else of substance:
 - Untracked files that are not gitignored count as dirty, before and after the run.
 - A repo opts into explicit checks with a `.claude/git-checks` file (one shell command per line, `#` comments allowed). Without it, checks come from `package.json` scripts. A file whose only non-comment line is `none` opts the repo out.
 - The commands in that file or in `package.json` run as-is from the repository. Only use this skill on repositories the user trusts.
+- Gitignored files (dependencies, build output, local env files) are still visible to the checks, so a pass means "passes on this machine at this commit".
+- A check that hides its own edits from git (for example with `git update-index --assume-unchanged`) is not detected.

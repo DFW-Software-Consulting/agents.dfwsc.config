@@ -55,7 +55,8 @@ for pair in "pnpm-lock.yaml:pnpm" "yarn.lock:yarn" "bun.lockb:bun" "bun.lock:bun
   eq "lockfile $f picks $pm" "$(detect "$d" False)" "[\"$pm run lint\"]"
 done
 d="$T/det7"; mkdir "$d"; eq "no files gives empty list" "$(detect "$d" False)" '[]'
-d="$T/det8"; mkdir "$d"; echo 'not json' > "$d/package.json"; eq "invalid package.json gives empty list" "$(detect "$d" False)" '[]'
+d="$T/det8"; mkdir "$d"; echo 'not json' > "$d/package.json"
+eq "invalid package.json is a detection error" "$(detect "$d" False 2>&1 | grep -c DetectionError | sed "s/^[1-9].*/ok/")" ok
 
 # --- passing run ---
 r="$(mkrepo pass $'echo build-ok\ntrue')"
@@ -106,7 +107,12 @@ eq "dirty status" "$(jq -r .status <<<"$out")" dirty
 eq "dirty lists the path" "$(jq -r '.dirty[0]' <<<"$out")" a.txt
 eq "dirty writes no stamp" "$(ls "$r/.git/claude-checks" 2>/dev/null | wc -l)" 0
 r="$(mkrepo untracked 'true')"; echo new > "$r/new.txt"
-run --dir "$r" >/dev/null; eq "untracked file alone is not dirty" "$?" 0
+out="$(run --dir "$r")"; rc=$?
+eq "untracked non-ignored file is dirty (exit 3)" "$rc" 3
+eq "untracked file listed" "$(jq -r '.dirty[0]' <<<"$out")" new.txt
+eq "untracked file: no stamp" "$(ls "$r/.git/claude-checks" 2>/dev/null | wc -l)" 0
+r="$(mkrepo ignored 'true')"; echo 'ign.txt' > "$r/.gitignore"; git -C "$r" add -A; git -C "$r" commit -qm ign; echo x > "$r/ign.txt"
+run --dir "$r" >/dev/null; eq "untracked ignored file is not dirty" "$?" 0
 r="$(mkrepo manydirty 'true')"; for i in $(seq 1 25); do echo x > "$r/f$i"; done
 git -C "$r" add -A; git -C "$r" commit -qm more; for i in $(seq 1 25); do echo y >> "$r/f$i"; done
 out="$(run --dir "$r")"; eq "dirty paths capped at 20" "$(jq '.dirty|length' <<<"$out")" 20
@@ -187,13 +193,127 @@ eq "linked worktree stamp lands in its own git dir" "$(jq -r .stamp <<<"$out")" 
 out="$(cd "$r/.claude" && run --dir "$r/.claude")"; eq "--dir in a subdirectory resolves the repo root" "$(jq -r .stamp <<<"$out")" "$r/.git/claude-checks/$(git -C "$r" rev-parse HEAD).json"
 
 # --- repository untouched ---
-r="$(mkrepo untouched $'echo x > scratch-untracked\ntrue')"
+r="$(mkrepo untouched $'echo x > scratch-ignored\ntrue')"
+echo scratch-ignored > "$r/.gitignore"; git -C "$r" add -A; git -C "$r" commit -qm ign
 snap() { { git -C "$r" rev-parse HEAD; git -C "$r" ls-files -s; git -C "$r" ls-files -z | xargs -0 -I{} sha1sum "$r/{}"; git -C "$r" status --porcelain --untracked-files=no; } | sha1sum; }
 b="$(snap)"; run --dir "$r" >/dev/null; eq "HEAD, index and tracked files unchanged" "$(snap)" "$b"
 
+# --- detection errors and opt-out ---
+statuscheck() {  # NAME REPO EXPECT_STATUS EXPECT_RC [ENV...]
+  local name="$1" repo="$2" st="$3" erc="$4" o rc; shift 4
+  o="$(env "$@" bash "$rc_script" --dir "$repo" 2>/dev/null)"; rc=$?
+  eq "$name: exit" "$rc" "$erc"
+  eq "$name: one JSON object with status $st" "$(printf '%s\n' "$o" | jq -sr 'if length==1 then .[0].status else "multi" end')" "$st"
+  eq "$name: stamp count" "$(ls "$repo/.git/claude-checks" 2>/dev/null | wc -l)" "$([ "$st" = error ] || [ "$st" = dirty ] && echo 0 || echo 1)"
+}
+r="$(mkrepo badutf 'true')"; printf 'true\n\xff\xfe\n' > "$r/.claude/git-checks"; git -C "$r" commit -qam bad
+statuscheck "invalid UTF-8 git-checks" "$r" error 2
+r="$(mkrepo unread 'true')"
+if [ "$(id -u)" != 0 ]; then
+  chmod 000 "$r/.claude/git-checks"
+  eq "unreadable git-checks is a detection error" "$(detect "$r" False 2>&1 | grep -c DetectionError | sed "s/^[1-9].*/ok/")" ok
+  statuscheck "unreadable git-checks (git sees it modified)" "$r" dirty 3
+  chmod 644 "$r/.claude/git-checks"
+fi
+r="$(mkrepo badpkg)"; echo '{oops' > "$r/package.json"; git -C "$r" add -A; git -C "$r" commit -qm p
+statuscheck "malformed package.json" "$r" error 2
+r="$(mkrepo emptychecks '')"; mkdir -p "$r/.claude"; : > "$r/.claude/git-checks"; git -C "$r" add -A; git -C "$r" commit -qm e
+statuscheck "empty git-checks" "$r" error 2
+out="$(run --dir "$r")"; eq "empty file message mentions opt out" "$(jq -r .error <<<"$out" | grep -c none)" 1
+r="$(mkrepo commentchecks $'# only\n\n# comments')"; statuscheck "comment-only git-checks" "$r" error 2
+r="$(mkrepo optout $'# no checks here\nnone')"; statuscheck "git-checks with none" "$r" none_detected 0
+eq "none opt-out stamp has no commands" "$(jq -c '.detected' "$r"/.git/claude-checks/*.json)" '[]'
+
+# --- stamp_valid strictness ---
+sv() { lib "
+ok=lambda **k: dict({'head':'h','tree':'t','status':'passed','detected':['a','b'],'results':[{'cmd':'a','exit':0},{'cmd':'b','exit':0}]},**k)
+$1"; }
+eq "stamp_valid accepts a correct stamp" "$(sv "print(c.stamp_valid(ok(),'h',['a'],tree='t'))")" True
+eq "rejects results shorter than detected" "$(sv "print(c.stamp_valid(ok(results=[{'cmd':'a','exit':0}]),'h',[]))")" False
+eq "rejects reordered results" "$(sv "print(c.stamp_valid(ok(results=[{'cmd':'b','exit':0},{'cmd':'a','exit':0}]),'h',[]))")" False
+eq "rejects mismatched cmd" "$(sv "print(c.stamp_valid(ok(results=[{'cmd':'a','exit':0},{'cmd':'x','exit':0}]),'h',[]))")" False
+for bv in False 0.0 '"0"' None 1; do
+  eq "rejects exit $bv" "$(sv "print(c.stamp_valid(ok(results=[{'cmd':'a','exit':0},{'cmd':'b','exit':$bv}]),'h',[]))")" False
+done
+eq "rejects passed with no commands" "$(sv "print(c.stamp_valid(ok(detected=[],results=[]),'h',[]))")" False
+eq "rejects none_detected with commands" "$(sv "print(c.stamp_valid(ok(status='none_detected'),'h',[]))")" False
+eq "rejects wrong tree" "$(sv "print(c.stamp_valid(ok(),'h',[],tree='other'))")" False
+eq "rejects dirty_after status" "$(sv "print(c.stamp_valid(ok(status='dirty_after'),'h',[]))")" False
+eq "rejects non-string detected" "$(sv "print(c.stamp_valid(ok(detected=[1,2]),'h',[]))")" False
+
+# --- tree must stay clean and HEAD must not move ---
+r="$(mkrepo da-edit $'echo more >> a.txt')"
+out="$(run --dir "$r")"; rc=$?
+eq "check editing a tracked file: dirty_after" "$(jq -r .status <<<"$out")" dirty_after; eq "  exit 3" "$rc" 3
+eq "  lists the path" "$(jq -r '.dirty[0]' <<<"$out")" a.txt
+hh="$(git -C "$r" rev-parse HEAD)"
+eq "  stamp exists but does not validate" "$(lib "
+s=c.read_stamp(c.stamp_path('$r/.git','$hh')); print(s['status'], c.stamp_valid(s,'$hh',[]))")" "dirty_after False"
+r="$(mkrepo da-new 'echo x > newfile')"; out="$(run --dir "$r")"; rc=$?
+eq "check creating untracked file: dirty_after" "$(jq -r .status <<<"$out")" dirty_after; eq "  exit 3" "$rc" 3
+eq "  lists newfile" "$(jq -r '.dirty[0]' <<<"$out")" newfile
+r="$(mkrepo da-commit $'echo y > y.txt && git add y.txt && git commit -qm y')"; hh="$(git -C "$r" rev-parse HEAD)"
+out="$(run --dir "$r")"; rc=$?
+eq "check making a commit: dirty_after" "$(jq -r .status <<<"$out")" dirty_after; eq "  exit 3" "$rc" 3
+eq "  reports old head" "$(jq -r .old_head <<<"$out")" "$hh"
+eq "  stamp does not validate" "$(lib "
+s=c.read_stamp(c.stamp_path('$r/.git','$hh')); print(c.stamp_valid(s,'$hh',[]))")" False
+r="$(mkrepo da-ign 'echo x > out.log')"; echo out.log > "$r/.gitignore"; git -C "$r" add -A; git -C "$r" commit -qm ign
+out="$(run --dir "$r")"; eq "check writing only an ignored path passes" "$(jq -r .status <<<"$out")" passed
+r="$(mkrepo da-fail $'echo x > junk\nfalse')"; out="$(run --dir "$r")"
+eq "failed check that also dirties the tree stays failed" "$(jq -r .status <<<"$out")" failed
+
+# --- rename path in dirty list ---
+r="$(mkrepo ren 'true')"; git -C "$r" mv a.txt renamed.txt
+out="$(run --dir "$r")"; eq "rename lists the new path only" "$(jq -c .dirty <<<"$out")" '["renamed.txt"]'
+
+# --- background child, large output ---
+r="$(mkrepo bg "sleep 30 & echo \$! > $T/bg.pid")"
+s0=$SECONDS; out="$(run --dir "$r")"; el=$((SECONDS - s0))
+eq "background child: passed" "$(jq -r .status <<<"$out")" passed
+[ "$el" -lt 8 ] && ok "background child does not block the run (${el}s)" || bad "background child blocks the run" "${el}s"
+pid="$(cat "$T/bg.pid")"; gone=no
+for _ in 1 2 3 4 5 6 7 8 9 10; do st="$(ps -o stat= -p "$pid" 2>/dev/null)"; if [ -z "$st" ] || [[ "$st" == Z* ]]; then gone=yes; break; fi; sleep 0.3; done
+eq "background child is gone" "$gone" yes
+r="$(mkrepo big $'yes some-output-line | head -c 50000000')"
+s0=$SECONDS
+out="$(python3 -I -c "
+import resource,subprocess,sys
+p=subprocess.run(['bash','$rc_script','--dir','$r'],capture_output=True,text=True)
+sys.stdout.write(p.stdout); sys.stderr.write(str(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss))" 2>"$T/rss")"
+el=$((SECONDS - s0)); rss="$(cat "$T/rss")"
+eq "50 MB output: passed" "$(jq -r .status <<<"$out")" passed
+[ "$el" -lt 30 ] && ok "50 MB output finishes quickly (${el}s)" || bad "50 MB output slow" "${el}s"
+[ "$rss" -lt 150000 ] && ok "50 MB output keeps memory flat (${rss} KB max)" || bad "memory not flat" "${rss} KB"
+eq "50 MB output: tail within 40 lines" "$([ "$(jq -r '.results[0].tail' <<<"$out" | wc -l)" -le 40 ] && echo y)" y
+eq "50 MB output: tail within 8000 bytes" "$([ "$(jq -r '.results[0].tail' <<<"$out" | wc -c)" -le 8001 ] && echo y)" y
+r="$(mkrepo longline $'head -c 5000000 /dev/zero | tr "\\0" x; echo')"
+out="$(run --dir "$r")"
+eq "5 MB single line is truncated" "$([ "$(jq -r '.results[0].tail' <<<"$out" | wc -c)" -le 501 ] && echo y)" y
+eq "  and not empty" "$([ "$(jq -r '.results[0].tail|length' <<<"$out")" -gt 100 ] && echo y)" y
+
+# --- bad timeout values still give one JSON object ---
+for tv in nan inf -5 0 abc ""; do
+  r="$(mkrepo to-"${tv:-empty}" 'true')"
+  statuscheck "CLAUDE_CHECKS_TIMEOUT='$tv'" "$r" passed 0 "CLAUDE_CHECKS_TIMEOUT=$tv"
+done
+
+# --- stamp directory problems ---
+if [ "$(id -u)" != 0 ]; then
+  r="$(mkrepo ro 'true')"; mkdir "$r/.git/claude-checks"; chmod 500 "$r/.git/claude-checks"
+  statuscheck "unwritable stamp dir" "$r" error 2; chmod 700 "$r/.git/claude-checks"
+fi
+r="$(mkrepo link 'true')"; mkdir "$T/linktarget"; ln -s "$T/linktarget" "$r/.git/claude-checks"; touch -d '20 days ago' "$T/linktarget/old.json"
+out="$(run --dir "$r")"; rc=$?
+eq "symlinked claude-checks: error" "$(jq -r .status <<<"$out")" error; eq "  exit 2" "$rc" 2
+eq "  target untouched (no write, no prune)" "$(ls "$T/linktarget")" old.json
+r="$(mkrepo asfile 'true')"; echo x > "$r/.git/claude-checks"
+out="$(run --dir "$r")"; rc=$?
+eq "claude-checks is a file: error" "$(jq -r .status <<<"$out")" error; eq "  exit 2" "$rc" 2
+
 # --- usage ---
 out="$(run --bogus)"; rc=$?; eq "unknown argument exits 2" "$rc" 2
-out="$(run --dir "$r" --build)"; eq "--build accepted" "$(jq -r .status <<<"$out")" passed
+r="$(mkrepo buildflag 'true')"; out="$(run --dir "$r" --build)"; eq "--build accepted" "$(jq -r .status <<<"$out")" passed
 
 echo
 echo "passed: $pass  failed: $fail"

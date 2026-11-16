@@ -21,17 +21,28 @@ import tempfile
 VERSION = 1
 
 
+class DetectionError(Exception):
+    """Detection could not decide what the checks are (not the same as none)."""
+
+
 def _read_lines(path):
     try:
-        with open(path, encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-    except OSError:
-        return []
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise DetectionError(f".claude/git-checks cannot be read: {e}")
     out = []
-    for line in lines:
+    for line in text.splitlines():
         s = line.strip()
         if s and not s.startswith("#"):
             out.append(s)
+    if not out:
+        raise DetectionError(
+            ".claude/git-checks has no commands; add commands, or make its only "
+            "non-comment line the word 'none' to opt out of checks"
+        )
+    if out == ["none"]:
+        return []
     return out
 
 
@@ -55,13 +66,15 @@ def detect_commands(repo_root, build=False):
     if not os.path.isfile(pkg):
         return []
     try:
-        with open(pkg, encoding="utf-8") as fh:
-            data = json.load(fh)
-        scripts = data.get("scripts") if isinstance(data, dict) else None
-    except (OSError, ValueError):
-        return []
+        with open(pkg, "rb") as fh:
+            data = json.loads(fh.read().decode("utf-8"))
+    except (OSError, ValueError) as e:
+        raise DetectionError(f"package.json cannot be read: {e}")
+    if not isinstance(data, dict):
+        raise DetectionError("package.json is not a JSON object")
+    scripts = data.get("scripts", {})
     if not isinstance(scripts, dict):
-        return []
+        raise DetectionError("package.json scripts is not an object")
     pm = _package_manager(repo_root)
     names = []
     for n in ("typecheck", "type-check"):
@@ -95,19 +108,31 @@ def read_stamp(path):
     return data
 
 
-def stamp_valid(stamp, head, detected_now):
+def stamp_valid(stamp, head, detected_now, tree=None):
     if not isinstance(stamp, dict) or stamp.get("head") != head:
         return False
-    if stamp.get("status") not in ("passed", "none_detected"):
+    if tree is not None and stamp.get("tree") != tree:
         return False
-    results = stamp.get("results")
-    if not isinstance(results, list):
-        return False
-    for r in results:
-        if not isinstance(r, dict) or r.get("exit") != 0:
-            return False
+    status = stamp.get("status")
     detected = stamp.get("detected")
-    if not isinstance(detected, list):
+    results = stamp.get("results")
+    if status not in ("passed", "none_detected"):
+        return False
+    if not isinstance(detected, list) or not isinstance(results, list):
+        return False
+    if not all(isinstance(c, str) for c in detected):
+        return False
+    if len(results) != len(detected):
+        return False
+    for cmd, r in zip(detected, results):
+        if not isinstance(r, dict) or r.get("cmd") != cmd:
+            return False
+        e = r.get("exit")
+        if isinstance(e, bool) or not isinstance(e, int) or e != 0:
+            return False
+    if status == "passed" and not detected:
+        return False
+    if status == "none_detected" and detected:
         return False
     return all(c in detected for c in detected_now)
 
@@ -131,7 +156,12 @@ def write_stamp(path, stamp):
 
 def main(argv):
     if len(argv) >= 3 and argv[1] == "detect":
-        for c in detect_commands(argv[2], "--build" in argv[3:]):
+        try:
+            cmds = detect_commands(argv[2], "--build" in argv[3:])
+        except DetectionError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        for c in cmds:
             print(c)
         return 0
     if len(argv) >= 4 and argv[1] == "path":
@@ -140,7 +170,11 @@ def main(argv):
     if len(argv) >= 5 and argv[1] == "valid":
         git_dir, head, root = argv[2:5]
         stamp = read_stamp(stamp_path(git_dir, head))
-        return 0 if stamp_valid(stamp, head, detect_commands(root, "--build" in argv[5:])) else 1
+        try:
+            now = detect_commands(root, "--build" in argv[5:])
+        except DetectionError:
+            return 1
+        return 0 if stamp_valid(stamp, head, now) else 1
     print(__doc__, file=sys.stderr)
     return 2
 

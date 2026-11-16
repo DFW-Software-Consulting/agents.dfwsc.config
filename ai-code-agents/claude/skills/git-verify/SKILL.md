@@ -30,9 +30,12 @@ Return exactly this envelope and nothing else of substance:
 
 - `status` is `ok` when the script reports `passed` or `none_detected`. `next` is `["git-push"]`.
 - `status` is `blocked` when it reports `failed`: `blocked_by` lists the failing commands and `next` is `[]`.
-- `status` is `blocked` when it reports `dirty`: `blocked_by` is `["dirty-tree"]`, `next` is `[]`, and say to commit first.
+- `status` is `blocked` when it reports `dirty` or `dirty_after`: `blocked_by` is `["dirty-tree"]`, `next` is `[]`, and say to commit, gitignore or remove the listed paths and run again.
+- `status` is `blocked` when it reports `error` (exit 2): `blocked_by` is `["error"]`, `next` is `[]`, and include the script's message.
 
 ## Notes
 
 - The stamp is tied to the commit. Any new commit or amend needs a new run.
-- A repo opts into explicit checks with a `.claude/git-checks` file (one shell command per line, `#` comments allowed). Without it, checks come from `package.json` scripts.
+- Untracked files that are not gitignored count as dirty, before and after the run.
+- A repo opts into explicit checks with a `.claude/git-checks` file (one shell command per line, `#` comments allowed). Without it, checks come from `package.json` scripts. A file whose only non-comment line is `none` opts the repo out.
+- The commands in that file or in `package.json` run as-is from the repository. Only use this skill on repositories the user trusts.

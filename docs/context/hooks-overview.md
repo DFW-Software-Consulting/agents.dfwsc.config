@@ -31,6 +31,9 @@ The 12h off-file: a file under `~/.claude/` (path overridable by an environment 
 ## Not a hook: run-checks
 `run-checks.sh` (logic in `_run_checks.py`) runs a repo's checks for the current commit and writes a stamp file in the worktree's git dir. It is run on request by the `git-verify` skill (`skills/git-verify/SKILL.md`), never from a hook. `_checks_stamp.py` defines check detection and the stamp; it is used by `_run_checks.py` (writes) and, through `_git-guard-check.py`'s `stamp_info`, by git-guard's lease rule and checks-gate (read). Checks come from a `.claude/git-checks` file at the repository root, else the `typecheck`, `lint` and `test` scripts in package.json. `CLAUDE_CHECKS_TIMEOUT` sets seconds per command.
 
+## Not a hook: git-facts
+`git-facts.sh` (logic in `_git_facts.py`) prints one JSON object of repository facts for the git skills (see git-workflow-skills.md). Read-only; `--dir <path>`; exits 2 with a JSON error outside a repository.
+
 ## Libraries
 - `_gate-common.sh`: off switch and off-file expiry. Sourced by delegate-gate, delegate-reminder, require-agent-model, read-size-gate, worktree-gate, git-guard, public-repo-text-gate, shared-db-write-gate; `_handback-common.sh` sources it lazily. If missing, gates stay on.
 - `_handback-common.sh`: exempt agent types, send-back cap, report cap, acceptance switch and its off-file. Sourced by context-docs-start, require-acceptance-criteria, handback-gate.
@@ -47,8 +50,8 @@ The 12h off-file: a file under `~/.claude/` (path overridable by an environment 
 
 ## Runtime dependencies
 - bash everywhere; jq for nearly every script (missing jq means allow, except sync-memory).
-- python3 for the Bash-parsing paths: delegate-gate (Bash), worktree-gate, git-guard, checks-gate, public-repo-text-gate, shared-db-write-gate, run-checks.
-- git: worktree-gate, git-guard, checks-gate, context-docs-start, behavior-doc-reminder, run-checks. gh: optional visibility lookup in public-repo-text-gate.
+- python3 for the Bash-parsing paths: delegate-gate (Bash), worktree-gate, git-guard, checks-gate, public-repo-text-gate, shared-db-write-gate, run-checks, git-facts.
+- git: worktree-gate, git-guard, checks-gate, context-docs-start, behavior-doc-reminder, run-checks, git-facts. gh: optional visibility lookup in public-repo-text-gate.
 
 ## Design rules (the gate scripts)
 - Fail open: malformed input, a missing tool or an undeterminable state exits 0 with no output (a missing `_gate-common.sh` keeps the gate on).

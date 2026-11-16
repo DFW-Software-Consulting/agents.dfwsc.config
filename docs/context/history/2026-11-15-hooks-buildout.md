@@ -18,6 +18,7 @@ Findings:
 - #23 Reply cap: adds "explain this more", "explain that more", "explain more", "tell me more", "elaborate" as one-shot approvals; a one-shot phrase no longer ends a session-long "limit off" approval.
 - Adds checks-gate (reads the run-checks stamps before push and PR create; warn or deny by config) and conditional `--force-with-lease` in git-guard (valid stamp, then ask).
 - Off-file for public-repo-text-gate, shared-db-write-gate and the acceptance pair (require-acceptance-criteria, handback-gate, context-docs-start): a fresh `~/.claude/public-text-gate.off`, `shared-db-gate.off` or `acceptance-gate.off` switches the gate off for 12 hours; a stale or future-dated one is ignored with an "expired" note in the denial text; environment switches unchanged.
+- Branch feat/split-git-workflow-skills (not a numbered pull request): splits the git-workflow skill into git-commit, git-push, git-pr and git-issue beside git-verify, adds `git-facts.sh` and its suite, turns the agent into a router and the old skill into a stub; drops the PR template's AI usage section.
 Lessons:
 - Test the whole `ai-code-agents/claude/` tree, not just `local-hooks/`.
 - Do not stack pull requests on a base that will be squash-merged.

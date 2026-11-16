@@ -91,6 +91,36 @@ git -C "$r" fetch -q origin
 eq "diverged ahead" "$(f "$r" .ahead)" 1
 eq "diverged behind" "$(f "$r" .behind)" 1
 
+# --- pushed or not (same-name remote branch) ---
+r="$(mkremote pub)"
+git -C "$r" worktree add -q -b nb "$T/pub-nb" origin/main 2>/dev/null
+eq "branch from origin/main tracks the default branch" "$(f "$T/pub-nb" .upstream)" '"origin/main"'
+eq "branch from origin/main is not pushed" "$(f "$T/pub-nb" .pushed)" false
+eq "not pushed: push_ref null" "$(f "$T/pub-nb" .push_ref)" null
+eq "not pushed: push_ahead null" "$(f "$T/pub-nb" .push_ahead)" null
+eq "push remote defaults to origin" "$(f "$T/pub-nb" .push_remote)" '"origin"'
+commit "$T/pub-nb" work a.txt
+git -C "$T/pub-nb" push -q origin nb 2>/dev/null
+eq "pushed without -u: pushed" "$(f "$T/pub-nb" .pushed)" true
+eq "pushed without -u: push_ref" "$(f "$T/pub-nb" .push_ref)" '"origin/nb"'
+eq "pushed without -u: in sync ahead" "$(f "$T/pub-nb" .push_ahead)" 0
+eq "pushed without -u: in sync behind" "$(f "$T/pub-nb" .push_behind)" 0
+eq "upstream fields keep their meaning" "$(f "$T/pub-nb" .ahead)" 1
+commit "$T/pub-nb" more a.txt
+eq "pushed and ahead" "$(f "$T/pub-nb" .push_ahead)" 1
+git -C "$r" worktree add -q -b dn "$T/pub-dn" origin/main 2>/dev/null
+git -C "$r" push -q origin dn:other 2>/dev/null; git -C "$r" fetch -q origin
+git -C "$T/pub-dn" branch -q -u origin/other
+eq "differently named upstream" "$(f "$T/pub-dn" .upstream)" '"origin/other"'
+eq "differently named upstream counts as pushed" "$(f "$T/pub-dn" .pushed)" true
+eq "differently named upstream push_ref" "$(f "$T/pub-dn" .push_ref)" '"origin/other"'
+git -C "$T/pub-nb" config branch.nb.pushRemote fork
+eq "pushRemote setting wins" "$(f "$T/pub-nb" .push_remote)" '"fork"'
+eq "no remote branch under that remote: not pushed" "$(f "$T/pub-nb" .pushed)" false
+eq "no remote: not pushed" "$(f "$(mkrepo nopush)" .pushed)" false
+git -C "$r" checkout -q --detach
+eq "detached: not pushed" "$(f "$r" .pushed)" false
+
 # --- default branch ---
 eq "default branch from origin/HEAD" "$(git -C "$r" remote set-head origin main >/dev/null 2>&1; f "$r" .default_branch)" '"main"'
 r2="$(mkrepo trunk)"; git -C "$r2" branch -m master

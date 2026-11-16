@@ -149,6 +149,43 @@ def changes(root, default):
     return res
 
 
+def counts(root, ref):
+    """(ahead, behind) of HEAD relative to ref, or (None, None)."""
+    out = git(root, "rev-list", "--left-right", "--count", "HEAD..." + ref)
+    if out and len(out.split()) == 2:
+        a, b = (int(x) for x in out.split())
+        return a, b
+    return None, None
+
+
+def push_state(root, branch, upstream, default):
+    """Is the branch published? Looks at the same-name remote branch first.
+
+    A branch made from origin/<default> tracks the default branch, which says
+    nothing about being pushed; a branch pushed without -u has no upstream.
+    """
+    out = {"push_remote": None, "push_ref": None, "pushed": False,
+           "push_ahead": None, "push_behind": None}
+    if not branch:
+        return out
+    remote = (git(root, "config", "branch." + branch + ".pushRemote")
+              or git(root, "config", "remote.pushDefault")
+              or git(root, "config", "branch." + branch + ".remote")
+              or "origin")
+    if remote == ".":
+        remote = "origin"
+    out["push_remote"] = remote
+    ref = remote + "/" + branch
+    if git(root, "rev-parse", "--verify", "-q", "refs/remotes/" + ref) is None:
+        if not upstream or upstream.split("/", 1)[-1] == default:
+            return out
+        ref = upstream
+    out["push_ref"] = ref
+    out["pushed"] = True
+    out["push_ahead"], out["push_behind"] = counts(root, ref)
+    return out
+
+
 def main(argv):
     d = "."
     args = list(argv)
@@ -195,6 +232,7 @@ def main(argv):
         "upstream": upstream,
         "ahead": ahead,
         "behind": behind,
+        **push_state(root, branch, upstream, default),
         "clean": status == "" if status is not None else None,
         "linked_worktree": bool(gitdir and common and
                                 os.path.realpath(gitdir) != os.path.realpath(common)),

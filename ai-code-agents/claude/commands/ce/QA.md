@@ -11,7 +11,7 @@ hard-guards:
 
 # QA (Read-Only) — Code Logic First
 
-Run a post-execution QA review for: $ARGUMENTS  (topic OR path to plan/report)
+Run a post-execution QA review for: $ARGUMENTS  (topic OR path to the plan)
 
 ## Initial Prompt (to user)
 "I'm starting a **read-only** QA review focused on the **code logic of recent changes**. I will outline potential logic issues, smells/anti-patterns, and security concerns. **No coding or fixes will be performed.** Please provide a topic or the path to the plan under memory-bank/plan/."
@@ -30,8 +30,8 @@ Run a post-execution QA review for: $ARGUMENTS  (topic OR path to plan/report)
 
 ## Step 2 — Build the Change Set (read-only)
 - Determine commit range:
-  - Start: from plan/log (`start_commit`) if available; else last tagged release or previous commit.
-  - End: current HEAD (or end_commit in report).
+  - Start: from the plan if it names a start commit; else last tagged release or previous commit.
+  - End: current HEAD (or the end commit named in the plan).
 - Capture diffs:
   - !`git diff --name-status $START..$END`
   - !`git diff --stat $START..$END`
@@ -94,7 +94,7 @@ scope: "Changed code only (logic-first), plus impacted contracts/tests"
 - Diffstat: <files/insertions/deletions>
 - Modules touched:
   - `<pkg/module>` — files changed: n (list)
-- User-visible behavior changes (from plan/report): bullets
+- User-visible behavior changes (from the plan): bullets
 
 ## 2. Code-Logic Findings (by severity)
 > Each item includes **Evidence (file:lines, commit)**, **Impact**, **Likelihood**, **Suggested Remediation (outline only)**, **Owner**, **Due-by**.

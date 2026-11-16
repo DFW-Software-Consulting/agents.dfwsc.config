@@ -1,5 +1,5 @@
 ---
-allowed-tools: Task(subagent:executor), Write
+allowed-tools: Agent, Write
 description: Prepare context for compaction when approaching token limits
 ---
 
@@ -81,9 +81,9 @@ Format output as:
 ```
 
 After printing the summary, save it:
-- Target: `~/memory-bank/handoff/YYYY-MM-DD_HH-MM-SS_<subject>.md`, using the current local date and time and a short lowercase hyphenated subject from the task (from $ARGUMENTS when given), at most six words. Create the folder if it is missing.
-- Content: first line `# Handoff: <subject>`, then a line with the date, time, working directory and git branch (if any), then the same summary that was printed.
-- Writing: the main session is normally not allowed to write outside config and memory directories, so by default dispatch the `executor` agent with an explicit `model` of haiku. Give it the exact path and exact text, and include a "Done when" section (the file exists at the path and its content matches). If direct mode is on (writes are permitted), write the file directly instead.
+- Target: `~/memory-bank/handoff/YYYY-MM-DD_HH-MM-SS_<subject>.md`, using the current local date and time and a short lowercase hyphenated subject, at most six words, taken from $ARGUMENTS when given, otherwise from the main objective in the summary. Create the folder if it is missing.
+- Content: first line `# Handoff: <subject>`, then a line with the date, time, working directory and `branch: <name>` (only inside a git repository), then the same summary that was printed.
+- Writing: by default hand the write to the `executor` subagent with an explicit `model` of haiku, giving it the exact path and exact text and a brief with a "Done when" section (the file exists at the path and its content matches). If `executor` is not available, use `general-purpose`. Write the file directly only when direct mode is on (the main session's writes are currently permitted).
 - Then print one line with the saved path. If saving fails, say so in one line; the printed summary is still the result.
 
 This ensures smooth continuation after context reset. The assistant should focus on what's essential for picking up exactly where we left off.

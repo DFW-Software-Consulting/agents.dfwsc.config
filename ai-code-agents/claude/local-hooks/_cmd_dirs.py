@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Shared library (no entry point): find every git and gh command on a Bash
 command line and say which directory each one runs in. Used by
-_checks-gate-check.py, _git-guard-check.py and _worktree-gate-check.py.
+_checks-gate-check.py, _git-guard-check.py, _worktree-gate-check.py, _commit-gate-check.py,
+_pr-gate-check.py and _public-text-check.py.
 
 walk(cmd, cwd) returns one dict per command, in the order they appear,
 including commands inside `bash -c`/`sh -c`/`eval`/`env -S` bodies (followed 3
@@ -50,6 +51,10 @@ the name unknown, never its earlier value. Command prefixes
 (`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
 effective(entry) is the one place that turns an entry into the directory to
 judge. Never runs anything and never touches a repository.
+Gate helpers for the content gates (commit-gate, pr-gate, public-repo-text-gate):
+gate_entries (walk, or cheap_gates over the budget), gate_dirs (how to judge one
+entry: known / temp / unknown / none) and explicit_work_dirs. Added alongside;
+nothing above changes.
 Known limits: an unparseable top-level line yields nothing; `bash -c`/`eval`
 nesting deeper than 3, aliases, xargs/find -exec/ssh wrappers, lines over about
 128 KB and word splitting under a changed IFS are not followed; a `cd` to a
@@ -102,6 +107,9 @@ UNESC = re.compile(r'\\(["\\$`])')
 # Text of an unparseable wrapper body that makes it a guarded command.
 BODY_GUARDS = {
     "worktree": re.compile(r"\bgit\b[^;&|]*\b(?:%s)\b" % "|".join(sorted(scan.MUTATING))),
+    "commit": re.compile(r"\bgit\b[^;&|]*\bcommit\b(?![^;&|]*--dry-run)"),
+    "pr": re.compile(r"\bgh\b\s+(?:pr|issue)\b[^;&|]*\b(?:create|edit|comment|review)\b"),
+    "text": re.compile(r"\bgit\b[^;&|]*\b(?:commit|tag)\b|\bgh\b\s+(?:pr|issue)\b"),
     "guard": re.compile(r"\bgit\b[^;&|]*(?:\bpush\b|--no-verify|hooksPath)|\b(?:HUSKY|SKIP)=[^;&|]*\bgit\b"),
 }
 
@@ -767,3 +775,103 @@ def fed_texts(cmd):
     for m in re.finditer(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\s*\2\s*(?:\n|$)", cmd, re.S):
         texts.append(m.group(3))
     return texts
+
+
+# ---------- helpers for the content gates ----------
+BUDGET_WHY = "the line has too many commands to analyse"
+
+
+def cheap_gates(cmd):
+    """Like cheap_commands but gh commands too (kind "gh", args the words after
+    gh); every directory is unknown with reason BUDGET_WHY, so a gate that needs
+    the repository can say so. For a line over the analysis budget."""
+    try:
+        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
+    except ValueError:
+        return []
+    out = []
+    for i, (kind, t) in enumerate(toks):
+        name = os.path.basename(t) if kind == "w" else ""
+        if name not in ("git", "gh"):
+            continue
+        ok, idx, _ = prefix_span(toks, i, False)
+        if not ok:
+            continue
+        if name == "gh":
+            out.append(_entry("gh", None, BUDGET_WHY, False, args=words_after(toks, i + 1),
+                              env=prefix_env(toks, idx)))
+            continue
+        r = git_target(words_after(toks, i + 1), None, BUDGET_WHY, False, {}, set())
+        out.append(_entry("git", None, BUDGET_WHY, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
+                          redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
+    return out
+
+
+def gate_entries(cmd, cwd, home=None):
+    """walk(cmd, cwd) for the content gates; a line over the budget yields
+    cheap_gates(cmd) instead (every directory unknown)."""
+    try:
+        return walk(cmd, cwd, home=home)
+    except Budget:
+        return cheap_gates(cmd)
+
+
+def _git_out(cwd, *args):
+    try:
+        r = subprocess.run(["git", *args], cwd=cwd or None, capture_output=True, text=True, timeout=3)
+    except Exception:
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def explicit_work_dirs(e):
+    """([work trees], unknown reason or None) for an entry with a literal
+    --git-dir/--work-tree/GIT_DIR=/GIT_WORK_TREE=: the --work-tree value, the
+    parent of a git directory named `.git`, else what git reports. A linked
+    worktree's git directory gives ([], None) (not judged)."""
+    gd, wt = e["gitdir"], e["worktree"]
+    dirs = []
+    if wt:
+        dirs.append(wt)
+    if gd:
+        if os.path.basename(gd.rstrip("/")) == ".git":
+            dirs.append(os.path.dirname(gd.rstrip("/")) or "/")
+        elif not wt:
+            here = existing_dir(e["dir"]) if e["dir"] else None
+            both = _git_out(here, "--git-dir=" + gd, "rev-parse", "--absolute-git-dir",
+                            "--path-format=absolute", "--git-common-dir")
+            if both and len(both.splitlines()) == 2:
+                a, b = both.splitlines()
+                if os.path.realpath(a) != os.path.realpath(b):
+                    return [], None
+            top = _git_out(here, "--git-dir=" + gd, "rev-parse", "--show-toplevel")
+            if not top:
+                return [], "the work tree of the explicit git directory could not be worked out"
+            dirs.append(top)
+    if not dirs:
+        return [], "the work tree of the explicit git directory could not be worked out"
+    return dirs, None
+
+
+def gate_dirs(e):
+    """-> (status, dirs, why): how a content gate judges entry e.
+      "known"    dirs: the directories (work trees) to judge; they may not exist
+      "temp"     a bare mktemp -d directory: no repository to inspect yet
+      "unknown"  the repository cannot be established; why says why
+      "none"     nothing to judge (no payload cwd, or a linked worktree's git directory)"""
+    if e["kind"] == "body":
+        return "unknown", [], e["why"]
+    if e["redirect"] == "unknown":
+        return "unknown", [], REDIRECT_WHY
+    if e["redirect"] == "literal":
+        dirs, why = explicit_work_dirs(e)
+        if why:
+            return "unknown", [], why
+        return ("known", dirs, None) if dirs else ("none", [], None)
+    if e["state"] == "known":
+        return "known", [e["dir"]], None
+    if e["state"] == "temp":
+        return "temp", [], None
+    if e["why"] == NO_CWD:
+        return "none", [], NO_CWD
+    return "unknown", [], e["why"]

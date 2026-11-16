@@ -8,12 +8,25 @@ queries, under a small time budget. Every failure path prints nothing.
 
 Hard rules (deny): secret files, conflict markers, secrets in staged content or
 in the message. Warn only: subject format, where the repo already follows it.
-Limits (fail open): `bash -c '...'` bodies and shell aliases are not parsed; a
-same-line `git add` with a non-literal argument is treated like `git add -A`;
-a file with over 2 MB of added text (or an .npmrc over 64 KB) is not scanned and the
-warning says so; skipped
-files do not use the scan budget. A path the commit deletes is never judged. Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
-extraction reuses commit_texts()/split_heredocs() from _public-text-check.py.
+Commands come from _cmd_dirs.py (the shared walker): the payload cwd followed
+through `cd`, `pushd`, `git -C`, `env -C`, `GIT_DIR=`/`--git-dir` (judged by its
+work tree), plain variable assignments certain to have run, and `bash -c`/`sh -c`/
+`eval`/`env -S` bodies (3 levels deep). A commit whose directory cannot be
+established (variable not certain, substitution, `cd -`, `popd`, a variable git
+directory, an unparseable wrapper body holding a commit, a line over the analysis
+budget) is denied, because the staged content cannot be inspected: write the
+directory literally. A directory made by a bare `mktemp -d` on the same line is
+allowed (its content is not inspected: the path is not known before the command
+runs). The message secret scan runs on the message text whatever the directory
+state; a literal directory behaves exactly as before. A payload without a cwd, a
+literal directory that does not exist or is not a repository, and a dry run are
+not judged (only the message scan runs for the first).
+Limits (fail open): shell aliases are not parsed; text fed to a shell (`| bash`)
+is not followed; a same-line `git add` with a non-literal argument is treated like
+`git add -A`; a file with over 2 MB of added text (or an .npmrc over 64 KB) is not
+scanned and the warning says so; skipped files do not use the scan budget. A path
+the commit deletes is never judged. Message extraction reuses
+commit_texts()/split_heredocs() from _public-text-check.py.
 """
 import fnmatch
 import os
@@ -23,6 +36,7 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _git_gates_lib as L  # noqa: E402
+import _cmd_dirs as cd  # noqa: E402
 
 SECRET_NAMES = [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
                 "credentials.json", "*.p12", "*.pfx"]
@@ -246,6 +260,36 @@ def follows_convention(top):
     return ok * 100 >= 80 * len(subs)
 
 
+def message_denials(args, d, ptc, bodies):
+    """([denials], [message texts]) for the message of a `git commit` with
+    arguments args; d (may be None) resolves a relative -F path. Needs no
+    repository."""
+    stdin_text = "\n".join(bodies)
+
+    def read_file(p):
+        if p == "-":
+            return stdin_text
+        if d is None and not os.path.isabs(p):
+            return ""
+        try:
+            with open(p if os.path.isabs(p) else os.path.join(d, p),
+                      encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    msgs = ptc.commit_texts(args, read_file)
+    texts = list(msgs)
+    if bodies and any("<<" in m for m in msgs):
+        texts.extend(bodies)
+    out = []
+    for kind, first in L.find_secrets("\n".join(texts)):
+        out.append(
+            f"commit-gate (secret-in-message): the commit message contains a {kind} ({first}...). "
+            f"Remove it from the message.")
+    return out, msgs
+
+
 def judge_commit(c, adds, cfg, ptc, bodies, cmd):
     d = c["dir"]
     top = L.toplevel(d)
@@ -381,26 +425,8 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
                      f"{' and more' if len(unscanned) > 3 else ''}. Check them by hand.")
 
     # Message text
-    stdin_text = "\n".join(bodies)
-
-    def read_file(p):
-        if p == "-":
-            return stdin_text
-        try:
-            with open(p if os.path.isabs(p) else os.path.join(d, p),
-                      encoding="utf-8", errors="replace") as f:
-                return f.read()
-        except OSError:
-            return ""
-
-    msgs = ptc.commit_texts(args, read_file)
-    texts = list(msgs)
-    if bodies and any("<<" in m for m in msgs):
-        texts.extend(bodies)
-    for kind, first in L.find_secrets("\n".join(texts)):
-        denials.append(
-            f"commit-gate (secret-in-message): the commit message contains a {kind} ({first}...). "
-            f"Remove it from the message.")
+    md, msgs = message_denials(args, d, ptc, bodies)
+    denials += md
 
     # Rule 4: subject format (warn only)
     if msgs and not o["no_edit"] and not o["fixup"] and not o["reuse"]:
@@ -427,23 +453,50 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
     return denials, warns
 
 
+def unknown_denial(why):
+    return (f"commit-gate (unknown-directory): could not tell which repository the commit runs in "
+            f"({why}), so the staged content cannot be inspected. Write the directory literally, "
+            f"for example: git -C <path> commit ... or cd <path> && git commit ... (a directory "
+            f"made with mktemp -d on the same line is fine).")
+
+
 def main():
     cmd = os.environ.get("CMD", "")
     cwd = os.environ.get("CWD", "")
     if "commit" not in cmd:
         return
-    scan = L.load_scan()
     ptc = L.load_text_check()
     cfg = L.parse_config()
     _, bodies = ptc.split_heredocs(cmd)
     denials, warns, adds = [], [], []
-    for c in scan.commands(cmd, cwd):
-        if c["sub"] == "add":
-            adds.append(c)
-        elif c["sub"] == "commit" and c["dir"] and os.path.isdir(c["dir"]):
-            d, w = judge_commit(c, adds, cfg, ptc, bodies, cmd)
-            denials += d
-            warns += w
+    for e in cd.gate_entries(cmd, cwd, home=os.environ.get("HOME", "")):
+        if e["kind"] == "body":
+            if cd.body_guarded(e, "commit"):
+                denials.append(unknown_denial(e["why"]))
+            continue
+        if e["kind"] != "git" or not e["sub"]:
+            continue
+        status, dirs, why = cd.gate_dirs(e)
+        if e["sub"] == "add":
+            if status == "known":
+                adds.append({"dir": dirs[0], "args": e["args"]})
+            continue
+        if e["sub"] != "commit":
+            continue
+        args = e["args"]
+        if "--dry-run" in args or "-h" in args or "--help" in args:
+            continue
+        if status == "known":
+            for d in dirs:
+                if os.path.isdir(d):
+                    dn, w = judge_commit({"dir": d, "args": args}, adds, cfg, ptc, bodies, cmd)
+                    denials += dn
+                    warns += w
+            continue
+        # No repository to inspect: the message is judged from its text alone.
+        denials += message_denials(args, None, ptc, bodies)[0]
+        if status == "unknown":
+            denials.append(unknown_denial(why))
     note = os.environ.get("NOTE", "")
     if denials:
         reason = " ".join(dict.fromkeys(denials))

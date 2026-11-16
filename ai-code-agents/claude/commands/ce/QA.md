@@ -11,10 +11,10 @@ hard-guards:
 
 # QA (Read-Only) — Code Logic First
 
-Run a post-execution QA review for: $ARGUMENTS  (topic OR path to plan/report)
+Run a post-execution QA review for: $ARGUMENTS  (topic OR path to the plan)
 
 ## Initial Prompt (to user)
-"I'm starting a **read-only** QA review focused on the **code logic of recent changes**. I will outline potential logic issues, smells/anti-patterns, and security concerns. **No coding or fixes will be performed.** Please provide a topic or the path to the plan/report under memory-bank/execute/."
+"I'm starting a **read-only** QA review focused on the **code logic of recent changes**. I will outline potential logic issues, smells/anti-patterns, and security concerns. **No coding or fixes will be performed.** Please provide a topic or the path to the plan under memory-bank/plan/."
 
 ## Strict Ordering
 1) Locate artifacts → 2) Build change set (commit range & diff) → 3) Code-logic review (primary) → 4) Tests & contracts review → 5) Secondary scans (optional, read-only) → 6) Synthesize findings → 7) Save QA report
@@ -24,16 +24,14 @@ Run a post-execution QA review for: $ARGUMENTS  (topic OR path to plan/report)
 ## Step 1 — Locate Inputs
 - Resolve target by $ARGUMENTS:
   - If path given: use it.
-  - If topic: select newest matching under `memory-bank/plan/` and `memory-bank/execute/`.
+  - If topic: select newest matching under `memory-bank/plan/`.
 - Read FULLY (no offsets):
   - Plan: `memory-bank/plan/...`
-  - Execution Log: `memory-bank/execute/*_log.md` (if exists)
-  - Execution Report: `memory-bank/execute/*_report.md` (if exists)
 
 ## Step 2 — Build the Change Set (read-only)
 - Determine commit range:
-  - Start: from plan/log (`start_commit`) if available; else last tagged release or previous commit.
-  - End: current HEAD (or end_commit in report).
+  - Start: from the plan if it names a start commit; else last tagged release or previous commit.
+  - End: current HEAD (or the end commit named in the plan).
 - Capture diffs:
   - !`git diff --name-status $START..$END`
   - !`git diff --stat $START..$END`
@@ -81,8 +79,6 @@ date: "{{timestamp}}"
 owner: "{{agent_or_user}}"
 sources:
   plan: "memory-bank/plan/<file>.md"
-  execution_log: "memory-bank/execute/<logfile>.md"
-  execution_report: "memory-bank/execute/<reportfile>.md"
   commit_range: "<start>..<end>"
 policy: "READ-ONLY QA — NO CODING OR CHANGES"
 scope: "Changed code only (logic-first), plus impacted contracts/tests"
@@ -98,7 +94,7 @@ scope: "Changed code only (logic-first), plus impacted contracts/tests"
 - Diffstat: <files/insertions/deletions>
 - Modules touched:
   - `<pkg/module>` — files changed: n (list)
-- User-visible behavior changes (from plan/report): bullets
+- User-visible behavior changes (from the plan): bullets
 
 ## 2. Code-Logic Findings (by severity)
 > Each item includes **Evidence (file:lines, commit)**, **Impact**, **Likelihood**, **Suggested Remediation (outline only)**, **Owner**, **Due-by**.

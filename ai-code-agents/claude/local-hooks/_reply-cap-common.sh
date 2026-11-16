@@ -16,6 +16,13 @@ REPLY_CAP_CHARS=1200
 # "thanks" are ignored. "expand", "limit off" and "limit on" count only as the
 # whole prompt (trailing punctuation ignored).
 REPLY_CAP_ONESHOT_PHRASES="go long|no limit|full writeup|full write-up|more detail"
+# Second group, "ask for more" requests: each phrase is itself a request for a
+# longer answer, so the START rule is looser than for the group above: the
+# phrase may be followed by a space and more words ("elaborate on the gate"),
+# as long as the next character is not a letter, digit or hyphen. Whole prompt,
+# end of prompt and alone on the first or last line work as for the group above.
+# A phrase in the middle of a sentence never counts.
+REPLY_CAP_ASKMORE_PHRASES="explain this more|explain that more|explain more|tell me more|elaborate"
 REPLY_CAP_SESSION_ON_PHRASE="limit off"
 REPLY_CAP_SESSION_OFF_PHRASE="limit on"
 
@@ -47,6 +54,9 @@ reply_cap_classify() {
       "go long"|"no limit"|"full writeup"|"full write-up"|"more detail") echo oneshot; return ;;
     esac
   done
+  # Second group: looser start rule (see REPLY_CAP_ASKMORE_PHRASES).
+  if printf '%s\n' "$first" | grep -qE "^($REPLY_CAP_ASKMORE_PHRASES)([^a-z0-9-]|\$)"; then echo oneshot; return; fi
+  if printf '%s\n' "$last" | grep -qE "(^|[^a-z0-9])($REPLY_CAP_ASKMORE_PHRASES)\$"; then echo oneshot; return; fi
   echo none
 }
 

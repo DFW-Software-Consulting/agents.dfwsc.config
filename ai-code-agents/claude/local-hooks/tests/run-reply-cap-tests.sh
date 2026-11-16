@@ -108,6 +108,28 @@ s="st2-$run"; call "$pr" "$(up "limit off" "$s")"; call "$pr" "$(up "fix the bug
 s="st3-$run"; call "$pr" "$(up "go long" "$s")"; call "$pr" "$(up "go long, again" "$s")"
 [ "$(cat "$(marker "$s")")" = oneshot ] && ok "new approving prompt re-arms the one-shot" || bad "re-arm"
 
+# --- "ask for more" phrase group ---
+n=0
+am_yes=("explain this more" "explain that more" "explain more" "tell me more" "elaborate"
+  "elaborate." "Tell me more?" "explain more!" "elaborate please" "Explain This More, thanks." "ELABORATE" "Tell Me More"
+  "can you elaborate?" "please explain this more" "ok, tell me more." "elaborate on the worktree gate"
+  "tell me more about the hooks" "explain more about the cap" "Explain that more, with an example"
+  $'what is the gate\ntell me more' $'elaborate\nthe rest' $'a\nb\nc\nd\nelaborate')
+for ph in "${am_yes[@]}"; do
+  n=$((n + 1)); s="am$n-$run"; call "$pr" "$(up "$ph" "$s")"
+  [ "$rc" -eq 0 ] && [ "$(cat "$(marker "$s")" 2>/dev/null)" = oneshot ] && ok "ask-more approves: '$ph'" || bad "ask-more '$ph'" "rc=$rc out=$out"
+done
+am_no=("I asked him to elaborate and he left" "the docs should explain this more clearly somewhere"
+  "do not tell me more than I need" "elaborated notes are in the file" "explain more-or-less what happened"
+  "elaborately done" $'```\nelaborate\n```' $'before\n```\ntell me more\n```\nafter' $'a\nb\nelaborate\nd\ne')
+for ph in "${am_no[@]}"; do
+  n=$((n + 1)); s="amn$n-$run"; call "$pr" "$(up "$ph" "$s")"
+  [ ! -e "$(marker "$s")" ] && ok "ask-more does not approve: '$ph'" || bad "ask-more unexpected marker '$ph'"
+done
+s="amo-$run"; call "$pr" "$(up "elaborate on the gate" "$s")"
+expect_stop "ask-more one-shot allows one long reply" "$(stop "$long" "$s")" none
+expect_stop "ask-more one-shot gone afterwards" "$(stop "$long" "$s")" block
+
 # --- reminders ---
 call "$pr" "$(up "hello" "r1-$run")"; plain="$out"
 [ "$rc" -eq 0 ] && grep -q '1200' <<<"$plain" && grep -qi 'code blocks' <<<"$plain" && [ "$(wc -l <<<"$plain")" -eq 1 ] && ok "plain reminder: one line with cap and counting rule" || bad "plain reminder" "$plain"

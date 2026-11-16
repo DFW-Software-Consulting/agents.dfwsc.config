@@ -8,6 +8,9 @@
 # times; after that the report goes through as is. For every agent type, exempt
 # ones included, a report longer than handback_max_chars (default 4000, env
 # CLAUDE_HANDBACK_MAX_CHARS) is also sent back. Fails open on any error.
+# Off switch: CLAUDE_ACCEPTANCE_GATE=off, or a fresh (under 12 hours old)
+# ~/.claude/acceptance-gate.off, path overridable with
+# CLAUDE_ACCEPTANCE_GATE_OFF_FILE (see _handback-common.sh).
 set -uo pipefail
 payload="$(cat 2>/dev/null)" || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
@@ -23,12 +26,14 @@ if ! source "$_dir/_handback-common.sh" 2>/dev/null; then
     v=$((10#$v)); [ "$v" -gt 0 ] || v=4000; echo "$v"
   }
   acceptance_gate_is_off() { [ "${CLAUDE_ACCEPTANCE_GATE:-on}" = "off" ]; }
+  acceptance_gate_expired_note() { :; }
   handback_is_exempt() {
     local t="$1" e; [ -n "$t" ] || return 1
     for e in $HANDBACK_EXEMPT_TYPES; do [ "$e" = "$t" ] && return 0; done; return 1
   }
 fi
 acceptance_gate_is_off && exit 0
+off_note="$(acceptance_gate_expired_note 2>/dev/null)"
 
 event="$(jq -r '.hook_event_name // empty' <<<"$payload" 2>/dev/null)" || exit 0
 agent_id="$(jq -r '.agent_id // empty' <<<"$payload" 2>/dev/null)" || exit 0
@@ -139,7 +144,7 @@ fi
 if [ "${#problems[@]}" -eq 0 ]; then finish; fi
 
 write_state "$((count + 1))" || true
-reason="Handback sent back (attempt $((count + 1)) of $HANDBACK_SEND_BACK_CAP). ${problems[*]}"
+reason="Handback sent back (attempt $((count + 1)) of $HANDBACK_SEND_BACK_CAP). ${problems[*]}${off_note:+ $off_note}"
 if [ "$event" = "PreToolUse" ]; then
   jq -n --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 else

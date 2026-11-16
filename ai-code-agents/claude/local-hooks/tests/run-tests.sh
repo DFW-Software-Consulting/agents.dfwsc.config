@@ -127,6 +127,21 @@ unset CLAUDE_DELEGATE_GATE_OFF_FILE
 iso="$(mktemp -d)"; cp "$hooks/delegate-gate.sh" "$iso/"; touch "$off"
 check "missing shared file behaves as gate ON" deny "bash $iso/delegate-gate.sh" "$edit"
 rm -f "$off"
+# off-file must be a regular file, or a link to one, judged by the target
+unset CLAUDE_DELEGATE_GATE
+od="$(mktemp -d)"; export CLAUDE_DELEGATE_GATE_OFF_FILE="$od/the.off"
+mkdir "$od/the.off"
+check "fresh directory at the off-file path is not an off-file" deny "$gate" "$edit"
+rm -rf "$od/the.off"; touch -d '13 hours ago' "$od/old"; touch "$od/new"
+ln -s "$od/old" "$od/the.off"; touch -h "$od/the.off"
+check "fresh link to a stale file is stale (gate ON)" deny "$gate" "$edit"
+rm -f "$od/the.off"; ln -s "$od/new" "$od/the.off"; touch -h -d '13 hours ago' "$od/the.off"
+check "stale link to a fresh file is fresh (gate off)" allow "$gate" "$edit"
+rm -f "$od/the.off"; mkdir "$od/d"; ln -s "$od/d" "$od/the.off"
+check "link to a directory is not an off-file" deny "$gate" "$edit"
+rm -f "$od/the.off"; ln -s "$od/missing" "$od/the.off"
+check "dangling link is not an off-file" deny "$gate" "$edit"
+unset CLAUDE_DELEGATE_GATE_OFF_FILE; rm -rf "$od"
 
 # --- no-agent-mention.py ---
 pr() { jq -n --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}'; }

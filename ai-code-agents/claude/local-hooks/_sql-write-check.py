@@ -630,6 +630,9 @@ def marker_path(payload):
 
 
 def emit(level, reason):
+    note = os.environ.get('GATE_OFF_NOTE', '')
+    if note:
+        reason = reason + ' ' + note
     print(json.dumps({'hookSpecificOutput': {
         'hookEventName': 'PreToolUse',
         'permissionDecision': level,

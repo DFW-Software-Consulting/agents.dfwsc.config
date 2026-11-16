@@ -17,6 +17,7 @@ Findings:
 - #22 Adds `run-checks.sh`, `_run_checks.py`, `_checks_stamp.py` and the `git-verify` skill: runs a repo's checks for the current commit and writes a stamp keyed by commit hash. On request only; not a hook. Refused on a dirty tree; a would-be pass becomes dirty_after if HEAD moved.
 - #23 Reply cap: adds "explain this more", "explain that more", "explain more", "tell me more", "elaborate" as one-shot approvals; a one-shot phrase no longer ends a session-long "limit off" approval.
 - Adds checks-gate (reads the run-checks stamps before push and PR create; warn or deny by config) and conditional `--force-with-lease` in git-guard (valid stamp, then ask).
+- Off-file for public-repo-text-gate, shared-db-write-gate and the acceptance pair (require-acceptance-criteria, handback-gate, context-docs-start): a fresh `~/.claude/public-text-gate.off`, `shared-db-gate.off` or `acceptance-gate.off` switches the gate off for 12 hours; a stale or future-dated one is ignored with an "expired" note in the denial text; environment switches unchanged.
 Lessons:
 - Test the whole `ai-code-agents/claude/` tree, not just `local-hooks/`.
 - Do not stack pull requests on a base that will be squash-merged.

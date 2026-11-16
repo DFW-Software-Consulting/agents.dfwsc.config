@@ -344,5 +344,33 @@ check "JSON array stdin silent" allow '[1,2]'
 check "payload without command allowed" allow '{"tool_name":"Bash","tool_input":{}}'
 out="$(printf 'garbage' | $gate 2>&1)"; [ -z "$out" ]; ok "malformed stdin prints nothing" $?
 
+# --- off-file ---
+offd="$work/offs"; mkdir -p "$offd"
+mkoff() { rm -f "$1"; touch -d "$2" "$1"; }   # FILE "N hours ago" | "N hours"
+off="$offd/public-text-gate.off"; export CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE="$off"
+bad_cmd='git commit -m "move to fakehost-01"'
+reason_of() { printf '%s' "$1" | $gate 2>&1 | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'; }
+rm -f "$off"
+check "no off-file: denied as before" deny "$(bp "$bad_cmd")"
+mkoff "$off" "1 hour ago"
+check "fresh off-file switches the gate off" allow "$(bp "$bad_cmd")"
+mkoff "$off" "13 hours ago"
+check "13-hour-old off-file ignored" deny "$(bp "$bad_cmd")"
+grep -q 'expired' <<<"$(reason_of "$(bp "$bad_cmd")")"; ok "13-hour-old off-file: denial says it expired" $?
+mkoff "$off" "2 hours"
+check "future-dated off-file ignored" deny "$(bp "$bad_cmd")"
+grep -q 'expired' <<<"$(reason_of "$(bp "$bad_cmd")")"; ok "future-dated off-file: denial says it expired" $?
+rm -f "$off"
+out="$(printf '%s' "$(bp "$bad_cmd")" | CLAUDE_PUBLIC_TEXT_GATE=off $gate 2>&1)"; [ -z "$out" ]; ok "env switch still works with no off-file" $?
+! grep -q 'expired' <<<"$(reason_of "$(bp "$bad_cmd")")"; ok "no off-file: denial has no expired note" $?
+mkoff "$off" "1 hour ago"
+iso="$(mktemp -d "$work/iso.XXXXXX")"; cp -r "$hooks" "$iso/local-hooks"; cp -r "$hooks/../hooks" "$iso/hooks"; rm -f "$iso/local-hooks/_gate-common.sh"
+out="$(printf '%s' "$(bp "$bad_cmd")" | bash "$iso/local-hooks/public-repo-text-gate.sh" 2>&1)"
+grep -q '"permissionDecision": *"deny"' <<<"$out"; ok "no _gate-common.sh: gate stays ON with fresh off-file" $?
+rm -f "$off"
+for v in CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_SHARED_DB_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE; do mkoff "$offd/$v" "1 hour ago"; export "$v=$offd/$v"; done
+check "other gates' fresh off-files do not switch it off" deny "$(bp "$bad_cmd")"
+unset CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_SHARED_DB_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE
+
 echo; echo "passed: $pass, failed: $fail"
 [ "$fail" -eq 0 ]

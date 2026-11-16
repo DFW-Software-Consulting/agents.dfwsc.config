@@ -431,6 +431,9 @@ def deny(slug, found):
               f"contains infrastructure details ({lines}). Remove or generalise "
               f"them (for example use a placeholder like example.com or 192.0.2.1) "
               f"before committing or posting.")
+    note = os.environ.get("GATE_OFF_NOTE", "")
+    if note:
+        reason += " " + note
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",

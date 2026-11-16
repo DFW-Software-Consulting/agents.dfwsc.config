@@ -12,6 +12,7 @@ _dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" 2>/dev/null && pwd)
 if ! source "$_dir/_handback-common.sh" 2>/dev/null; then
   HANDBACK_EXEMPT_TYPES="Explore codebase-locator codebase-analyzer context-synthesis check web-fetch claude-code-guide Plan statusline-setup antipattern-sniffer fork"
   acceptance_gate_is_off() { [ "${CLAUDE_ACCEPTANCE_GATE:-on}" = "off" ]; }
+  acceptance_gate_expired_note() { :; }
   handback_is_exempt() {
     local t="$1" e; [ -n "$t" ] || return 1
     for e in $HANDBACK_EXEMPT_TYPES; do [ "$e" = "$t" ] && return 0; done; return 1

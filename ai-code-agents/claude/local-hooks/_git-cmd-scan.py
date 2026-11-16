@@ -136,40 +136,165 @@ def git_hit(args, cwd):
     return d, sub
 
 
-def scan(cmd, cwd):
+def walk(cmd, cwd, lenient=False):
+    """Yield (toks, i, args, cwd) for every `git` word in command position,
+    with args the words after it and cwd the directory in effect (literal `cd`
+    followed, parentheses scoped). Raises Stop when the directory becomes
+    undeterminable (after yielding everything found before that point) and
+    ValueError when the command cannot be tokenized. GIT_DIR / GIT_WORK_TREE
+    assignments on the command skip it. With lenient=True an undeterminable
+    directory does not stop the walk: cwd becomes None (unknown) and later
+    commands are still yielded (a later absolute `cd` recovers it)."""
     toks = bwc.tokenize(bwc.strip_heredocs(cmd))
-    hits, stack = [], []
-    try:
-        for i, (kind, t) in enumerate(toks):
-            if kind == "o":
-                if t == "(":
-                    stack.append(cwd)
-                elif t == ")" and stack:
-                    cwd = stack.pop()
-                continue
-            if not cmd_position(toks, i):
-                continue
-            name = os.path.basename(t)
-            args = bwc.args_until_op(toks, i + 1)
-            if name in ("cd", "pushd"):
-                args = [a for a in args if not (a.startswith("-") and a != "-")]
+    stack = []
+    for i, (kind, t) in enumerate(toks):
+        if kind == "o":
+            if t == "(":
+                stack.append(cwd)
+            elif t == ")" and stack:
+                cwd = stack.pop()
+            continue
+        if not cmd_position(toks, i):
+            continue
+        name = os.path.basename(t)
+        args = bwc.args_until_op(toks, i + 1)
+        if name in ("cd", "pushd"):
+            args = [a for a in args if not (a.startswith("-") and a != "-")]
+            try:
                 if not args:
                     if not HOME:
                         raise Stop
                     cwd = HOME
                 else:
                     cwd = join(cwd, args[0])
-            elif name == "popd":
+            except Stop:
+                if not lenient:
+                    raise
+                cwd = None
+        elif name == "popd":
+            if not lenient:
                 raise Stop
-            elif name == "git":
-                if env_redirected(toks, i):
-                    continue
-                hit = git_hit(args, cwd)
-                if hit:
-                    hits.append(hit)
+            cwd = None
+        elif name == "git":
+            if env_redirected(toks, i):
+                continue
+            yield toks, i, args, cwd
+
+
+def scan(cmd, cwd):
+    hits = []
+    try:
+        for _toks, _i, args, d in walk(cmd, cwd):
+            hit = git_hit(args, d)
+            if hit:
+                hits.append(hit)
     except Stop:
         pass
     return hits
+
+
+def session_env(toks, i):
+    """Guarded-style variables set by standalone statements before toks[i]:
+    `NAME=value`, `export NAME=value ...`, alone in a statement (not a prefix
+    of another command). Parentheses scope them. Returns {name: value}."""
+    env, stack = {}, []
+    n = 0
+    while n < i:
+        kind, t = toks[n]
+        if kind == "o":
+            if t == "(":
+                stack.append(dict(env))
+            elif t == ")" and stack:
+                env = stack.pop()
+            n += 1
+            continue
+        if n == 0 or toks[n - 1][0] == "o" or toks[n - 1][1] in KEYWORDS:
+            m = n
+            if toks[m][1] == "export":
+                m += 1
+            found = []
+            while m < i and toks[m][0] == "w" and bwc.ASSIGN.match(toks[m][1]):
+                k, _, v = toks[m][1].partition("=")
+                found.append((k, v))
+                m += 1
+            if found and m > n and (m >= len(toks) or toks[m][0] == "o"):
+                env.update(found)
+                n = m
+                continue
+        n += 1
+    return env
+
+
+def leading_env(toks, i):
+    """NAME=value pairs in effect for the command whose `git` word is toks[i]:
+    earlier standalone assignments (session_env), then the NAME=value words
+    prefixed to the command itself (which win)."""
+    env = session_env(toks, i)
+    own = []
+    j = i - 1
+    while j >= 0 and toks[j][0] == "w" and (
+            bwc.ASSIGN.match(toks[j][1]) or toks[j][1] in PREFIX or toks[j][1].startswith("-")):
+        if bwc.ASSIGN.match(toks[j][1]):
+            k, _, v = toks[j][1].partition("=")
+            own.append((k, v))
+        j -= 1
+    own.reverse()
+    env.update(own)
+    return list(env.items())
+
+
+def git_command(toks, i, args, cwd, lenient=False):
+    """Describe one git command: {"dir", "sub", "args" (words after the
+    subcommand), "env" ([(name, value)]), "config" ([(key, value)] from -c)}.
+    "dir" is None when it cannot be determined and lenient is set.
+    Returns None when there is no subcommand or --git-dir / --work-tree is
+    used (target cannot be judged). Raises Stop on an undeterminable -C
+    unless lenient."""
+    j, d, config = 0, cwd, []
+    while j < len(args):
+        a = args[j]
+        if a == "-C":
+            if j + 1 >= len(args):
+                raise Stop
+            try:
+                d = join(d, args[j + 1])
+            except Stop:
+                if not lenient:
+                    raise
+                d = None
+            j += 2
+        elif a.startswith(UNJUDGEABLE):
+            return None
+        elif a == "-c":
+            if j + 1 < len(args):
+                k, _, v = args[j + 1].partition("=")
+                config.append((k, v))
+            j += 2
+        elif a in OPT_WITH_VALUE:
+            j += 2
+        elif a.startswith("-"):
+            j += 1
+        else:
+            break
+    if j >= len(args):
+        return None
+    return {"dir": d, "sub": args[j], "args": args[j + 1:],
+            "env": leading_env(toks, i), "config": config}
+
+
+def commands(cmd, cwd):
+    """All git commands in a command line (see git_command), lenient about
+    undeterminable directories: "dir" is then None (or a path that may not
+    exist)."""
+    out = []
+    try:
+        for toks, i, args, d in walk(cmd, cwd, lenient=True):
+            c = git_command(toks, i, args, d, lenient=True)
+            if c:
+                out.append(c)
+    except (Stop, ValueError):
+        pass
+    return out
 
 
 def main():

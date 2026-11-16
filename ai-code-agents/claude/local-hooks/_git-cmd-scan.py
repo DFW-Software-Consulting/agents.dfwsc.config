@@ -10,6 +10,16 @@ inside quotes is not a command. The directory starts at CWD, follows literal
 `cd -`) ends the scan: hits found before it are kept, the rest is allowed.
 Any parse problem prints nothing (allow).
 
+Read-only forms are allowed: --help/-h, dry runs (add/rm/mv/clean -n,
+--dry-run; commit --dry-run) and inspect-only apply (--check, --stat,
+--numstat, --summary). An explicit GIT_DIR / GIT_WORK_TREE assignment on the
+command means the target cannot be judged, so it is allowed.
+
+Documented gaps (all fail open): `bash -c '...'` / `sh -c` bodies are not
+parsed; an unterminated quote is not parsed; edits to files inside a primary
+checkout's .git/ directory are not judged (that is done in worktree-gate.sh);
+git aliases are not resolved.
+
 Env: CMD (the command), CWD (payload cwd, may be empty), GATE_HOME.
 """
 import importlib.util
@@ -73,6 +83,17 @@ def cmd_position(toks, i):
     return v in KEYWORDS
 
 
+def env_redirected(toks, i):
+    """True if GIT_DIR / GIT_WORK_TREE is assigned on this command."""
+    j = i - 1
+    while j >= 0 and toks[j][0] == "w" and (
+            bwc.ASSIGN.match(toks[j][1]) or toks[j][1] in PREFIX or toks[j][1].startswith("-")):
+        if toks[j][1].startswith(("GIT_DIR=", "GIT_WORK_TREE=")):
+            return True
+        j -= 1
+    return False
+
+
 def git_hit(args, cwd):
     """args: words after `git`. Returns subcommand if it mutates, else None."""
     i, d = 0, cwd
@@ -95,6 +116,18 @@ def git_hit(args, cwd):
         return None
     sub, rest = args[i], args[i + 1:]
     if sub not in MUTATING:
+        return None
+    opts = rest[:rest.index("--")] if "--" in rest else rest
+    longs = {a for a in opts if a.startswith("--")}
+    shorts = set("".join(a[1:] for a in opts if a.startswith("-") and not a.startswith("--")))
+    if "--help" in longs or "-h" in opts or "-h" in args[:i]:
+        return None
+    dry = "--dry-run" in longs or "n" in shorts
+    if sub in ("add", "rm", "mv", "clean") and dry:
+        return None  # -n wins over -f for clean
+    if sub == "commit" and "--dry-run" in longs:
+        return None
+    if sub == "apply" and longs & {"--check", "--stat", "--numstat", "--summary"}:
         return None
     if sub == "stash":
         first = next((x for x in rest if not x.startswith("-")), "")
@@ -129,6 +162,8 @@ def scan(cmd, cwd):
             elif name == "popd":
                 raise Stop
             elif name == "git":
+                if env_redirected(toks, i):
+                    continue
                 hit = git_hit(args, cwd)
                 if hit:
                     hits.append(hit)

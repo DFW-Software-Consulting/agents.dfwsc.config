@@ -120,6 +120,20 @@ check "command without git word allowed" allow "$(bp 'ls -la' "$primary")"
 check "heredoc body mentioning git commit allowed" allow "$(bp $'cat <<EOF\ngit commit -m x\nEOF' "$primary")"
 check "unparseable command allowed" allow "$(bp "git commit -m 'oops" "$primary")"
 
+# --- read-only forms ---
+for c in 'git commit --help' 'git checkout -h' 'git --no-pager stash --help' 'git add -n .' 'git add --dry-run .' \
+  'git rm -n x' 'git rm --dry-run x' 'git mv -n a b' 'git mv --dry-run a b' 'git clean -n' 'git clean --dry-run -d' \
+  'git clean -nfd' 'git clean -n -f' 'git clean -fn' 'git commit --dry-run' 'git apply --check p.diff' \
+  'git apply --stat p.diff' 'git apply --numstat p.diff' 'git apply --summary p.diff' 'git apply --index --check p.diff' \
+  'GIT_DIR=x git commit -m x' 'GIT_WORK_TREE=x git add .' 'env GIT_DIR=x git commit -m x'; do
+  check "allow: $c" allow "$(bp "$c" "$primary")"
+done
+for c in 'git clean -fd' 'git clean -f' 'git clean --force' 'git clean -d' 'git apply --index p.diff' 'git apply --cached p.diff' \
+  'git apply -3 p.diff' 'git apply p.diff' 'git merge --no-commit x' 'git add .' 'git rm x' 'git mv a b' 'git commit -m x' \
+  'git commit -am x' 'FOO=1 git clean -fd'; do
+  check "deny: $c" deny "$(bp "$c" "$primary")"
+done
+
 # --- escape hatch ---
 edit_primary="$(fp "$primary/src/a.txt")"
 touch "$off"

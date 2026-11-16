@@ -29,7 +29,7 @@ Return exactly this envelope and nothing else of substance:
 ```
 
 - `status` is `ok` when the script reports `passed` or `none_detected`. `next` is `["git-push"]` when the branch is not pushed or `push_ahead` is above 0, otherwise `["git-pr"]`. `next` is a hint; the router decides.
-- `status` is `blocked` when it reports `failed`: `blocked_by` is `["checks-failed"]`, the failing commands are in `result.failed`, and `next` is `[]`.
+- `status` is `blocked` when it reports `failed`: `blocked_by` is `["checks-failed"]`, the failing commands are the entries of `result.results` with a non-zero `exit`, and `next` is `[]`.
 - `status` is `blocked` when it reports `dirty` or `dirty_after`: `blocked_by` is `["dirty-tree"]`, `next` is `[]`, and say to commit, gitignore or remove the listed paths and run again. For `dirty_after`, report whichever the script gave: the paths, or the old and new head (when a check moved HEAD).
 - `status` is `blocked` when it reports `error` (exit 2): `blocked_by` is `["error"]`, `next` is `[]`, and include the script's message.
 

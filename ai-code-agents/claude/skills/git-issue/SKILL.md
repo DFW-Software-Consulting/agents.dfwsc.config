@@ -15,7 +15,7 @@ One job: create a GitHub issue from a template.
 ## Procedure
 
 1. Run `~/.claude/local-hooks/git-facts.sh --dir <path>`.
-2. Pick the template from `issue_templates` in the facts: match the request's type (bug, feature, task) against each `.md` template's file name or front matter. With no clear match, or if only `.yml` issue forms exist (they cannot be filled through `--body`), use `~/.claude/skills/git-issue/templates/issue-body.md`. Never just take the first one.
+2. Pick the template from `issue_templates` in the facts: match the request's type (bug, feature, task) against each `.md` template's file name or front matter. If a Markdown template and a `.yml` form share a name, use the Markdown one. Forms cannot be filled through `--body`, so with no clear match, or only forms, use `~/.claude/skills/git-issue/templates/issue-body.md`. Never just take the first one.
 3. Fill the sections from the description. Do not invent facts: for anything the user did not give, write what is known and add it to `open_questions`.
 4. Placeholder rule (same as git-pr): keep every heading in order, but remove a section the template marks as conditional ("only if ...") when it does not apply, such as the split plan. No angle-bracket placeholders or HTML comments may remain; write a `TBD:` line with the reason instead.
 5. If there are no acceptance criteria, do not stop to ask. Put this line under that section and carry on: `TBD: acceptance criteria not provided (open question)`.

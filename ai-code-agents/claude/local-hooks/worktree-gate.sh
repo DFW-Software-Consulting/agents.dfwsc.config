@@ -11,11 +11,17 @@
 # File tools: deny edits to files in a primary checkout (symlinks resolved
 # first). Allowed: outside any repo, unborn repos, linked worktrees, git-ignored paths.
 # Bash: deny git subcommands that change HEAD, the index or the working tree
-# when the effective directory (payload cwd, `cd`, `git -C`, `env -C`, `bash -c`
-# bodies; a literal path or a plain variable assignment certain to have run) is a
-# primary checkout. When the directory cannot be established (a variable that is
-# not certain, a substitution, `cd -`, ...) such a command is denied too: write
-# the directory literally. A `mktemp -d` directory on the same line is allowed.
+# when the effective directory (payload cwd, `cd`/`builtin cd`, `git -C`,
+# `env -C`, `bash -c`/`sh -c`/`eval`/`env -S` bodies, escaped quotes unescaped; a
+# literal path or a plain variable assignment certain to have run; a path not
+# there yet is judged by its nearest existing ancestor) is a primary checkout.
+# An explicit git directory (GIT_DIR=, --git-dir, GIT_WORK_TREE=, --work-tree)
+# is judged by its work tree. When the directory cannot be established (a
+# variable that is not certain, a substitution, `cd -`, an unparseable wrapper
+# body holding a git command, a line over the analysis budget, ...) such a
+# command is denied too: write the directory literally. A directory made by a
+# bare `mktemp -d` on the same line is allowed (no -p/template/--tmpdir, TMPDIR
+# untouched, the gate's own temp root not inside a git work tree).
 # Read-only git commands are never judged. Parsing: _worktree-gate-check.py
 # (uses _cmd_dirs.py and _git-cmd-scan.py).
 #

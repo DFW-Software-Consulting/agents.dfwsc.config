@@ -253,6 +253,50 @@ done
 iso="$(mktemp -d)"; cp "$req" "$iso/"; call "$iso/require-acceptance-criteria.sh" "$(ag 'x' executor)"
 jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$out" >/dev/null 2>&1 && ok "require gate still denies without shared file" || bad "require fallback deny"
 
+# --- acceptance off-file (shared by require-acceptance-criteria, handback-gate, context-docs-start) ---
+offd="$HOME/offs"; mkdir -p "$offd"
+mkoff() { rm -f "$1"; touch -d "$2" "$1"; }   # FILE "N hours ago" | "N hours"
+aoff="$offd/acceptance-gate.off"; export CLAUDE_ACCEPTANCE_GATE_OFF_FILE="$aoff"
+badm='no report format'
+rm -f "$aoff"
+expect "no off-file: Agent without criteria still denied" "$req" "$(ag 'do it' executor)" deny
+expect "no off-file: bad handback still sent back" "$hb" "$(pre "$badm" "of0-$run")" deny
+mkoff "$aoff" "1 hour ago"
+expect "fresh off-file: Agent without criteria allowed" "$req" "$(ag 'do it' executor)" none
+expect "fresh off-file: bad handback allowed (PreToolUse)" "$hb" "$(pre "$badm" "of1-$run")" none
+expect "fresh off-file: bad SubagentStop allowed" "$hb" "$(stp "$badm" "of2-$run")" none
+call "$start" "$(sa "$plain" executor)"; c="$(ctx_of)"
+grep -q 'Context docs: updated' <<<"$c" && ! grep -q 'Acceptance check' <<<"$c" && ok "fresh off-file drops acceptance instruction" || bad "fresh off-file start"
+mkoff "$aoff" "13 hours ago"
+expect "13-hour off-file: Agent without criteria denied" "$req" "$(ag 'do it' executor)" deny
+grep -q 'expired' <<<"$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")" && ok "13-hour off-file: require denial says expired" || bad "require expired note"
+expect "13-hour off-file: bad handback sent back" "$hb" "$(pre "$badm" "of3-$run")" deny
+grep -q 'expired' <<<"$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")" && ok "13-hour off-file: handback reason says expired" || bad "handback expired note"
+expect "13-hour off-file: bad SubagentStop blocked" "$hb" "$(stp "$badm" "of4-$run")" block
+grep -q 'expired' <<<"$(jq -r .reason <<<"$out")" && ok "13-hour off-file: stop reason says expired" || bad "stop expired note"
+call "$start" "$(sa "$plain" executor)"; grep -q 'Acceptance check' <<<"$(ctx_of)" && ok "13-hour off-file keeps acceptance instruction" || bad "stale off-file start"
+mkoff "$aoff" "2 hours"
+expect "future-dated off-file: Agent without criteria denied" "$req" "$(ag 'do it' executor)" deny
+grep -q 'expired' <<<"$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")" && ok "future-dated off-file: says expired" || bad "future expired note"
+expect "future-dated off-file: bad handback sent back" "$hb" "$(pre "$badm" "of5-$run")" deny
+rm -f "$aoff"
+CLAUDE_ACCEPTANCE_GATE=off call "$req" "$(ag 'do it' executor)"; [ -z "$out" ] && ok "env switch still works with no off-file (require)" || bad "env require"
+CLAUDE_ACCEPTANCE_GATE=off call "$hb" "$(pre "$badm" "of6-$run")"; [ -z "$out" ] && ok "env switch still works with no off-file (handback)" || bad "env hb"
+# shared _gate-common.sh missing: gate stays ON even with a fresh file
+mkoff "$aoff" "1 hour ago"
+iso="$(mktemp -d)"; cp "$req" "$hb" "$start" "$hooks/_handback-common.sh" "$iso/"
+call "$iso/require-acceptance-criteria.sh" "$(ag 'do it' executor)"
+jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$out" >/dev/null 2>&1 && ok "no _gate-common.sh: require stays ON with fresh off-file" || bad "require without gate-common"
+call "$iso/handback-gate.sh" "$(pre "$badm" "of7-$run")"
+jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$out" >/dev/null 2>&1 && ok "no _gate-common.sh: handback stays ON with fresh off-file" || bad "hb without gate-common"
+call "$iso/context-docs-start.sh" "$(sa "$plain" executor)"; grep -q 'Acceptance check' <<<"$(ctx_of)" && ok "no _gate-common.sh: start keeps acceptance instruction" || bad "start without gate-common"
+# other gates' off-files do not switch this gate off
+rm -f "$aoff"
+for v in CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE CLAUDE_SHARED_DB_GATE_OFF_FILE; do mkoff "$offd/$v" "1 hour ago"; export "$v=$offd/$v"; done
+expect "other gates' fresh off-files: Agent without criteria still denied" "$req" "$(ag 'do it' executor)" deny
+expect "other gates' fresh off-files: bad handback still sent back" "$hb" "$(pre "$badm" "of8-$run")" deny
+unset CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE CLAUDE_SHARED_DB_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

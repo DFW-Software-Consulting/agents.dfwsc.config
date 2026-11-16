@@ -8,8 +8,35 @@ HANDBACK_EXEMPT_TYPES="Explore codebase-locator codebase-analyzer context-synthe
 # How many times a handback may be sent back before it goes through as is.
 HANDBACK_SEND_BACK_CAP=2
 
-# CLAUDE_ACCEPTANCE_GATE=off disables the acceptance gate entirely.
-acceptance_gate_is_off() { [ "${CLAUDE_ACCEPTANCE_GATE:-on}" = "off" ]; }
+# The acceptance gate is off when CLAUDE_ACCEPTANCE_GATE=off, or when the
+# off-file (~/.claude/acceptance-gate.off, path overridable with
+# CLAUDE_ACCEPTANCE_GATE_OFF_FILE) was modified less than 12 hours ago, using
+# gate_off_file_state_for from _gate-common.sh. A stale or future-dated file is
+# ignored. If _gate-common.sh cannot be sourced the file is ignored (gate ON).
+_HANDBACK_COMMON_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" 2>/dev/null && pwd)"
+
+# Prints: none | fresh | stale.
+acceptance_gate_off_state() {
+  local HOME="${HOME-}"
+  local f="${CLAUDE_ACCEPTANCE_GATE_OFF_FILE:-$HOME/.claude/acceptance-gate.off}"
+  if ! declare -F gate_off_file_state_for >/dev/null 2>&1; then
+    [ -n "$_HANDBACK_COMMON_DIR" ] || { echo none; return; }
+    source "$_HANDBACK_COMMON_DIR/_gate-common.sh" 2>/dev/null || { echo none; return; }
+  fi
+  gate_off_file_state_for "$f"
+}
+
+acceptance_gate_is_off() {
+  [ "${CLAUDE_ACCEPTANCE_GATE:-on}" = "off" ] && return 0
+  [ "$(acceptance_gate_off_state)" = "fresh" ]
+}
+
+# Prints a one-line note only when an off-file exists but has expired.
+acceptance_gate_expired_note() {
+  [ "${CLAUDE_ACCEPTANCE_GATE:-on}" = "off" ] && return 0
+  [ "$(acceptance_gate_off_state)" = "stale" ] || return 0
+  echo "Note: the acceptance-gate.off escape hatch expired (older than 12 hours) and is being ignored; touch it again to switch the acceptance gate off."
+}
 
 # handback_is_exempt TYPE: success when TYPE is exempt. Empty is non-exempt.
 handback_is_exempt() {

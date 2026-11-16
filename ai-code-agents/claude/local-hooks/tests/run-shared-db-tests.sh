@@ -233,6 +233,40 @@ check "ask output is valid JSON with quotes/backslashes/newlines" ask "$(P "$nas
 check "deny output is valid JSON with quotes/backslashes/newlines" deny "$(P "delete from $S.tasks where a = 'q\"\\\\x
 y'")"
 
+# --- off-file ---
+offd="$HOME/offs"; mkdir -p "$offd"
+mkoff() { rm -f "$1"; touch -d "$2" "$1"; }   # FILE "N hours ago" | "N hours"
+off="$offd/shared-db-gate.off"; export CLAUDE_SHARED_DB_GATE_OFF_FILE="$off"
+dq="drop table $S.tasks"        # denied
+aq="select * from $S.tasks where x = 'unterminated"   # asked (unparseable, mentions schema)
+reason_of() { printf '%s' "$1" | $gate 2>&1 | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'; }
+rm -f "$off"
+check "no off-file: denied as before" deny "$(P "$dq")"
+check "no off-file: unparseable SQL asks as before" ask "$(P "$aq")"
+mkoff "$off" "1 hour ago"
+check "fresh off-file: denied payload allowed" allow "$(P "$dq")"
+check "fresh off-file: asked payload allowed" allow "$(P "$aq")"
+check "fresh off-file: apply_migration allowed" allow "$(P "create table $S.t(a int)" sess1 "$REF" mcp__x__apply_migration)"
+mkoff "$off" "13 hours ago"
+check "13-hour-old off-file ignored (deny)" deny "$(P "$dq")"
+grep -q 'expired' <<<"$(reason_of "$(P "$dq")")"; if [ $? -eq 0 ]; then pass=$((pass+1)); echo "ok   - 13-hour-old off-file: denial says it expired"; else fail=$((fail+1)); echo "FAIL - expired note (deny)"; fi
+check "13-hour-old off-file ignored (ask)" ask "$(P "$aq")"
+grep -q 'expired' <<<"$(reason_of "$(P "$aq")")"; if [ $? -eq 0 ]; then pass=$((pass+1)); echo "ok   - 13-hour-old off-file: ask text says it expired"; else fail=$((fail+1)); echo "FAIL - expired note (ask)"; fi
+mkoff "$off" "2 hours"
+check "future-dated off-file ignored" deny "$(P "$dq")"
+grep -q 'expired' <<<"$(reason_of "$(P "$dq")")"; if [ $? -eq 0 ]; then pass=$((pass+1)); echo "ok   - future-dated off-file: denial says it expired"; else fail=$((fail+1)); echo "FAIL - expired note (future)"; fi
+rm -f "$off"
+out="$(printf '%s' "$(P "$dq")" | CLAUDE_SHARED_DB_GATE=off $gate 2>&1)"
+if [ -z "$out" ]; then pass=$((pass+1)); echo "ok   - env switch still works with no off-file"; else fail=$((fail+1)); echo "FAIL - env switch: $out"; fi
+mkoff "$off" "1 hour ago"
+iso="$(mktemp -d)"; cp "$hooks/shared-db-write-gate.sh" "$hooks/_sql-write-check.py" "$iso/"
+out="$(printf '%s' "$(P "$dq")" | bash "$iso/shared-db-write-gate.sh" 2>&1)"
+if grep -q '"deny"' <<<"$out"; then pass=$((pass+1)); echo "ok   - no _gate-common.sh: gate stays ON with fresh off-file"; else fail=$((fail+1)); echo "FAIL - without gate-common: $out"; fi
+rm -f "$off"
+for v in CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE; do mkoff "$offd/$v" "1 hour ago"; export "$v=$offd/$v"; done
+check "other gates' fresh off-files do not switch it off" deny "$(P "$dq")"
+unset CLAUDE_DELEGATE_GATE_OFF_FILE CLAUDE_WORKTREE_GATE_OFF_FILE CLAUDE_GIT_GUARD_OFF_FILE CLAUDE_PUBLIC_TEXT_GATE_OFF_FILE CLAUDE_ACCEPTANCE_GATE_OFF_FILE CLAUDE_SHARED_DB_GATE_OFF_FILE
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

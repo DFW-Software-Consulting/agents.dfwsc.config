@@ -11,8 +11,13 @@
 # File tools: deny edits to files in a primary checkout (symlinks resolved
 # first). Allowed: outside any repo, unborn repos, linked worktrees, git-ignored paths.
 # Bash: deny git subcommands that change HEAD, the index or the working tree
-# when the effective directory (payload cwd, literal `cd`, `git -C`) is a primary
-# checkout. Parsing lives in _git-cmd-scan.py.
+# when the effective directory (payload cwd, `cd`, `git -C`, `env -C`, `bash -c`
+# bodies; a literal path or a plain variable assignment certain to have run) is a
+# primary checkout. When the directory cannot be established (a variable that is
+# not certain, a substitution, `cd -`, ...) such a command is denied too: write
+# the directory literally. A `mktemp -d` directory on the same line is allowed.
+# Read-only git commands are never judged. Parsing: _worktree-gate-check.py
+# (uses _cmd_dirs.py and _git-cmd-scan.py).
 #
 # Fails open everywhere: bad input, missing jq/git/python3, undeterminable state.
 # Escape hatch: CLAUDE_WORKTREE_GATE=off, or touch ~/.claude/worktree-gate.off
@@ -87,13 +92,15 @@ if [ "$tool_name" = "Bash" ] || [ -n "$command_str" ]; then
   printf '%s' "$command_str" | grep -qw git || exit 0
   command -v python3 >/dev/null 2>&1 || exit 0
   hits="$(CMD="$command_str" CWD="$cwd" GATE_HOME="$HOME" \
-    python3 "$_gate_dir/_git-cmd-scan.py" 2>/dev/null)" || exit 0
+    python3 -B "$_gate_dir/_worktree-gate-check.py" 2>/dev/null)" || exit 0
   [ -n "$hits" ] || exit 0
   # `pull` is allowed on purpose (it is not in the scanner's list) so the
   # primary checkout's main can be fast-forwarded.
-  while IFS=$'\t' read -r dir sub; do
+  while IFS=$'\t' read -r state dir sub; do
     [ -n "$dir" ] || continue
-    if root="$(primary_root "$dir")"; then
+    if [ "$state" = "unknown" ]; then
+      deny "Worktree gate: could not tell which checkout git $sub runs in ($dir), so it cannot be checked against the primary checkout. Write the directory literally, for example: git -C /absolute/path/of/the/worktree $sub ... or cd /absolute/path/of/the/worktree && git $sub ... (a directory made with mktemp -d on the same line is fine). Escape hatch: touch ~/.claude/worktree-gate.off (expires after 12 hours) or launch with CLAUDE_WORKTREE_GATE=off."
+    elif root="$(primary_root "$dir")"; then
       deny_message "$root" "git $sub"
     fi
   done <<<"$hits"

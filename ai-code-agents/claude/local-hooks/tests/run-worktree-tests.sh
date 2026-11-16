@@ -108,10 +108,10 @@ check "echo git commit (argument words) allowed" allow "$(bp 'echo git commit' "
 check "FOO=1 git commit denied" deny "$(bp 'FOO=1 git commit -m x' "$primary")"
 check "env FOO=1 git commit denied" deny "$(bp 'env FOO=1 git commit -m x' "$primary")"
 check "git commit after && denied" deny "$(bp 'ls && git commit -m x' "$primary")"
-check "cd \"\$DIR\" && git commit allowed (not literal)" allow "$(bp 'cd "$DIR" && git commit -m x' "$primary")"
-check "cd - && git commit allowed" allow "$(bp 'cd - && git commit -m x' "$primary")"
-check "cd \$(pwd) && git commit allowed" allow "$(bp 'cd $(mktemp -d) && git commit -m x' "$primary")"
-check "git -C \"\$D\" commit allowed (not literal)" allow "$(bp 'git -C "$D" commit -m x' "$primary")"
+check "cd \"\$DIR\" && git commit denied (directory unknown)" deny "$(bp 'cd "$DIR" && git commit -m x' "$primary")"
+check "cd - && git commit denied (directory unknown)" deny "$(bp 'cd - && git commit -m x' "$primary")"
+check "cd \$(mktemp -d) && git commit allowed (temporary directory)" allow "$(bp 'cd $(mktemp -d) && git commit -m x' "$primary")"
+check "git -C \"\$D\" commit denied (directory unknown)" deny "$(bp 'git -C "$D" commit -m x' "$primary")"
 check "git commit in non-repo allowed" allow "$(bp 'git commit -m x' "$plain")"
 check "git commit in unborn repo allowed" allow "$(bp 'git commit -m x' "$unborn")"
 check "git add in submodule of primary superproject denied" deny "$(bp 'git add -A' "$sub/vendor")"
@@ -134,11 +134,108 @@ for c in 'git clean -fd' 'git clean -f' 'git clean --force' 'git clean -d' 'git 
   check "deny: $c" deny "$(bp "$c" "$primary")"
 done
 
+# --- unknown directory, variables, wrapper bodies, temporary directories ---
+P="$primary"; W="$wt"
+reason_has() {  # NAME PAYLOAD REGEX
+  local out; out="$(printf '%s' "$2" | $gate 2>&1)"
+  if jq -e --arg re "$3" '.hookSpecificOutput.permissionDecisionReason | test($re)' <<<"$out" >/dev/null 2>&1; then
+    pass=$((pass + 1)); echo "ok   - $1"
+  else fail=$((fail + 1)); echo "FAIL - $1 (output: $out)"; fi
+}
+nest() { local c="$1" k; for k in $(seq "$2"); do c="$(printf '%s -c %q' "${3:-bash}" "$c")"; done; printf '%s' "$c"; }
+# plain resolvable assignments are judged like a literal path
+check "W=primary && cd \$W && commit denied" deny "$(bp "W=$P && cd \"\$W\" && git commit -m x" "$plain")"
+check "W=primary; git -C \$W commit denied" deny "$(bp "W=$P; git -C \"\$W\" commit -m x" "$plain")"
+check "W=worktree && cd \$W && commit allowed" allow "$(bp "W=$W && cd \"\$W\" && git commit -m x" "$primary")"
+check "W=worktree; git -C \$W commit allowed" allow "$(bp "W=$W; git -C \"\$W\" commit -m x" "$primary")"
+check "export W=primary; cd \$W; add denied" deny "$(bp "export W=$P; cd \"\$W\"; git add ." "$plain")"
+check "W=primary then relative cd below it denied" deny "$(bp "W=$P && cd \"\$W\" && cd src && git add ." "$plain")"
+reason_has "denial for an assigned primary path names the root" "$(bp "W=$P; git -C \"\$W\" commit -m x" "$plain")" "primary checkout of"
+# unknown directory: checkout-changing commands denied, with the new message
+check "cd \$ENV_VAR && commit denied" deny "$(bp 'cd "$ENV_VAR" && git commit -m x' "$plain")"
+check "git -C \$W (unset) commit denied" deny "$(bp 'git -C "$W2" commit -m x' "$wt")"
+check "unknown directory from a worktree cwd: git add denied" deny "$(bp 'cd "$X" && git add -A' "$wt")"
+check "(cd \$W && commit) denied" deny "$(bp '(cd "$W2" && git commit -m x)' "$plain")"
+check "pushd \$W && commit denied" deny "$(bp 'pushd "$W2" >/dev/null && git commit -m x' "$plain")"
+check "popd && commit denied" deny "$(bp 'popd && git commit -m x' "$plain")"
+check "cd \$(git rev-parse --show-toplevel) && commit denied" deny "$(bp 'cd $(git rev-parse --show-toplevel) && git commit -m x' "$plain")"
+check "git -C \$(...) unquoted commit denied" deny "$(bp 'git -C $(git rev-parse --show-toplevel) commit -m x' "$plain")"
+check "GIT_DIR=\$W commit denied" deny "$(bp 'GIT_DIR="$W2" git commit -m x' "$plain")"
+check "--git-dir=\$W commit denied" deny "$(bp 'git --git-dir="$W2" commit -m x' "$plain")"
+check "doubtful assignment is unknown: true && W=x; cd \$W denied" deny "$(bp "true && W=$wt; cd \"\$W\" && git commit -m x" "$plain")"
+check "conditional assignment is unknown denied" deny "$(bp "if true; then W=$wt; fi; cd \"\$W\" && git commit -m x" "$plain")"
+check "unknown directory then literal cd into a worktree allowed" allow "$(bp "cd \"\$X\" && cd $wt && git commit -m x" "$primary")"
+reason_has "unknown-directory denial says it could not tell the checkout" "$(bp 'cd "$X" && git commit -m x' "$plain")" "could not tell which checkout git commit runs in"
+reason_has "unknown-directory denial asks for a literal directory" "$(bp 'cd "$X" && git commit -m x' "$plain")" "Write the directory literally"
+reason_has "unknown-directory denial names the escape hatch" "$(bp 'cd "$X" && git commit -m x' "$plain")" "CLAUDE_WORKTREE_GATE=off"
+# explicit literal git directories stay allowed (as before)
+check "GIT_DIR=x commit (literal) still allowed" allow "$(bp 'GIT_DIR=x git commit -m x' "$primary")"
+check "--git-dir=x commit (literal) still allowed" allow "$(bp 'git --git-dir=x commit -m x' "$primary")"
+# env -C
+check "env -C primary commit denied" deny "$(bp "env -C $P git commit -m x" "$plain")"
+check "env -C worktree commit allowed" allow "$(bp "env -C $W git commit -m x" "$primary")"
+check "env -C \$W commit denied" deny "$(bp 'env -C "$W2" git commit -m x' "$plain")"
+check "env FOO=1 -C primary commit denied" deny "$(bp "env FOO=1 -C $P git commit -m x" "$plain")"
+check "env -C \$W status allowed (read-only)" allow "$(bp 'env -C "$W2" git status' "$plain")"
+# wrapper bodies
+check "bash -c commit in a primary cwd denied" deny "$(bp "bash -c 'git commit -m x'" "$primary")"
+check "bash -c commit in a worktree cwd allowed" allow "$(bp "bash -c 'git commit -m x'" "$wt")"
+check "bash -c cd primary && commit denied" deny "$(bp "bash -c 'cd $P && git commit -m x'" "$plain")"
+check "bash -c cd worktree && commit allowed" allow "$(bp "bash -c 'cd $W && git commit -m x'" "$primary")"
+check "bash -c cd \$W && commit denied" deny "$(bp "bash -c 'cd \"\$W2\" && git commit -m x'" "$plain")"
+check "sh -c commit in a primary cwd denied" deny "$(bp "sh -c 'git add -A'" "$primary")"
+check "eval commit in a primary cwd denied" deny "$(bp "eval 'git commit -m x'" "$primary")"
+check "eval cd worktree && commit allowed" allow "$(bp "eval 'cd $W && git commit -m x'" "$primary")"
+check "eval uses an earlier assignment (primary) denied" deny "$(bp "W=$P; eval 'cd \"\$W\" && git commit -m x'" "$plain")"
+check "bash -c cd inside does not leak out: later commit judged in the old directory" deny "$(bp "bash -c 'cd $W' && git commit -m x" "$primary")"
+check "three levels deep commit in a primary cwd denied" deny "$(bp "$(nest 'git commit -m x' 3)" "$primary")"
+check "three levels deep commit in a worktree cwd allowed" allow "$(bp "$(nest 'git commit -m x' 3 sh)" "$wt")"
+check "three levels deep cd primary then commit denied" deny "$(bp "$(nest "cd $P && git commit -m x" 3)" "$plain")"
+check "four levels deep is not followed (documented limit)" allow "$(bp "$(nest 'git commit -m x' 4)" "$primary")"
+check "bash script file allowed" allow "$(bp 'bash ./make.sh && git status' "$primary")"
+# temporary directories
+check "T=\$(mktemp -d) && cd \$T && commit allowed" allow "$(bp 'T=$(mktemp -d) && cd "$T" && git init -q && git commit -m x' "$primary")"
+check "T=\$(mktemp -d); git -C \$T commit allowed" allow "$(bp 'T=$(mktemp -d); git -C "$T" commit -m x' "$primary")"
+check "cd \"\$(mktemp -d)\" && commit allowed" allow "$(bp 'cd "$(mktemp -d)" && git commit -m x' "$primary")"
+check "git -C \"\$(mktemp -d)\" add allowed" allow "$(bp 'git -C "$(mktemp -d)" add -A' "$primary")"
+check "mktemp with options and a template allowed" allow "$(bp 'T=$(mktemp -d "${TMPDIR:-/tmp}/x.XXXXXX") && cd "$T" && git add .' "$primary")"
+check "mktemp backticks allowed" allow "$(bp 'T=`mktemp -d`; cd "$T" && git add .' "$primary")"
+check "temporary directory, relative cd below it allowed" allow "$(bp 'T=$(mktemp -d) && cd "$T" && mkdir a && cd a && git add .' "$primary")"
+check "git -C \$T/sub below a temporary directory allowed" allow "$(bp 'T=$(mktemp -d); git -C "$T/sub" add .' "$primary")"
+check "export T=\$(mktemp -d) allowed" allow "$(bp 'export T=$(mktemp -d); cd "$T" && git add .' "$primary")"
+check "quoted assignment T=\"\$(mktemp -d)\" allowed" allow "$(bp 'T="$(mktemp -d)"; cd "$T" && git add .' "$primary")"
+check "eval in a temporary directory allowed" allow "$(bp 'T=$(mktemp -d); eval "cd $T && git add ."' "$primary")"
+check "bash -c cd mktemp -d && commit allowed" allow "$(bp "bash -c 'cd \"\$(mktemp -d)\" && git commit -m x'" "$primary")"
+check "temporary directory then literal cd to primary denied" deny "$(bp "T=\$(mktemp -d) && cd \"\$T\" && cd $P && git commit -m x" "$plain")"
+check "temporary directory reassigned from a variable denied" deny "$(bp 'T=$(mktemp -d); T=$X; cd "$T" && git commit -m x' "$primary")"
+check "mktemp without -d (a file) denied" deny "$(bp 'T=$(mktemp); cd "$T" && git commit -m x' "$primary")"
+check "other variable than the temporary one denied" deny "$(bp 'T=$(mktemp -d); cd "$U" && git commit -m x' "$primary")"
+check "mktemp assignment after && following a command is doubtful, denied" deny "$(bp 'true && T=$(mktemp -d) && cd "$T" && git commit -m x' "$primary")"
+check "temporary directory scoped by a subshell: commit after it judged in cwd" deny "$(bp '(cd "$(mktemp -d)" && git init -q); git commit -m x' "$primary")"
+check "mktemp -d .. escape denied" deny "$(bp 'T=$(mktemp -d); cd "$T/../x" && git commit -m x' "$primary")"
+# read-only commands with an unknown directory stay silent
+for c in 'cd "$X" && git status' 'git -C "$X" log --oneline' 'git -C "$X" stash list' 'git -C "$X" add -n .' \
+  'cd "$X" && git diff' 'cd - && git fetch origin' 'git -C "$X" commit --dry-run' 'git -C "$X" clean -n' \
+  "bash -c 'cd \"\$X\" && git status'" 'GIT_DIR="$X" git log' 'env -C "$X" git branch' 'git -C "$X" commit --help' 'cd "$X" && git pull --ff-only'; do
+  silent "silent: $c" "$(bp "$c" "$primary")"
+done
+# text as data stays silent
+silent "echo of a git commit after an unknown cd is silent" "$(bp 'cd "$X" && echo "git commit -m x"' "$primary")"
+silent "heredoc body after an unknown cd is silent" "$(bp $'cd "$X" && cat <<EOF\ngit commit -m x\nEOF' "$primary")"
+silent "bash -c echo of a git commit is silent" "$(bp "bash -c 'cd \"\$X\" && echo \"git commit -m x\"'" "$primary")"
+silent "grep for git stash after an unknown cd is silent" "$(bp "cd \"\$X\" && grep -r 'git stash' ." "$primary")"
+silent "payload without a cwd and a plain commit is silent (fail open)" "$(jq -n '{tool_name:"Bash",tool_input:{command:"git commit -m x"}}')"
+silent "unparseable wrapper body is silent" "$(bp "bash -c 'git commit -m \\'oops'" "$primary")"
+# several commands on one line: any denial wins
+check "allowed worktree command then unknown-directory commit denied" deny "$(bp "git -C $wt commit -m a && cd \"\$X\" && git commit -m b" "$primary")"
+check "temporary and worktree commands only allowed" allow "$(bp "git -C $wt commit -m a && git -C \"\$(mktemp -d)\" commit -m b" "$primary")"
+
 # --- escape hatch ---
 edit_primary="$(fp "$primary/src/a.txt")"
 touch "$off"
 check "fresh off-file allows" allow "$edit_primary"
 check "fresh off-file allows Bash" allow "$(bp 'git commit -m x' "$primary")"
+check "fresh off-file allows an unknown-directory commit" allow "$(bp 'cd "$X" && git commit -m x' "$primary")"
 touch -d '13 hours ago' "$off"
 check "13h-old off-file does not allow" deny "$edit_primary"
 if printf '%s' "$edit_primary" | $gate | grep -q 'expired'; then pass=$((pass + 1)); echo "ok   - denial says the off-file expired"

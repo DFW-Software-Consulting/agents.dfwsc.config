@@ -48,6 +48,8 @@ Identify the distinct units of work and which agent owns each:
 
 Preserve leaf boundaries: implementation specialists may edit only within their own task and must not delegate. Use `executor` for mechanical work that no specialist owns; otherwise prefer the closest specialist.
 
+**Availability fallback:** Claude Code appears to cap how many custom agents get surfaced per session, so any of the above can occasionally be missing even though its definition is fine. If the Agent tool reports a table entry as not found, delegate that unit of work to `general-purpose` instead and continue — don't stall the workflow re-diagnosing it.
+
 ### 3. Spawn and delegate
 Tell the user what you're about to do before spawning:
 > "Delegating to `<agent>` for: <what it's doing>"

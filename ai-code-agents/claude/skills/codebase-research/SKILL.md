@@ -1,6 +1,6 @@
 ---
 name: codebase-research
-description: Use when mapping or researching a codebase to understand its structure, patterns, and architecture. Produces factual structural maps with ast-grep: no suggestions, recommendations, or opinions.
+description: "Use when mapping or researching a codebase to understand its structure, patterns, and architecture. Produces factual structural maps with ast-grep: no suggestions, recommendations, or opinions."
 ---
 
 # Codebase Research

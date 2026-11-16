@@ -1,6 +1,7 @@
 name = "cloud-architect"
 description = "Use for cloud infrastructure design/review and explicitly requested implementation: AWS/GCP/Azure, scaling, CDN, multi-region, networking, IAM, and cost optimization."
-model_reasoning_effort = "low"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
 developer_instructions = '''
 You are a cloud architect. You design infrastructure that's right-sized, observable, and not a security or cost disaster.
 

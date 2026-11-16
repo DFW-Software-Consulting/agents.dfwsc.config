@@ -48,31 +48,64 @@ export OPENAI_API_KEY=your-key-here
 
 ## Model Strategy
 
-Toggle Codex-only routing with `tools/codex-only.sh` (`on`/`off`). When OFF, every
-specialized agent keeps its existing non-Codex default and variants are left empty
-so providers use their own reasoning effort. When ON, all agents route through the
-GPT-5.6 family with explicit reasoning variants.
+Launch an isolated OpenCode instance with a provider-only model profile:
 
-| Tier | Model | Variant | Agents |
+```bash
+opencode [directory]         # Mixed OpenCode Go and Claude subagent team
+opencode-codex [directory]   # OpenAI Codex: Sol, Terra, and Luna
+opencode-go [directory]      # OpenCode Go models only
+opencode-claude [directory]  # Claude Agent: Opus, Sonnet, and Haiku
+```
+
+Each command passes additional arguments through to OpenCode and uses
+`--standalone` so its model environment cannot leak into another profile through
+the shared background service. Run any launcher with `--print-env` to inspect its
+complete assignment without starting OpenCode.
+
+New sessions use the profile-appropriate orchestrator primary agent. It
+classifies each work unit, selects the narrowest specialist, and therefore
+selects that specialist's model from the active profile. Fast lookup/check work
+uses the fast tier, normal analysis and review use balanced specialists, and
+implementation or high-risk work uses flagship specialists. Existing sessions
+retain their previously selected primary agent; start a new session to use
+automatic routing.
+
+Mixed `opencode` sessions use `orchestrator-mixed`. On an explicit provider
+quota, rate-limit, overload, or temporary model-capacity failure, it retries the
+same specialist at the equivalent tier on the other allowed provider. Subagents
+use only OpenCode Go and Claude: OpenCode Go → Claude or Claude → OpenCode Go.
+Each is attempted at most once per work unit, then the orchestrator stops and
+reports the capacity blocker. Provider-only launchers continue to use the strict
+`orchestrator` and never cross their provider boundary.
+
+The mixed profile keeps its conversational primary model independent, but does
+not assign that model to any subagent. Mixed subagent environment overrides are
+accepted only when they use an `opencode-go/*` or `claude-agent/*` model; the
+launcher exits before starting OpenCode if an override, `OPENCODE_FREE_MODEL`, or
+any subagent's config binding resolves to another provider or to nothing. At
+runtime, `plugins/mixed-model-guard` pins any unbound subagent to an allowed
+model, drops disallowed per-call subagent model overrides, and blocks any
+remaining non-allowed model request from a child session.
+
+| Profile | Flagship | Balanced | Fast |
 |---|---|---|---|
-| Free fast (Codex-off default) | `opencode/deepseek-v4-flash-free` | — | Main model, check |
-| Flagship reasoning | `openai/gpt-5.6-sol` | `high` | context-synthesis, frontend-developer, backend-architect, cloud-architect, database-optimizer, devops-troubleshooter, performance-engineer, executor |
-| Balanced reasoning | `openai/gpt-5.6-terra` | `medium` / `high` | codebase-analyzer, general, antipattern-sniffer, response-reviewer (`medium`); mobile-developer, deployment-engineer, test-automator, spec-reviewer (`high`) |
-| High-volume mechanical | `openai/gpt-5.6-luna-fast` | `none` / `low` | check (`none`); git-runner, codebase-locator, explore (`low`) |
+| Mixed (default) | OpenCode Go Qwen or Claude Opus | Claude Sonnet and OpenCode Go GLM/Kimi/MiniMax by specialty | OpenCode Go GLM Flash |
+| Codex | `openai/gpt-5.6-sol` | `openai/gpt-5.6-terra` | `openai/gpt-5.6-luna` |
+| OpenCode Go | `opencode-go/qwen3.8-max` | GLM, Kimi, MiMo, and MiniMax models | `opencode-go/glm-5.3-flash` |
+| Claude | `claude-agent/opus` | `claude-agent/sonnet` | `claude-agent/haiku` |
 
-The `max` and `xhigh` variants are intentionally unused by default; official guidance
-reserves them for eval-proven hardest workloads. See `tools/codex-only.sh` for the
-full per-agent `OPENCODE_*_MODEL` and `OPENCODE_*_VARIANT` exports.
+`tools/model-profile.sh` contains the complete per-agent assignments and allows
+environment-variable overrides for individual tiers.
 
 ## Agents
 
-See [agents/README.md](agents/README.md) for the full list and when to use each one.
+See the [`agents/`](agents/) directory for the active agent definitions and invocation guidance.
 
 ## Additional Resources
 
 - [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) — curated list of OpenCode plugins, skills, agents, and community resources
 - [plannotator](https://plannotator.ai) — visual plan review UI (already configured as a plugin)
-- [OpenCode docs](https://opencode.ai/docs)
+- [OpenCode V2 docs](https://opencode.ai/v2/docs/)
 
 | Command | What it does |
 |---|---|

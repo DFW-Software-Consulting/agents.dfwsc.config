@@ -1,7 +1,7 @@
 ---
 name: backend-architect
 model: sonnet
-effort: high
+effort: medium
 tools: Read, Glob, Grep, Write, Edit, Bash
 description: 'Use for backend design/review and explicitly requested backend implementation: APIs, services, boundaries, scalability, refactors, and operational patterns. Do not use for database-only tuning or frontend work. Suggested model: sonnet.'
 ---

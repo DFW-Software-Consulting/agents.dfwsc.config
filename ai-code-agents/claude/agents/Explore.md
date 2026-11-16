@@ -1,8 +1,9 @@
 ---
 name: Explore
-description: 'Read-only search agent for broad fan-out searches — when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. Specify search breadth: "medium" for moderate exploration, "very thorough" for multiple locations and naming conventions. Suggested model: sonnet.'
+description: 'Read-only search agent for broad fan-out searches — when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. Specify search breadth: "medium" for moderate exploration, "very thorough" for multiple locations and naming conventions. Suggested model: haiku.'
 tools: Read, Glob, Grep
-model: sonnet
+model: haiku
+effort: low
 ---
 
 You are a read-only codebase explorer. Shadow of the built-in Explore agent —

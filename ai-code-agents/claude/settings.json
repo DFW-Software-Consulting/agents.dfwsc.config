@@ -1,40 +1,12 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git branch:*)",
-      "Bash(git show:*)",
-      "Bash(git remote:*)",
-      "Bash(git stash list:*)",
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(grep:*)",
-      "Bash(rg:*)",
-      "Bash(find:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)",
-      "Bash(which:*)",
-      "Bash(jq:*)",
-      "Bash(npm run lint:*)",
-      "Bash(npm test:*)",
-      "Bash(npm run test:*)",
-      "Bash(npm run test:run:*)",
-      "Bash(npm run build:*)",
-      "Bash(npx tsc:*)",
-      "Bash(npx eslint:*)",
-      "Bash(npx biome:*)",
-      "Bash(make lint:*)",
-      "Bash(make test:*)",
-      "Bash(make fmt:*)",
-      "Bash(docker ps:*)",
-      "Bash(docker compose ps:*)",
-      "Bash(docker compose logs:*)"
-    ]
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
   },
-  "model": "claude-fable-5[1m]",
+  "permissions": {
+    "allow": []
+  },
+  "model": "sonnet",
+  "autoContinueAtUsageLimit": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -61,9 +33,52 @@
     }
   },
   "effortLevel": "xhigh",
+  "modelSettings": {
+    "claude-fable-5": {
+      "effortLevel": "xhigh"
+    }
+  },
   "tui": "fullscreen",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
   "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "Bash(supabase db push:*) in this repo when targeting the prod project ref",
+      "Bash(vercel --prod:*) or vercel deploy --prod for this project",
+      "Writes to supabase/baseline/2026-07-27-prod-*.sql or any future prod-* baseline file"
+    ],
+    "environment": [
+      "### Org-wide",
+      "**Organization**: Craft Digital (Craft-Digital-Ai GitHub org) — this repo (media-minefield-reporting-portal) only, per project scope",
+      "**Cloud provider(s)**: Supabase (project ref lfcinrrdygqcfwoywzqf, and api.supabase.com); Vercel (deployment host media-minefield-reporting-portal-*.vercel.app)",
+      "**Repository visibility**: Private (Craft-Digital-Ai/media-minefield-reporting-portal, confirmed via gh)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: CI secrets referenced: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_ID (names only); env vars via .env (gitignored, .env.example tracked)",
+      "**Default / protected branches**: Default branch main; no classic branch protection or rulesets listed via gh (rulesets may still apply at the org level and are not visible here)",
+      "**CI/CD deploy targets**: Vercel (media-minefield-reporting-portal-git-main-craft-digital-ai.vercel.app, media-minefield-reporting-portal-1fnaffw9z-craft-digital-ai.vercel.app); Supabase project lfcinrrdygqcfwoywzqf",
+      "**Network posture**: None configured",
+      "**Source control**: This repo and its origin remote only — github.com/Craft-Digital-Ai/media-minefield-reporting-portal (private)",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: Supabase project lfcinrrdygqcfwoywzqf.supabase.co; example.supabase.co (example/test host seen in usage); Vercel deployment hosts for this project",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: .env, .env.local, .env.local.remote-dev-backup (local secrets, gitignored); supabase/baseline/2026-07-27-prod-cross-schema-objects.sql and supabase/baseline/2026-07-27-prod-public-schema.sql (prod schema baselines); client PR/social report content and Media Minefield client data handled by this portal — share only with cleared Craft Digital / Media Minefield staff",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: Any namespace/host with 'prod' or 'production' as a whole word/segment — e.g. supabase/baseline/2026-07-27-prod-*.sql baselines and the prod Supabase/Vercel deployment for this project",
+      "**Protected deployment namespaces / environments**: Production Vercel deployment and prod Supabase project for media-minefield-reporting-portal (per Sensitive remote targets heuristic)",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything named/tagged prod or production — including the supabase/baseline/2026-07-27-prod-* SQL baselines in this repo",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development (this repo: media-minefield-reporting-portal, a client reporting portal for Media Minefield)",
+      "**Trusted repo**: /home/messyginger0804/craftDigital/media-minefield-reporting-portal and its origin remote github.com/Craft-Digital-Ai/media-minefield-reporting-portal (private) — confidential material is fine to commit here; content ported from other repos/hosts is not this repo's own work",
+      "**Org-specific CLIs**: supabase, vercel (seen frequently in this project's usage)"
+    ]
+  },
+  "voiceEnabled": true,
   "smallModel": "claude-haiku-4-5",
   "mcpServers": {
     "github": {

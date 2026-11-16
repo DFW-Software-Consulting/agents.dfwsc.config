@@ -12,13 +12,22 @@
       "npm": "@ai-sdk/anthropic",
       "name": "OpenCode Go",
       "options": {
-        "apiKey": "{env:OPENCODE_GO_API_KEY}",
-        "baseURL": "https://opencode.ai/zen/go/v1/messages"
+        "baseURL": "https://opencode.ai/zen/go/v1"
       }
     }
   },
-  "model": "opencode/deepseek-v4-flash-free",
+  "default_agent": "{env:OPENCODE_DEFAULT_AGENT}",
+  "model": "{env:OPENCODE_PRIMARY_MODEL}",
+  "small_model": "{env:OPENCODE_SMALL_MODEL}",
   "agent": {
+    "build": {
+      "model": "{env:OPENCODE_PRIMARY_MODEL}",
+      "variant": "{env:OPENCODE_PRIMARY_VARIANT}"
+    },
+    "plan": {
+      "model": "{env:OPENCODE_PLAN_MODEL}",
+      "variant": "{env:OPENCODE_PLAN_VARIANT}"
+    },
     "working": {
       "permission": {
         "bash": {
@@ -37,7 +46,12 @@
     "git-runner": {
       "mode": "subagent",
       "model": "{env:OPENCODE_LOCATOR_MODEL}",
-      "variant": "{env:OPENCODE_LOCATOR_VARIANT}"
+      "variant": ""
+    },
+    "sql-runner": {
+      "mode": "subagent",
+      "model": "{env:OPENCODE_LOCATOR_MODEL}",
+      "variant": ""
     },
     "check": {
       "mode": "subagent",
@@ -72,6 +86,14 @@
       "model": "{env:OPENCODE_BACKEND_MODEL}",
       "variant": "{env:OPENCODE_BACKEND_VARIANT}"
     },
+    "backend-fix-workunit": {
+      "model": "{env:OPENCODE_BACKEND_MODEL}",
+      "variant": "{env:OPENCODE_BACKEND_VARIANT}"
+    },
+    "frontend-fix-workunit": {
+      "model": "{env:OPENCODE_FRONTEND_MODEL}",
+      "variant": "{env:OPENCODE_FRONTEND_VARIANT}"
+    },
     "cloud-architect": {
       "model": "{env:OPENCODE_CLOUD_MODEL}",
       "variant": "{env:OPENCODE_CLOUD_VARIANT}"
@@ -101,16 +123,14 @@
       "variant": "{env:OPENCODE_EXECUTOR_VARIANT}"
     },
     "general": {
+      "mode": "subagent",
       "model": "{env:OPENCODE_GENERAL_MODEL}",
       "variant": "{env:OPENCODE_GENERAL_VARIANT}"
     },
     "explore": {
+      "mode": "subagent",
       "model": "{env:OPENCODE_EXPLORE_MODEL}",
       "variant": "{env:OPENCODE_EXPLORE_VARIANT}"
-    },
-    "response-reviewer": {
-      "model": "{env:OPENCODE_RESPONSE_REVIEWER_MODEL}",
-      "variant": "{env:OPENCODE_RESPONSE_REVIEWER_VARIANT}"
     },
     "spec-reviewer": {
       "model": "{env:OPENCODE_SPEC_REVIEWER_MODEL}",
@@ -123,12 +143,24 @@
       {
         "workflow": "manual"
       }
-    ]
+    ],
+    "file:///home/messyginger0804/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/free-mode.ts",
+    "file:///home/messyginger0804/dfwsc/agents.dfwsc.config/ai-code-agents/opencode/plugins/mixed-model-guard"
   ],
   "mcp": {
+    "read-ai": {
+      "type": "remote",
+      "url": "https://api.read.ai/mcp",
+      "enabled": true
+    },
+    "calcom": {
+      "type": "remote",
+      "url": "https://mcp.cal.com/mcp",
+      "enabled": true
+    },
     "github": {
       "type": "local",
-      "enabled": false,
+      "enabled": true,
       "command": [
         "sh",
         "/home/messyginger0804/.config/opencode/github-mcp.sh"
@@ -139,29 +171,13 @@
         "GH_TOKEN": "{env:GITHUB_TOKEN}"
       }
     },
-    "dfwsc": {
-      "type": "local",
-      "enabled": false,
-      "command": [
-        "node",
-        "/home/messyginger0804/dfwsc/dfwsc-mcp/src/index.js"
-      ],
-      "environment": {
-        "COOLIFY_URL": "{env:COOLIFY_URL}",
-        "COOLIFY_TOKEN": "{env:COOLIFY_TOKEN}",
-        "NEXTCLOUD_URL": "{env:NEXTCLOUD_URL}",
-        "NEXTCLOUD_USER": "{env:NEXTCLOUD_USER}",
-        "NEXTCLOUD_PASSWORD": "{env:NEXTCLOUD_PASSWORD}",
-        "GITHUB_TOKEN": "{env:GITHUB_TOKEN}",
-        "GITHUB_OWNER": "{env:GITHUB_OWNER}",
-        "GITHUB_REPO": "{env:GITHUB_REPO}"
-      }
-    },
     "nextcloud": {
       "type": "local",
-      "enabled": false,
+      "enabled": true,
       "command": [
         "uvx",
+        "--with",
+        "importlib-metadata",
         "nextcloud-mcp-server",
         "run",
         "--transport",
@@ -176,14 +192,11 @@
     "stripe": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@stripe/mcp"
+        "sh",
+        "-c",
+        ". \"$HOME/.secrets\"; exec npx -y @stripe/mcp"
       ],
-      "enabled": true,
-      "environment": {
-        "STRIPE_SECRET_KEY": "{env:STRIPE_SECRET_KEY}"
-      }
+      "enabled": true
     },
     "coolify": {
       "type": "local",
@@ -196,6 +209,77 @@
         "COOLIFY_BASE_URL": "{env:COOLIFY_URL}",
         "COOLIFY_ACCESS_TOKEN": "{env:COOLIFY_TOKEN}"
       }
+    },
+    "supabase": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--read-only",
+        "--project-ref=ojdjvnvtuhzolcpqdmju"
+      ],
+      "environment": {
+        "SUPABASE_ACCESS_TOKEN": "{env:SUPABASE_ACCESS_TOKEN}"
+      }
+    },
+    "slack": {
+      "type": "remote",
+      "enabled": true,
+      "url": "https://mcp.slack.com/mcp",
+      "oauth": {
+        "client_id": "{file:~/.config/opencode/secrets/slack-client-id}",
+        "client_secret": "{file:~/.config/opencode/secrets/slack-client-secret}",
+        "scope": "canvases:read canvases:write channels:history channels:read channels:write chat:write emoji:read files:read files:write groups:history groups:read groups:write im:history im:read im:write lists:read lists:write mpim:history mpim:read mpim:write reactions:read reactions:write search:read.files search:read.im search:read.mpim search:read.private search:read.public search:read.users users:read users:read.email",
+        "callback_port": 19876,
+        "redirect_uri": "http://127.0.0.1:19876/callback"
+      }
+    },
+    "supabase-oauth": {
+      "type": "remote",
+      "enabled": false,
+      "url": "https://mcp.supabase.com/mcp?project_ref=ojdjvnvtuhzolcpqdmju&read_only=true",
+      "oauth": {}
+    },
+    "playwright": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--user-data-dir",
+        "/home/messyginger0804/.config/opencode/browser-profile",
+        "--output-dir",
+        "/home/messyginger0804/.config/opencode/browser-output"
+      ]
+    },
+    "vercel": {
+      "type": "remote",
+      "url": "https://mcp.vercel.com",
+      "enabled": true
+    },
+    "cloudflare": {
+      "type": "remote",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "enabled": true
+    },
+    "brain": {
+      "type": "remote",
+      "url": "https://brain.craftdigital.dev/api/mcp",
+      "enabled": true,
+      "oauth": {},
+      "timeout": 90000
+    },
+    "brain-local": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "bun",
+        "run",
+        "/home/messyginger0804/.config/opencode/tools/brain-mcp.ts"
+      ]
     }
   }
 }

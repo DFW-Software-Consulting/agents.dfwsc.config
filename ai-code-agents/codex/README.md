@@ -13,6 +13,19 @@ This directory contains DFWSC Codex setup material using Codex-native locations.
 | `skills/*/SKILL.md` | `~/.agents/skills/*/SKILL.md` | Shared Agent Skills |
 | `commands/` | Not linked by default | Mirrored Claude/OpenCode command source layout |
 
+## Model Strategy
+
+Codex agent configs assume the local Codex model cache includes the GPT-5.6
+family (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`). Each agent now has an
+explicit `model` and `model_reasoning_effort`.
+
+| Tier | Model | Effort | Agents |
+|---|---|---|---|
+| Complex planning / orchestration | `gpt-5.6-sol` | `high` | `planner`, `orchestrator` |
+| Complex specialists | `gpt-5.6-sol` | `medium` | `frontend-developer`, `backend-architect`, `cloud-architect`, `database-optimizer`, `devops-troubleshooter`, `performance-engineer`, `context-synthesis`, `executor` |
+| Balanced analysis / review / mobile / deploy / test | `gpt-5.6-terra` | `medium` | `codebase-analyzer`, `antipattern-sniffer`, `code-reviewer`, `response-reviewer`, `spec-reviewer`, `mobile-developer`, `deployment-engineer`, `test-automator`, `working` |
+| Mechanical / high-volume | `gpt-5.6-luna` | `low` | `check`, `codebase-locator`, `git-workflow` |
+
 ## Setup
 
 From the repository root:

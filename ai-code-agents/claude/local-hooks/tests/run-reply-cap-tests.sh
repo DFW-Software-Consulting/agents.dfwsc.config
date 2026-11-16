@@ -68,12 +68,12 @@ expect_stop "fallback: junk lines skipped" "$(fb "$tr_dir/short.jsonl" "b7-$run"
 
 # --- approval phrases set a marker ---
 n=0
-yes_phrases=("go long" "No Limit" "give me the full writeup" "FULL WRITE-UP please" "I need more detail." "expand" "  Expand  " " Expand. " "explain the gate, go long" "go long on this one" "in more detail please." "Tell me about it, Full Write-Up, thanks!" $'first line\ngo long\nlast line' $'do the thing\n  More detail.  \nok' $'```\nx\n```\ngo long' "GO LONG")
+yes_phrases=("go long" "No Limit" "give me the full writeup" "FULL WRITE-UP please" "I need more detail." "expand" "  Expand  " " Expand. " "explain the gate, go long" "Go long: what does the gate do?" "go long, explain the gate" "Go long. Explain." "go long - explain" "go long — explain" "go long! explain" "no limit." "More detail?" "go long thanks" $'more detail\nthe rest of it' $'a\nb\nc\nd\nmore detail' $'explain X\n\ngo long\n' $'a\nb\nc\nd\ne \nmore detail' "in more detail please." "Tell me about it, Full Write-Up, thanks!" $'```\nx\n```\ngo long' "GO LONG")
 for ph in "${yes_phrases[@]}"; do
   n=$((n + 1)); s="ph$n-$run"; call "$pr" "$(up "$ph" "$s")"
   [ "$rc" -eq 0 ] && [ "$(cat "$(marker "$s")" 2>/dev/null)" = oneshot ] && ok "phrase sets one-shot marker: '$ph'" || bad "phrase '$ph'" "rc=$rc out=$out"
 done
-no_phrases=("expand the function" "going longer" "no limits" "more details" "please explain" "nolimit" "add more detail to the docs" "there is no limit on retries" "what is the rate limit on this API" "we should go long on the stock" $'say go long here\nand more' $'```\ngo long\n```\nhello' $'before\n```\nmore detail\n```' "expand it please" "set the limit off for the rate limiter" "go long-term")
+no_phrases=("go long on this one" "more detail is needed in the docs, can you fix" "no limit on retries should be set" "go long-term plan" "go long -x" $'a\nb\nmore detail\nd\ne' $'first line\ngo long\nlast line' $'do the thing\n  More detail.  \nok' "expand the function" "going longer" "no limits" "more details" "please explain" "nolimit" "add more detail to the docs" "there is no limit on retries" "what is the rate limit on this API" "we should go long on the stock" $'say go long here\nand more' $'```\ngo long\n```\nhello' $'before\n```\nmore detail\n```' "expand it please" "set the limit off for the rate limiter" "go long-term")
 for ph in "${no_phrases[@]}"; do
   n=$((n + 1)); s="np$n-$run"; call "$pr" "$(up "$ph" "$s")"
   [ ! -e "$(marker "$s")" ] && ok "no marker for '$ph'" || bad "unexpected marker for '$ph'"
@@ -105,7 +105,7 @@ call "$pr" "$(up "now fix the bug" "$s")"
 expect_stop "stale one-shot: long reply to unrelated prompt blocked" "$(stop "$long" "$s")" block
 s="st2-$run"; call "$pr" "$(up "limit off" "$s")"; call "$pr" "$(up "fix the bug" "$s")"
 [ "$(cat "$(marker "$s")")" = session ] && ok "session approval survives later prompts" || bad "session approval lost"
-s="st3-$run"; call "$pr" "$(up "go long" "$s")"; call "$pr" "$(up "go long again" "$s")"
+s="st3-$run"; call "$pr" "$(up "go long" "$s")"; call "$pr" "$(up "go long, again" "$s")"
 [ "$(cat "$(marker "$s")")" = oneshot ] && ok "new approving prompt re-arms the one-shot" || bad "re-arm"
 
 # --- reminders ---

@@ -8,11 +8,13 @@
 # (scratchpad_dir is deliberately not used: it may not be in every payload).
 
 REPLY_CAP_CHARS=1200
-# Phrases that approve one long reply (case-insensitive, whole phrase). They
-# count only at the very start or very end of the prompt (trailing punctuation,
-# "please" and "thanks" ignored) or alone on a line; never inside a fenced code
-# block. "expand", "limit off" and "limit on" count only as the whole prompt
-# (trailing punctuation ignored).
+# Phrases that approve one long reply (case-insensitive, whole phrase, never
+# inside a fenced code block). A one-shot phrase counts when the prompt is just
+# the phrase; or ends with it (after whitespace/punctuation); or starts with it
+# followed directly by . , : ; ! ? or a dash with a space, or a line break; or
+# it is alone on the first or last line. Trailing punctuation, "please" and
+# "thanks" are ignored. "expand", "limit off" and "limit on" count only as the
+# whole prompt (trailing punctuation ignored).
 REPLY_CAP_ONESHOT_PHRASES="go long|no limit|full writeup|full write-up|more detail"
 REPLY_CAP_SESSION_ON_PHRASE="limit off"
 REPLY_CAP_SESSION_OFF_PHRASE="limit on"
@@ -35,15 +37,16 @@ reply_cap_classify() {
     expand) echo oneshot; return ;;
   esac
   first="$(printf '%s\n' "$t" | sed -E '/^[[:space:]]*$/d' | head -n 1 | sed -E 's/^[[:space:]]+//')"
-  if printf '%s\n' "$first" | grep -qE "^($REPLY_CAP_ONESHOT_PHRASES)([^a-z0-9-]|\$)"; then echo oneshot; return; fi
+  if printf '%s\n' "$first" | grep -qE "^($REPLY_CAP_ONESHOT_PHRASES)( ?(-|–|—) |[.,:;!?]|\$)"; then echo oneshot; return; fi
   last="$(printf '%s\n' "$t" | sed -E '/^[[:space:]]*$/d' | tail -n 1 | reply_cap_strip_tail)"
   if printf '%s\n' "$last" | grep -qE "(^|[^a-z0-9])($REPLY_CAP_ONESHOT_PHRASES)\$"; then echo oneshot; return; fi
-  while IFS= read -r line; do
+  # Alone on the first or last line.
+  for line in "$first" "$last"; do
     line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//' | reply_cap_strip_tail)"
     case "$line" in
       "go long"|"no limit"|"full writeup"|"full write-up"|"more detail") echo oneshot; return ;;
     esac
-  done <<<"$t"
+  done
   echo none
 }
 

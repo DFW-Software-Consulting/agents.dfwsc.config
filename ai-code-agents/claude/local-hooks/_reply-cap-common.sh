@@ -16,6 +16,16 @@ REPLY_CAP_CHARS=1200
 # "thanks" are ignored. "expand", "limit off" and "limit on" count only as the
 # whole prompt (trailing punctuation ignored).
 REPLY_CAP_ONESHOT_PHRASES="go long|no limit|full writeup|full write-up|more detail"
+# Second group, "ask for more" requests: each phrase is itself a request for a
+# longer answer, so its START rule is looser than for the group above: besides
+# the end of the prompt or a delimiter (. , : ; ! ? spaced dash, newline), the
+# phrase may be followed by whitespace and one of REPLY_CAP_ASKMORE_CONTINUATIONS
+# as a whole word ("elaborate on the gate"). Any other word after it does not
+# count ("explain this more clearly"). Whole prompt, end of prompt and alone on
+# the first or last line work as for the group above. A phrase in the middle of
+# a sentence never counts.
+REPLY_CAP_ASKMORE_PHRASES="explain this more|explain that more|explain more|tell me more|elaborate"
+REPLY_CAP_ASKMORE_CONTINUATIONS="on|about|please|further"
 REPLY_CAP_SESSION_ON_PHRASE="limit off"
 REPLY_CAP_SESSION_OFF_PHRASE="limit on"
 
@@ -47,6 +57,9 @@ reply_cap_classify() {
       "go long"|"no limit"|"full writeup"|"full write-up"|"more detail") echo oneshot; return ;;
     esac
   done
+  # Second group: looser start rule (see REPLY_CAP_ASKMORE_PHRASES).
+  if printf '%s\n' "$first" | grep -qE "^($REPLY_CAP_ASKMORE_PHRASES)(( ?(-|–|—) |[.,:;!?]|\$)| ($REPLY_CAP_ASKMORE_CONTINUATIONS)([^a-z0-9-]|\$))"; then echo oneshot; return; fi
+  if printf '%s\n' "$last" | grep -qE "(^|[^a-z0-9])($REPLY_CAP_ASKMORE_PHRASES)\$"; then echo oneshot; return; fi
   echo none
 }
 

@@ -62,6 +62,41 @@ def git(d, *args):
     return r.stdout.decode("utf-8", errors="replace")
 
 
+def git_capped(d, cap, *args):
+    """Like git(), but reads at most cap bytes. Returns (text, truncated);
+    (None, False) on failure, timeout or an exhausted budget. A reader that
+    stops early kills the child, so a huge diff is never read in full."""
+    import threading
+    left = BUDGET - (time.monotonic() - _START)
+    if left <= 0 or not d:
+        return None, False
+    try:
+        proc = subprocess.Popen(["git", "-C", d, "-c", "core.quotepath=off", *args],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=GIT_ENV)
+    except Exception:
+        return None, False
+    timer = threading.Timer(min(PER_CALL, left), proc.kill)
+    timer.start()
+    try:
+        data = proc.stdout.read(cap + 1)
+        truncated = len(data) > cap
+        if truncated:
+            proc.kill()
+        proc.stdout.close()
+        rc = proc.wait()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return None, False
+    finally:
+        timer.cancel()
+    if not truncated and rc != 0:
+        return None, False
+    return data[:cap].decode("utf-8", errors="replace"), truncated
+
+
 def toplevel(d):
     if not d or not os.path.isdir(d):
         return None

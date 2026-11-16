@@ -58,6 +58,22 @@ SLACK="xo""xb-""0000000000-FAKEFAKEFAKE"
 PRIV="-----BEGIN ""RSA PRIVATE KEY-----"
 SK="s""k-""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
 [ "${#GHP}" -eq 40 ] || { echo "bad fake ghp length ${#GHP}"; exit 2; }
+GHO="gh""o_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHU="gh""u_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHS="gh""s_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHR="gh""r_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+SKANT="s""k-ant-""api03-FAKEFAKEFAKEFAKEFAKE"
+SKPROJ="s""k-proj-""FAKEFAKEFAKEFAKEFAKEFAKE"
+SKLIVE="s""k_live_""FAKEFAKEFAKEFAKEFAKEFAKE"
+RKLIVE="r""k_live_""FAKEFAKEFAKEFAKEFAKEFAKE"
+AIZA="AI""za""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAK"
+AWS_EXAMPLE="AK""IAIOSFODNN7""EXAMPLE"                # the provider's documented example key
+HEX40="$(printf 'a1b2c3d4e5%.0s' 1 2 3 4)"
+UUID="123e4567-e89b-12d3-a456-426614174000"
+INTEGRITY="sha512-$(printf 'Zm9vYmFy%.0s' 1 2 3 4 5 6 7 8 9 10 11)=="
+[ "${#AIZA}" -eq 39 ] && [ "${#GHO}" -eq 40 ] && [ "${#HEX40}" -eq 40 ] && [ "${#AWS_EXAMPLE}" -eq 20 ] || { echo "bad fake length"; exit 2; }
+# values that look key-like but are not secrets
+FALSE_POSITIVES=("class=\"sk-card-body-layout-with-long-hyphenated-name-and-more-words\"" "risk-$HEX40" "task-$HEX40" "disk-$HEX40" "commit $HEX40" "id $UUID" "\"integrity\": \"$INTEGRITY\"" "key $AWS_EXAMPLE")
 
 # --- fixtures ---
 T="$(mktemp -d "$HOME/t.XXXXXX")"
@@ -84,7 +100,7 @@ conf() { printf '%s\n' "$@" > "$CLAUDE_GIT_GATES_CONF"; }
 noconf() { rm -f "$CLAUDE_GIT_GATES_CONF"; }
 
 # --- secret file names: staged, commit -a, same-line add, add -A ---
-names=(.env .env.local .env.production server.pem tls.key id_rsa id_rsa_work id_ed25519 id_ed25519.pub credentials.json cert.p12 cert.pfx sub/dir/.env sub/x.pem)
+names=(.env .env.local .env.production server.pem tls.key id_rsa id_rsa_work id_ed25519 credentials.json cert.p12 cert.pfx sub/dir/.env sub/x.pem)
 for f in "${names[@]}"; do
   newrepo; mkdir -p "$(dirname "$R/$f")"; echo "v=1" > "$R/$f"; git -C "$R" add -f "$f"
   check "staged $f denied" deny "$(bp 'git commit -m "feat: x"')"
@@ -165,8 +181,8 @@ newrepo; echo "a" > "$R/f"; printf '<<<<<<< HEAD\n=======\n>>>>>>> b\n' > "$R/a.
 check "markers only in context, not in added lines, allowed" allow "$(bp 'git commit -m "feat: x"')"
 
 # --- secrets in staged content ---
-declare -A SECRETS=([aws]="$AWS" [ghp]="$GHP" [ghpat]="$GHPAT" [slack]="$SLACK" [priv]="$PRIV" [sk]="$SK")
-for k in aws ghp ghpat slack priv sk; do
+declare -A SECRETS=([aws]="$AWS" [ghp]="$GHP" [ghpat]="$GHPAT" [slack]="$SLACK" [priv]="$PRIV" [sk]="$SK" [gho]="$GHO" [ghu]="$GHU" [ghs]="$GHS" [ghr]="$GHR" [skant]="$SKANT" [skproj]="$SKPROJ" [sklive]="$SKLIVE" [rklive]="$RKLIVE" [aiza]="$AIZA")
+for k in aws ghp ghpat slack priv sk gho ghu ghs ghr skant skproj sklive rklive aiza; do
   v="${SECRETS[$k]}"
   newrepo; printf 'token = "%s"\n' "$v" > "$R/app.py"; git -C "$R" add app.py
   check "$k secret in staged content denied" deny "$(bp 'git commit -m "feat: x"')"
@@ -198,6 +214,66 @@ check "clean -F message file allowed" allow "$(bp "git commit -F $T/clean.txt")"
 check "key-like text that is too short allowed" allow "$(bp 'git commit -m "feat: AKIA is a prefix, sk-short, xoxb- and ghp_ are prefixes"')"
 newrepo; printf 'AKIA and sk-short and ghp_ here\n' > "$R/n.py"; git -C "$R" add n.py
 check "short prefixes in content allowed" allow "$(bp 'git commit -m "feat: x"')"
+
+# --- public keys, env-var tokens, the example key, look-alikes ---
+for f in id_rsa.pub id_ed25519.pub deploy.pub keys/work.pub; do
+  newrepo; mkdir -p "$(dirname "$R/$f")"; echo "ssh-ed25519 AAAA fake" > "$R/$f"; git -C "$R" add "$f"
+  check "staged public key $f allowed" allow "$(bp 'git commit -m "feat: x"')"
+done
+for tok in '${NPM_TOKEN}' '$NPM_TOKEN' '"${NPM_TOKEN}"'; do
+  newrepo; printf '//registry.example.invalid/:_%s=%s\n' authToken "$tok" > "$R/.npmrc"; git -C "$R" add .npmrc
+  check ".npmrc with an env-var token ($tok) allowed" allow "$(bp 'git commit -m "feat: x"')"
+done
+newrepo; printf '//a.example.invalid/:_%s=${NPM_TOKEN}\n//b.example.invalid/:_%s=fakefake\n' authToken authToken > "$R/.npmrc"; git -C "$R" add .npmrc
+check ".npmrc with one env-var and one literal token denied" deny "$(bp 'git commit -m "feat: x"')"
+newrepo; printf 'k = "%s"\n' "$AWS_EXAMPLE" > "$R/app.py"; git -C "$R" add app.py
+check "the documented example access key in content allowed" allow "$(bp 'git commit -m "feat: x"')"
+check "the documented example access key in the message allowed" allow "$(bp "git commit -m 'feat: docs use $AWS_EXAMPLE'")"
+for fp in "${FALSE_POSITIVES[@]}"; do
+  newrepo; printf '%s\n' "$fp" > "$R/app.py"; git -C "$R" add app.py
+  check "look-alike in content allowed: ${fp:0:24}" allow "$(bp 'git commit -m "feat: x"')"
+  check "look-alike in the message allowed: ${fp:0:24}" allow "$(bp "git commit -m 'feat: $(printf '%s' "$fp" | tr -d "'\"")'")"
+done
+
+# --- path-limited commits (only the named paths are committed) ---
+newrepo; echo "ok" > "$R/a.py"; echo "ok" > "$R/b.py"; git -C "$R" add a.py b.py; git -C "$R" commit -qm "feat: ab"
+printf 'k = "%s"\n' "$AWS" > "$R/a.py"; echo "fine" >> "$R/b.py"
+check "named path with an unstaged secret denied" deny "$(bp 'git commit -m "feat: x" a.py')"
+reason_has "path-limited denial names the file" "$(bp 'git commit -m "feat: x" a.py')" 'secret-in-content.*a\.py'
+check "path-limited commit of a different clean file allowed" allow "$(bp 'git commit -m "feat: x" b.py')"
+git -C "$R" add a.py
+check "staged secret in another file is not committed by a path-limited commit" allow "$(bp 'git commit -m "feat: x" b.py')"
+check "-i with a path commits the staged files too" deny "$(bp 'git commit -i -m "feat: x" b.py')"
+check "--include with a path commits the staged files too" deny "$(bp 'git commit --include -m "feat: x" b.py')"
+newrepo; echo "v=1" > "$R/.env"; echo y > "$R/ok.py"
+check "named untracked .env denied by name" deny "$(bp 'git commit -m "feat: x" .env')"
+newrepo; printf 'k = "%s"\n' "$AWS" > "$R/new.py"; echo y > "$R/ok.py"
+check "named untracked file with a secret denied" deny "$(bp 'git commit -m "feat: x" new.py')"
+check "named path after -- denied" deny "$(bp 'git commit -m "feat: x" -- new.py')"
+newrepo; mkdir "$R/dir"; printf 'k = "%s"\n' "$AWS" > "$R/dir/new.py"
+check "named directory with an untracked secret denied" deny "$(bp 'git commit -m "feat: x" dir')"
+newrepo; printf '<<<<<<< a\nx\n=======\ny\n>>>>>>> b\n' > "$R/c.py"
+check "named untracked file with conflict markers denied" deny "$(bp 'git commit -m "feat: x" c.py')"
+newrepo; echo "v=1" > "$R/.env"; echo y > "$R/g.py"
+check "glob pathspec on a commit finds a secret file" deny "$(bp "git commit -m 'feat: x' '.env*'")"
+
+# --- same-line add with a glob or a non-literal argument ---
+newrepo; echo "v=1" > "$R/.env.local"; echo y > "$R/g.py"
+check "git add with a glob matching a secret file denied" deny "$(bp "git add '.env*' && git commit -m 'feat: x'")"
+check "git add with a glob matching nothing secret allowed" allow "$(bp "git add '*.py' && git commit -m 'feat: x'")"
+check "git add with a variable argument is treated like add -A" deny "$(bp 'git add $FILES && git commit -m "feat: x"')"
+check "git add with a substitution argument is treated like add -A" deny "$(bp 'git add $(ls) && git commit -m "feat: x"')"
+newrepo; printf 'k = "%s"\n' "$AWS" > "$R/g.py"
+check "git add of a glob stages content that is scanned" deny "$(bp "git add '*.py' && git commit -m 'feat: x'")"
+newrepo; echo y > "$R/g.py"
+check "git add with a variable argument and a clean tree allowed" allow "$(bp 'git add $FILES && git commit -m "feat: x"')"
+
+# --- short-flag clusters with attached values ---
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env; git -C "$R" commit -qf -m "feat: env" 2>/dev/null; git -C "$R" commit -qm "feat: env" 2>/dev/null
+echo "v=2" > "$R/.env"
+check "-Skeya is a key id, not -a (modified .env not committed)" allow "$(bp 'git commit -Skeya -m "feat: x"')"
+check "-uno is a mode, not flags" allow "$(bp 'git commit -uno -m "feat: x"')"
+check "-a before -S still counts as -a" deny "$(bp 'git commit -aSkey -m "feat: x"')"
 
 # --- 3 MB staged diff skips the content scan ---
 newrepo
@@ -336,7 +412,7 @@ check "warning with quotes in the subject is valid JSON" warn "$(bp "git commit 
 
 # --- the hook never changes a repo ---
 newrepo; touch "$R/commitlint.config.js"; echo "v=1" > "$R/.env"; echo n > "$R/new.txt"; echo m >> "$R/f"; git -C "$R" add .env commitlint.config.js
-snap() { echo "$(git -C "$R" rev-parse HEAD) $(git -C "$R" status --porcelain | md5sum) $(git -C "$R" ls-files -s | md5sum) $(stat -c %Y-%s "$R/.git/index") $(git -C "$R" for-each-ref | md5sum) $(find "$R/.git" -type f -newer "$R/.git/index" | wc -l)"; }
+snap() { echo "$(git -C "$R" rev-parse HEAD) $(GIT_OPTIONAL_LOCKS=0 git -C "$R" status --porcelain | md5sum) $(git -C "$R" ls-files -s | md5sum) $(stat -c %Y-%s "$R/.git/index") $(git -C "$R" for-each-ref | md5sum) $(find "$R/.git" -type f -newer "$R/.git/index" | wc -l)"; }
 before="$(snap)"
 for c in 'git commit -m "feat: x"' 'git commit -am "Fixed stuff."' "git add -A && git commit -m x" 'git commit --amend --no-edit' 'git commit --dry-run -m x'; do
   printf '%s' "$(bp "$c")" | $gate >/dev/null 2>&1

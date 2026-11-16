@@ -22,6 +22,7 @@
 # Config (data only, never sourced): ${CLAUDE_GIT_GATES_CONF:-~/.claude/git-gates.conf};
 # see git-gates.conf.example. Escape hatch: CLAUDE_PR_GATE=off.
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 payload="$(cat)"
 command -v jq >/dev/null 2>&1 || exit 0
 jq -e 'type == "object"' >/dev/null 2>&1 <<<"$payload" || exit 0

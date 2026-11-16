@@ -8,7 +8,9 @@ queries, under a small time budget. Every failure path prints nothing.
 
 Hard rules (deny): secret files, conflict markers, secrets in staged content or
 in the message. Warn only: subject format, where the repo already follows it.
-Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
+Limits (fail open): `bash -c '...'` bodies and shell aliases are not parsed; a
+same-line `git add` with a non-literal argument is treated like `git add -A`;
+the content scan is skipped when the diff passes 2 MB. Commands come from _git-cmd-scan.py (directory handling, `cd`, `-C`); message
 extraction reuses commit_texts()/split_heredocs() from _public-text-check.py.
 """
 import fnmatch
@@ -40,7 +42,7 @@ def parse_commit(args):
     """Flags that matter: all (-a), amend, no_edit, fixup (--fixup/--squash),
     reuse (-C/-c), and literal path arguments."""
     o = {"all": False, "amend": False, "no_edit": False, "fixup": False,
-         "reuse": False, "paths": []}
+         "reuse": False, "include": False, "paths": []}
     i, only_paths = 0, False
     while i < len(args):
         a = args[i]
@@ -60,14 +62,20 @@ def parse_commit(args):
                 o["fixup"] = True
             elif name == "--reuse-message":
                 o["reuse"] = True
+            elif name == "--include":
+                o["include"] = True
             if name in VALUE_LONG and "=" not in a:
                 i += 1
         elif a.startswith("-") and len(a) > 1:
             for k, ch in enumerate(a[1:]):
                 if ch == "a":
                     o["all"] = True
+                if ch == "i":
+                    o["include"] = True
                 if ch in "Cc":
                     o["reuse"] = True
+                if ch in "Su":
+                    break  # -S<keyid>, -u<mode>: the rest of the cluster is a value
                 if ch in VALUE_SHORT:
                     if k == len(a) - 2:
                         i += 1  # value is the next word
@@ -80,24 +88,36 @@ def parse_commit(args):
 
 def secret_name(path):
     name = os.path.basename(path).lower()
-    if name in ENV_EXAMPLES:
-        return None
+    if name in ENV_EXAMPLES or name.endswith(".pub"):
+        return None  # templates and public keys are not secrets
     for pat in SECRET_NAMES:
         if fnmatch.fnmatchcase(name, pat):
             return pat
     return None
 
 
+NPMRC_CAP = 65536
+SAFE_TOKEN = re.compile(r"""^["']?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?["']?$""")
+
+
 def read_text(top, path, staged):
     if staged:
-        out = L.git(top, "show", ":" + path)
+        out, _ = L.git_capped(top, NPMRC_CAP, "show", ":" + path)
         if out is not None:
             return out
     try:
         with open(os.path.join(top, path), encoding="utf-8", errors="replace") as f:
-            return f.read()
+            return f.read(NPMRC_CAP)
     except OSError:
         return ""
+
+
+def npmrc_has_token(text):
+    """True when an _authToken has a literal value (not an env var reference)."""
+    for m in re.finditer(r"_authToken\s*=\s*(\S+)", text):
+        if not SAFE_TOKEN.match(m.group(1)):
+            return True
+    return False
 
 
 def lines_z(out):
@@ -141,7 +161,12 @@ def add_targets(top, add_cmd):
         if p == ".":
             all_mode = True
             continue
-        if not L_literal(p):
+        if not p or "$" in p or "`" in p:
+            all_mode = True  # cannot be read literally: consider everything
+            continue
+        if has_glob(p):
+            out = L.git(d, "ls-files", "-z", "-m", "-o", "--exclude-standard", "--full-name", "--", p)
+            found.extend(lines_z(out))
             continue
         ab = p if os.path.isabs(p) else os.path.join(d, p)
         ab = os.path.realpath(ab)
@@ -159,8 +184,34 @@ def add_targets(top, add_cmd):
     return found, all_mode, update
 
 
+def has_glob(p):
+    return any(c in p for c in "*?[")
+
+
 def L_literal(p):
-    return bool(p) and not any(c in p for c in "*?[$`")
+    return bool(p) and not has_glob(p) and "$" not in p and "`" not in p
+
+
+def named_paths(top, d, named):
+    """Paths named on `git commit <paths>`: files, directory contents (modified
+    or untracked) and glob pathspecs, as repo-relative paths."""
+    real_top, out = os.path.realpath(top), []
+    for p in named:
+        if not p or "$" in p or "`" in p:
+            continue
+        if has_glob(p):
+            out.extend(lines_z(L.git(d, "ls-files", "-z", "-m", "-o", "--exclude-standard",
+                                     "--full-name", "--", p)))
+            continue
+        ab = os.path.realpath(p if os.path.isabs(p) else os.path.join(d, p))
+        rel = os.path.relpath(ab, real_top)
+        if rel.startswith(".."):
+            continue
+        if os.path.isdir(ab):
+            out.extend(lines_z(L.git(top, "ls-files", "-z", "-m", "-o", "--exclude-standard", "--", rel)))
+        elif os.path.isfile(ab):
+            out.append(rel)
+    return out
 
 
 def added_by_file(diff):
@@ -220,18 +271,20 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
     def put(p, src):
         paths.setdefault(p, src)
 
-    staged = lines_z(L.git(top, "diff", "--cached", "--name-only", "-z", "--diff-filter=d"))
-    for p in staged:
-        put(p, "staged")
+    # `git commit <paths>` commits the working-tree content of those paths only,
+    # not the rest of the index, unless -i/--include or -a is given.
+    only_mode = bool(o["paths"]) and not o["all"] and not o["include"]
+    staged = []
+    if not only_mode:
+        staged = lines_z(L.git(top, "diff", "--cached", "--name-only", "-z", "--diff-filter=d"))
+        for p in staged:
+            put(p, "staged")
     if o["all"]:
         for p in lines_z(L.git(top, "diff", "--name-only", "-z", "--diff-filter=d")):
             put(p, "modified (commit -a)")
-    for p in o["paths"]:
-        if L_literal(p):
-            ab = os.path.realpath(p if os.path.isabs(p) else os.path.join(d, p))
-            rel = os.path.relpath(ab, real_top)
-            if not rel.startswith("..") and os.path.isfile(ab):
-                put(rel, "named on the commit")
+    named = named_paths(top, d, o["paths"]) if o["paths"] else []
+    for p in named:
+        put(p, "named on the commit")
     for a in adds:
         if not a["dir"] or L.toplevel(a["dir"]) is None:
             continue
@@ -256,36 +309,55 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
             denials.append(
                 f"commit-gate (secret-file): {p} ({src}) matches the secret-file name pattern {pat}. "
                 f"Unstage it (git restore --staged {p}) or add it to .gitignore.")
-        elif os.path.basename(p).lower() == ".npmrc" and "_authToken" in read_text(top, p, p in staged):
+        elif os.path.basename(p).lower() == ".npmrc" and npmrc_has_token(read_text(top, p, p in staged)):
             denials.append(
-                f"commit-gate (secret-file): {p} ({src}) is an .npmrc containing _authToken. "
+                f"commit-gate (secret-file): {p} ({src}) is an .npmrc with a literal _authToken. "
                 f"Unstage it (git restore --staged {p}) or add it to .gitignore.")
 
-    # Rules 2 and 3 on content
-    diff = L.git(top, "diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-                 "--src-prefix=a/", "--dst-prefix=b/") or ""
+    # Rules 2 and 3 on content, read with a 2 MB cap in total
+    diff_args = ["-U0", "--no-color", "--no-ext-diff", "--no-textconv",
+                 "--src-prefix=a/", "--dst-prefix=b/"]
+    used, over = [0], [False]
+
+    def gd(*extra):
+        if over[0]:
+            return ""
+        out, trunc = L.git_capped(top, MAX_DIFF + 1 - used[0], "diff", *diff_args, *extra)
+        if trunc:
+            over[0] = True
+        used[0] += len(out or "")
+        return out or ""
+
+    diffs = []
+    if not only_mode:
+        diffs.append(gd("--cached"))
     if o["all"]:
-        diff += "\n" + (L.git(top, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-                              "--src-prefix=a/", "--dst-prefix=b/") or "")
-    # Content of files a same-line `git add` is about to stage (not in the index yet).
-    add_paths = [p for p, src in paths.items() if src.startswith("git add")]
+        diffs.append(gd())
+    # Files a same-line `git add` or a path-limited commit takes from the working tree.
+    wt_paths = [p for p, src in paths.items() if src.startswith("git add") or src == "named on the commit"]
     extra = {}
-    if add_paths:
+    if wt_paths:
         tracked = set(lines_z(L.git(top, "ls-files", "-z")))
-        tr = [p for p in add_paths if p in tracked]
+        tr = [p for p in wt_paths if p in tracked]
         if tr:
-            diff += "\n" + (L.git(top, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-                                   "--src-prefix=a/", "--dst-prefix=b/", "--", *tr) or "")
-        for p in add_paths:
-            if p not in tracked:
+            if only_mode:
+                diffs.append(gd("HEAD", "--", *tr))
+            else:
+                diffs.append(gd("--", *tr))
+        for p in wt_paths:
+            if p not in tracked and not over[0]:
                 try:
                     with open(os.path.join(top, p), "rb") as f:
-                        raw = f.read(MAX_DIFF + 1)
+                        raw = f.read(MAX_DIFF + 1 - used[0])
                 except OSError:
                     continue
-                if b"\0" not in raw[:8000] and len(raw) <= MAX_DIFF:
+                used[0] += len(raw)
+                if used[0] > MAX_DIFF:
+                    over[0] = True
+                elif b"\0" not in raw[:8000]:
                     extra[p] = raw.decode("utf-8", errors="replace").split("\n")
-    if len(diff) <= MAX_DIFF:
+    diff = "\n".join(diffs)
+    if not over[0]:
         files = added_by_file(diff)
         for p, lines in extra.items():
             files.setdefault(p, []).extend(lines)

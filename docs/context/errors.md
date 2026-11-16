@@ -17,6 +17,10 @@ Newest first. Check here before proposing a fix.
 - Signature: agent prose says "use the X skill", the agent has an explicit `tools:` list without `Skill`, and it improvises instead of following the skill.
 - Cause: such an agent cannot invoke skills, and prose delivers no skill content. Only names in the agent's `skills:` frontmatter list are injected, in full, at start. A wrong name is skipped with no error, and a skill with `disable-model-invocation: true` cannot be preloaded.
 - Fix: list the skills under `skills:` in the agent frontmatter; run `run-agent-skills-tests.sh` to catch a mistyped name.
+## pr-gate denies a pushed branch as "not pushed" (pr-gate.sh, `_pr-gate-check.py` `rule_a`)
+- Signature: `pr-gate (not-pushed): branch <name> has <N> unpushed commits (ahead of origin/main)` right after `git push origin <name>`, for a branch made with `git worktree add -b <name> <path> origin/main`.
+- Cause: that branch tracks `origin/main`, and a plain push (no `-u`) leaves the upstream unchanged, so counting `<name>@{u}..HEAD` counted the whole branch.
+- Fix: judge `refs/remotes/<push remote>/<name>` first (push remote: `branch.<name>.pushRemote`, `remote.pushDefault`, the branch's remote, else origin); fall back to the upstream only when it is not the remote's default branch; an upstream that is the default branch, or none, means not pushed.
 - Date: 2026-11-15
 
 ## Force push runs after approving a lease push (git-guard.sh, `_git-guard-check.py` `judge`)

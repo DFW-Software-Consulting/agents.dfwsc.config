@@ -20,6 +20,7 @@
 # ~/.claude/git-guard.off (path overridable with CLAUDE_GIT_GUARD_OFF_FILE; expires
 # after 12 hours). If _gate-common.sh is missing the gate stays ON.
 set -uo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 payload="$(cat)"
 command -v jq >/dev/null 2>&1 || exit 0
 jq -e 'type == "object"' >/dev/null 2>&1 <<<"$payload" || exit 0

@@ -37,8 +37,9 @@ An empty `committed` list from git-commit continues the chain. git-pr reads the 
 | No coding-agent credit in commit or `gh pr` text | `hooks/no-agent-mention.py` |
 | No private hostnames, addresses or emails in text on public repos | public-repo-text-gate.sh |
 | Checks pass for the current commit before push or PR create | checks-gate.sh reads the stamp git-verify writes (warn or deny by its config) |
-| Secret files, conflict markers | no hook yet; git-commit skips secret-looking files and blocks on conflict markers. Commit subject format: no hook, skill follows the repo's style |
-| PR size cap, PR body sections, branch pushed before PR | skill only: git-pr warns on size and checks `pushed` and `push_ahead` |
+| Secret files, conflict markers, secrets in staged content or the message | commit-gate.sh denies them; git-commit also skips secret-looking files and blocks on conflict markers. Commit subject format: commit-gate warns only, where the repo already follows the convention. Takes effect once the hook is registered |
+| Branch pushed before PR, secrets in PR or issue text | pr-gate.sh denies (judged from `<push remote>/<branch>`); git-pr also checks `pushed` and `push_ahead`. Takes effect once the hook is registered |
+| PR size cap, PR body sections, unfilled placeholders | pr-gate.sh warns (or denies by `PR_GATE_MODE`); git-pr also warns on size. Takes effect once the hook is registered |
 
 Repository hooks (husky, lint-staged, commitlint) run once, inside `git commit` and `git push`; no skill runs them by hand. No skill edits source files.
 

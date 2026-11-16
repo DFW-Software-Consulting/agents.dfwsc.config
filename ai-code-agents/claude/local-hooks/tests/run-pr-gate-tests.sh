@@ -54,6 +54,22 @@ GHPAT="github""_pat_""FAKEFAKEFAKEFAKEFAKEFAKE"
 SLACK="xo""xb-""0000000000-FAKEFAKEFAKE"
 PRIV="-----BEGIN ""RSA PRIVATE KEY-----"
 SK="s""k-""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHO="gh""o_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHU="gh""u_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHS="gh""s_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+GHR="gh""r_""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+SKANT="s""k-ant-""api03-FAKEFAKEFAKEFAKEFAKE"
+SKPROJ="s""k-proj-""FAKEFAKEFAKEFAKEFAKEFAKE"
+SKLIVE="s""k_live_""FAKEFAKEFAKEFAKEFAKEFAKE"
+RKLIVE="r""k_live_""FAKEFAKEFAKEFAKEFAKEFAKE"
+AIZA="AI""za""FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAK"
+AWS_EXAMPLE="AK""IAIOSFODNN7""EXAMPLE"                # the provider's documented example key
+HEX40="$(printf 'a1b2c3d4e5%.0s' 1 2 3 4)"
+UUID="123e4567-e89b-12d3-a456-426614174000"
+INTEGRITY="sha512-$(printf 'Zm9vYmFy%.0s' 1 2 3 4 5 6 7 8 9 10 11)=="
+[ "${#AIZA}" -eq 39 ] && [ "${#GHO}" -eq 40 ] && [ "${#HEX40}" -eq 40 ] && [ "${#AWS_EXAMPLE}" -eq 20 ] || { echo "bad fake length"; exit 2; }
+# values that look key-like but are not secrets
+FALSE_POSITIVES=("class=\"sk-card-body-layout-with-long-hyphenated-name-and-more-words\"" "risk-$HEX40" "task-$HEX40" "disk-$HEX40" "commit $HEX40" "id $UUID" "\"integrity\": \"$INTEGRITY\"" "key $AWS_EXAMPLE")
 
 # --- fixtures ---
 T="$(mktemp -d "$HOME/t.XXXXXX")"
@@ -103,17 +119,42 @@ check "--head branch judges that branch (pushed, in sync)" allow "$(bp "$(prc 'b
 git -C "$R" checkout -q main
 check "head equal to the default branch denied" deny "$(bp "$(prc 'body text')")"
 reason_has "head-is-base denial names the rule" "$(bp "$(prc 'body text')")" 'head-is-base'
-check "--base naming the current branch denied" deny "$(bp "$(prc 'body text' '--base feature')" "$R")"
 git -C "$R" checkout -q feature
+check "--base naming the current branch denied" deny "$(bp "$(prc 'body text' '--base feature')" "$R")"
 check "--head names a branch with no upstream denied" deny "$(git -C "$R" branch -q unpushed; bp "$(prc 'body text' '--head unpushed')")"
 check "gh pr edit is not subject to the push rule" allow "$(git -C "$R" checkout -q local-only; bp 'gh pr edit 5 --body "body text"')"
 git -C "$R" checkout -q feature
 check "gh issue create is not subject to the push rule" allow "$(git -C "$R" checkout -q local-only; bp 'gh issue create --title "t" --body "body text"')"
 git -C "$R" checkout -q feature
 
+# --- rule A: upstream is the default branch (worktree add -b x origin/main) ---
+newrepo; git -C "$R" checkout -q -b wt origin/main
+[ "$(git -C "$R" rev-parse --abbrev-ref wt@{u})" = "origin/main" ] || { echo "fixture: wt should track origin/main"; exit 2; }
+echo w > "$R/w.txt"; git -C "$R" add -A; git -C "$R" commit -qm "wt work"
+check "never pushed, upstream is the default branch: denied" deny "$(bp "$(prc 'body text')")"
+reason_has "that denial says the branch is not pushed" "$(bp "$(prc 'body text')")" 'not-pushed.*not pushed to origin.*upstream is the default branch'
+git -C "$R" push -q origin wt
+check "pushed with a plain push, upstream still the default branch: allowed" allow "$(bp "$(prc 'body text')")"
+echo w2 >> "$R/w.txt"; git -C "$R" commit -qam "wt more"
+check "pushed, then one commit ahead of origin/wt: denied" deny "$(bp "$(prc 'body text')")"
+reason_has "the ahead denial counts commits against the pushed ref" "$(bp "$(prc 'body text')")" '1 unpushed commit.*origin/wt'
+git -C "$R" push -q origin wt
+check "pushed again: allowed" allow "$(bp "$(prc 'body text')")"
+newrepo; git -C "$R" checkout -q -b wt2 origin/main; echo w > "$R/w.txt"; git -C "$R" add -A; git -C "$R" commit -qm "w"
+git -C "$R" push -q origin wt2:other-name; git -C "$R" branch -q -u origin/other-name
+check "differently named upstream in sync: allowed" allow "$(bp "$(prc 'body text')")"
+echo w2 >> "$R/w.txt"; git -C "$R" commit -qam "w2"
+check "differently named upstream, one commit ahead: denied" deny "$(bp "$(prc 'body text')")"
+reason_has "that denial names the upstream" "$(bp "$(prc 'body text')")" '1 unpushed commit.*origin/other-name'
+newrepo; git -C "$R" checkout -q -b wt3 origin/main; git -C "$R" config branch.wt3.pushRemote origin
+echo w > "$R/w.txt"; git -C "$R" add -A; git -C "$R" commit -qm "w"; git -C "$R" push -q origin wt3
+check "pushRemote configured and pushed: allowed" allow "$(bp "$(prc 'body text')")"
+newrepo; git -C "$R" checkout -q -b wt4 origin/main
+check "upstream is the default branch and nothing new committed: denied (not pushed)" deny "$(bp "$(prc 'body text')")"
+
 # --- rule B: secrets in title and body ---
 newrepo
-for kv in "aws:$AWS" "ghp:$GHP" "ghpat:$GHPAT" "slack:$SLACK" "priv:$PRIV" "sk:$SK"; do
+for kv in "aws:$AWS" "ghp:$GHP" "ghpat:$GHPAT" "slack:$SLACK" "priv:$PRIV" "sk:$SK" "gho:$GHO" "ghu:$GHU" "ghs:$GHS" "ghr:$GHR" "skant:$SKANT" "skproj:$SKPROJ" "sklive:$SKLIVE" "rklive:$RKLIVE" "aiza:$AIZA"; do
   k="${kv%%:*}"; v="${kv#*:}"
   check "$k secret in the body denied" deny "$(bp "$(prc "token $v here")")"
   reason_has "$k body denial shows the first 6 characters only" "$(bp "$(prc "token $v here")")" "secret-in-text.*body.*${v:0:6}\\.\\.\\."
@@ -127,6 +168,11 @@ done
 check "secret in a -t/-b cluster form denied" deny "$(bp "gh pr create -t 'x' -b 'y $AWS'")"
 check "secret in --body= form denied" deny "$(bp "gh pr create --title x --body='y $AWS'")"
 check "a hard secret rule denies even in warn mode" deny "$(bp "$(prc "$AWS")")"
+check "pr edit --title alone: a secret in the title denied" deny "$(bp "gh pr edit 3 --title 'fix $AWS'")"
+check "pr edit --title alone: a clean title allowed" allow "$(bp "gh pr edit 3 --title 'fix things'")"
+for fp in "${FALSE_POSITIVES[@]}"; do
+  check "look-alike in a body allowed: ${fp:0:24}" allow "$(bp "$(prc "$(printf '%s' "$fp" | tr -d "'\"")")")"
+done
 check "short key prefixes allowed" allow "$(bp "$(prc 'AKIA and sk-short and xoxb- and ghp_ are only prefixes')")"
 
 # --- rule C: required sections, template locations and letter case ---
@@ -391,7 +437,7 @@ check "denial with quotes in the text is valid JSON" deny "$(bp "gh pr create --
 # --- the hook never changes a repo ---
 newrepo; mktemplate .github/pull_request_template.md; commit_lines "$R" big.txt 30; echo dirty >> "$R/f"; echo new > "$R/untracked.txt"
 conf 'LOC_CAP=5'
-snap() { echo "$(git -C "$R" rev-parse HEAD) $(git -C "$R" status --porcelain | md5sum) $(git -C "$R" ls-files -s | md5sum) $(stat -c %Y-%s "$R/.git/index") $(git -C "$R" for-each-ref | md5sum) $(git -C "$R" config --list | md5sum) $(find "$R/.git" -type f -newer "$R/.git/index" | wc -l)"; }
+snap() { echo "$(git -C "$R" rev-parse HEAD) $(GIT_OPTIONAL_LOCKS=0 git -C "$R" status --porcelain | md5sum) $(git -C "$R" ls-files -s | md5sum) $(stat -c %Y-%s "$R/.git/index") $(git -C "$R" for-each-ref | md5sum) $(git -C "$R" config --list | md5sum) $(find "$R/.git" -type f -newer "$R/.git/index" | wc -l)"; }
 before="$(snap)"
 for c in "$(prc 'x')" "$(prc "$GOOD")" "gh issue create --title t --body x" 'gh pr edit 2 --body "x"' "$(prc 'x' '--head feature')"; do
   printf '%s' "$(bp "$c")" | $gate >/dev/null 2>&1

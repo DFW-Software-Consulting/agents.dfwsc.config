@@ -10,7 +10,9 @@ local git queries, under a small time budget. Every failure path prints nothing.
 Hard rules (always deny): A head branch pushed and in sync (pr create), B secrets
 in title or body. Soft rules (warn, or deny in deny mode): C required template
 sections, D unfilled template placeholders, E size cap; F is the issue variant
-of C and D. gh commands and their directory come from find_hits() in
+of C and D. Limits: rule A is skipped on a detached HEAD; a template heading with
+an empty section still passes; `bash -c '...'` bodies and shell aliases are not
+parsed. gh commands and their directory come from find_hits() in
 _public-text-check.py; flags are parsed here.
 """
 import datetime
@@ -99,6 +101,9 @@ def parse_gh(args, cmddir, bodies, used, ptc):
                 o["repo"] = v
         i += 1
     if body_src is None:
+        if kind == "pr" and sub == "edit" and o["title"] and "$(" not in o["title"] \
+                and "`" not in o["title"]:
+            return o, None  # title only: still checked for secrets
         return None, "no body"
 
     def heredoc():
@@ -264,11 +269,23 @@ def rule_a(top, o):
     if base and branch == base:
         return (f"pr-gate (head-is-base): the head branch {branch} is the base branch. "
                 f"Create a feature branch, push it, then open the pull request.")
-    up = L.git(top, "rev-parse", "--abbrev-ref", "--symbolic-full-name", f"{branch}@{{u}}")
-    if up is None or not up.strip():
-        return (f"pr-gate (not-pushed): branch {branch} has no upstream. "
-                f"Push it first (git push -u origin {branch}) and retry.")
-    ahead = L.git(top, "rev-list", "--count", f"{branch}@{{u}}..{ref}")
+    remote = push_remote(top, branch)
+    pushed = f"refs/remotes/{remote}/{branch}"
+    if L.git(top, "rev-parse", "-q", "--verify", pushed) is not None:
+        cmp_ref, label = pushed, f"{remote}/{branch}"
+    else:
+        # Never pushed under this name. A deliberately differently named upstream
+        # counts; the remote's default branch (set by `worktree add -b x origin/main`)
+        # or no upstream means the branch is not pushed.
+        up = (L.git(top, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                    f"{branch}@{{u}}") or "").strip()
+        dname = default_name(top, remote)
+        if not up or up in (f"{remote}/{dname}", dname):
+            return (f"pr-gate (not-pushed): branch {branch} is not pushed to {remote} "
+                    f"({'its upstream is the default branch' if up else 'no upstream'}). "
+                    f"Push it first (git push -u {remote} {branch}) and retry.")
+        cmp_ref, label = f"{branch}@{{u}}", up
+    ahead = L.git(top, "rev-list", "--count", f"{cmp_ref}..{ref}")
     try:
         n = int((ahead or "").strip())
     except ValueError:
@@ -276,8 +293,26 @@ def rule_a(top, o):
     if n > 0:
         s = "" if n == 1 else "s"
         return (f"pr-gate (not-pushed): branch {branch} has {n} unpushed commit{s} "
-                f"(ahead of {up.strip()}). Push first, then retry.")
+                f"(ahead of {label}). Push first, then retry.")
     return None
+
+
+def push_remote(top, branch):
+    """Remote the branch pushes to: pushRemote, remote.pushDefault, the branch's
+    remote, else origin."""
+    for key in (f"branch.{branch}.pushRemote", "remote.pushDefault", f"branch.{branch}.remote"):
+        v = (L.git(top, "config", "--get", key) or "").strip()
+        if v and v != ".":
+            return v
+    return "origin"
+
+
+def default_name(top, remote):
+    ref = (L.git(top, "symbolic-ref", "--short", "-q", f"refs/remotes/{remote}/HEAD") or "").strip()
+    if ref:
+        return ref.split("/", 1)[-1]
+    name, _ = L.default_ref(top)
+    return name or "main"
 
 
 def changed_lines(top, o):
@@ -327,6 +362,11 @@ def judge(o, d, cfg):
         if not flag_slug or not dir_slug or flag_slug.lower() != dir_slug.lower():
             return hard, soft  # target repository is not this directory's
     body, title = o["body"], o["title"]
+    if body is None:  # gh pr edit --title: only the title is judged
+        for kind, first in L.find_secrets(title):
+            hard.append(f"pr-gate (secret-in-text): the title contains a {kind} ({first}...). "
+                        f"Remove it before posting.")
+        return hard, soft
     is_pr, create = o["kind"] == "pr", o["sub"] == "create"
 
     if is_pr and create:

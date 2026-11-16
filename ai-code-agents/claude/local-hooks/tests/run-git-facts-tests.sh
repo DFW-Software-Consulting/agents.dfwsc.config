@@ -112,14 +112,35 @@ git -C "$r" worktree add -q -b dn "$T/pub-dn" origin/main 2>/dev/null
 git -C "$r" push -q origin dn:other 2>/dev/null; git -C "$r" fetch -q origin
 git -C "$T/pub-dn" branch -q -u origin/other
 eq "differently named upstream" "$(f "$T/pub-dn" .upstream)" '"origin/other"'
-eq "differently named upstream counts as pushed" "$(f "$T/pub-dn" .pushed)" true
-eq "differently named upstream push_ref" "$(f "$T/pub-dn" .push_ref)" '"origin/other"'
+eq "differently named upstream alone is not pushed" "$(f "$T/pub-dn" .pushed)" false
+eq "differently named upstream: push_ref null" "$(f "$T/pub-dn" .push_ref)" null
 git -C "$T/pub-nb" config branch.nb.pushRemote fork
 eq "pushRemote setting wins" "$(f "$T/pub-nb" .push_remote)" '"fork"'
 eq "no remote branch under that remote: not pushed" "$(f "$T/pub-nb" .pushed)" false
 eq "no remote: not pushed" "$(f "$(mkrepo nopush)" .pushed)" false
 git -C "$r" checkout -q --detach
 eq "detached: not pushed" "$(f "$r" .pushed)" false
+
+# --- cut from a non-default remote branch ---
+git -C "$r" push -q origin main:develop 2>/dev/null; git -C "$r" fetch -q origin
+git -C "$r" worktree add -q -b feat-dev "$T/pub-dev" origin/develop 2>/dev/null
+commit "$T/pub-dev" dev-work a.txt
+eq "cut from develop: upstream is develop" "$(f "$T/pub-dev" .upstream)" '"origin/develop"'
+eq "cut from develop, never pushed: not pushed" "$(f "$T/pub-dev" .pushed)" false
+git -C "$T/pub-dev" push -q origin feat-dev 2>/dev/null
+eq "cut from develop, plain push: pushed" "$(f "$T/pub-dev" .pushed)" true
+eq "cut from develop, plain push: in sync" "$(f "$T/pub-dev" .push_ahead)" 0
+
+# --- push remote selection ---
+r="$(mkrepo oneremote)"; git init -q --bare "$T/oneremote.git"
+git -C "$r" remote add upstream "$T/oneremote.git"
+eq "single non-origin remote is used" "$(f "$r" .push_remote)" '"upstream"'
+git init -q --bare "$T/second.git"; git -C "$r" remote add other "$T/second.git"
+eq "several remotes, no origin: no push remote" "$(f "$r" .push_remote)" null
+eq "several remotes, no origin: not pushed" "$(f "$r" .pushed)" false
+git -C "$r" remote add origin "$T/second.git"
+eq "origin preferred when present" "$(f "$r" .push_remote)" '"origin"'
+eq "no remotes: no push remote" "$(f "$(mkrepo noremote)" .push_remote)" null
 
 # --- default branch ---
 eq "default branch from origin/HEAD" "$(git -C "$r" remote set-head origin main >/dev/null 2>&1; f "$r" .default_branch)" '"main"'

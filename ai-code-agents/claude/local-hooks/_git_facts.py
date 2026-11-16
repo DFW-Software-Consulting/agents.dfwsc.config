@@ -158,11 +158,12 @@ def counts(root, ref):
     return None, None
 
 
-def push_state(root, branch, upstream, default):
-    """Is the branch published? Looks at the same-name remote branch first.
+def push_state(root, branch, remotes):
+    """Is the branch published? True only when <push remote>/<branch> exists.
 
-    A branch made from origin/<default> tracks the default branch, which says
-    nothing about being pushed; a branch pushed without -u has no upstream.
+    A branch cut from any remote branch tracks that branch, which says nothing
+    about being pushed, and a branch pushed without -u has no upstream, so the
+    upstream is never used here.
     """
     out = {"push_remote": None, "push_ref": None, "pushed": False,
            "push_ahead": None, "push_behind": None}
@@ -170,16 +171,18 @@ def push_state(root, branch, upstream, default):
         return out
     remote = (git(root, "config", "branch." + branch + ".pushRemote")
               or git(root, "config", "remote.pushDefault")
-              or git(root, "config", "branch." + branch + ".remote")
-              or "origin")
-    if remote == ".":
-        remote = "origin"
+              or git(root, "config", "branch." + branch + ".remote"))
+    if not remote or remote == ".":
+        if "origin" in remotes:
+            remote = "origin"
+        elif len(remotes) == 1:
+            remote = remotes[0]
+        else:
+            return out
     out["push_remote"] = remote
     ref = remote + "/" + branch
     if git(root, "rev-parse", "--verify", "-q", "refs/remotes/" + ref) is None:
-        if not upstream or upstream.split("/", 1)[-1] == default:
-            return out
-        ref = upstream
+        return out
     out["push_ref"] = ref
     out["pushed"] = True
     out["push_ahead"], out["push_behind"] = counts(root, ref)
@@ -208,9 +211,9 @@ def main(argv):
     upstream = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}") if branch else None
     ahead = behind = None
     if upstream:
-        counts = git(root, "rev-list", "--left-right", "--count", "HEAD...@{u}")
-        if counts and len(counts.split()) == 2:
-            ahead, behind = (int(x) for x in counts.split())
+        pair = git(root, "rev-list", "--left-right", "--count", "HEAD...@{u}")
+        if pair and len(pair.split()) == 2:
+            ahead, behind = (int(x) for x in pair.split())
     status = git(root, "status", "--porcelain")
     gitdir = git(root, "rev-parse", "--absolute-git-dir")
     common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -232,7 +235,7 @@ def main(argv):
         "upstream": upstream,
         "ahead": ahead,
         "behind": behind,
-        **push_state(root, branch, upstream, default),
+        **push_state(root, branch, remotes),
         "clean": status == "" if status is not None else None,
         "linked_worktree": bool(gitdir and common and
                                 os.path.realpath(gitdir) != os.path.realpath(common)),

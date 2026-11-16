@@ -34,12 +34,19 @@ levels deep, at the position of the wrapper, in the directory in effect there,
             then its prefix assignments; a wrapper's are inherited by its body)
   config    [(key, value)] from `git -c key=value`
   depth     0 on the line itself, 1 to 3 inside wrapper bodies
+trace(cmd, cwd) is the same walk for callers that also need each command's
+certain variables and the text of every followed body (additive; walk() is
+unchanged).
 Raises Budget when the line has more than MAX_CMDS commands to follow or the
 analysis takes longer than BUDGET_SECS: the caller then applies only rules that
 need no directory (see cheap_commands). legacy=True is not bounded.
 
 A variable resolves only from a standalone, plain-literal assignment certain to
-have run (certain_env); anything doubtful is unknown. Command prefixes
+have run (certain_env); anything doubtful is unknown. A value counts as a plain
+literal only through certain_literal: no `$`, backtick, glob, brace, bracket,
+backslash escape, `:~`, `<(`/`>(` or foreign tilde form (quoting is not tracked, so a
+quoted value with brackets or braces is unknown too); a later assignment of any other value makes
+the name unknown, never its earlier value. Command prefixes
 (`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
 effective(entry) is the one place that turns an entry into the directory to
 judge. Never runs anything and never touches a repository.
@@ -266,6 +273,15 @@ def prefix_env(toks, idx):
     return [tuple(toks[p][1].partition("=")[::2]) for p in sorted(idx) if scan.bwc.ASSIGN.match(toks[p][1])]
 
 
+def certain_literal(v):
+    """True when assigning v gives exactly the text v: no expansion of any kind
+    (`$`, backtick, glob, brace, bracket, `:~`, a tilde form other than a bare `~` or
+    `~/...`; process substitution is caught where the tokens are read). Anything else makes the name unknown."""
+    if not scan.literal(v) or ":~" in v or any(c in v for c in "{}[]\\"):
+        return False
+    return not v.startswith("~") or v == "~" or v.startswith("~/")
+
+
 def certain_env(toks, i, temps=None, taint=False):
     """{NAME: literal value} for names certain to hold that value when the
     command at toks[i] expands its words. A name qualifies only through a
@@ -305,7 +321,7 @@ def certain_env(toks, i, temps=None, taint=False):
             for x in body:
                 k, _, v = x.partition("=")
                 fresh = k not in poison
-                if unsafe or not scan.literal(v) or k in poison:
+                if unsafe or not certain_literal(v) or k in poison:
                     bad(k)
                     if fresh and not unsafe and not taint and (mk == k or mktemp_word(v)):
                         temps.add(k)
@@ -335,20 +351,24 @@ def certain_env(toks, i, temps=None, taint=False):
             if "TMPDIR" in t:
                 taint = True
             continue
+        if words and t in ("<", ">") and n + 1 < len(toks) and toks[n + 1] == ("o", "(") \
+                and scan.bwc.ASSIGN.match(words[-1]):
+            words = words[:-1] + [words[-1].partition("=")[0] + "=$"]  # NAME=text<(cmd): process substitution
         if words:
             mk = None
             if t == "(":
                 ws = list(words)
-                if len(ws) >= 2 and ws[-1] == "$" and ws[-2].endswith("="):
+                if len(ws) >= 2 and ws[-1] == "$" and scan.bwc.ASSIGN.match(ws[-2]):
                     ws[-2:] = [ws[-2] + "$"]
-                m = re.fullmatch(r"([A-Za-z_]\w*)=\$", ws[-1])
+                m = re.fullmatch(r"([A-Za-z_]\w*)=.*\$", ws[-1], re.S)
                 if m and all(scan.bwc.ASSIGN.match(x) for x in (ws[1:-1] if ws[0] == "export" else ws[:-1])):
+                    words = ws  # NAME=`...` / NAME=$(...): a value made by a command, never a literal
                     q = n + 1
                     inner = []
                     while q < len(toks) and toks[q][0] == "w":
                         inner.append(toks[q][1])
                         q += 1
-                    if (q < len(toks) and toks[q] == ("o", ")") and inner
+                    if (q < len(toks) and toks[q] == ("o", ")") and inner and ws[-1] == m.group(1) + "=$"
                             and os.path.basename(inner[0]) == "mktemp"
                             and mktemp_word("$(" + " ".join(inner) + ")")):
                         mk = m.group(1)
@@ -583,6 +603,8 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
         e_env = list(dict(list(inherit) + _session(toks, i) + prefix_env(toks, idx)).items())
         if name == "gh":
             out.append(_entry("gh", d, w, tmp, args=args, env=e_env, depth=_depth))
+            if "trace" in state:
+                state["trace"].append((out[-1], dict(env)))
         elif name == "git":
             r = git_target(args, d, w, tmp, env, temps, tmp_ok)
             if legacy:
@@ -593,6 +615,8 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             out.append(_entry("git", r["dir"], r["why"], r["temp"], sub=r["sub"], args=r["rest"],
                               pre=r["pre"], redirect=r["redirect"], gitdir=r["gitdir"],
                               worktree=r["worktree"], env=e_env, config=r["config"], depth=_depth))
+            if "trace" in state:
+                state["trace"].append((out[-1], dict(env)))
         elif _depth < MAX_DEPTH:
             body = shell_body(name, args)
             if body:
@@ -601,6 +625,23 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
                 out.extend(_body(body, cmd, d, w, tmp, env, temps, name == "eval", inh, _depth + 1, legacy,
                                  tainted, state))
     return out
+
+
+def trace(cmd, cwd, home=None):
+    """(entries, bodies) for a caller that needs more than walk() reports; walk()
+    itself returns exactly what it did before. entries: [(entry, env)] for every
+    git/gh command (wrapper bodies included), in walk() order, where env is the
+    {NAME: literal} certain to hold when that command expands its words (see
+    certain_env; inside a body, the body's own, plus an eval's outer ones).
+    bodies: [(text, dir)] for every followed `bash -c`/`sh -c`/`eval`/`env -S`
+    body (3 deep; eval's text carries its outer assignments as a prefix; dir is
+    the path in effect or None). Both are [] when the line is over budget."""
+    state = {"start": time.monotonic(), "count": 0, "trace": [], "bodies": []}
+    try:
+        walk(cmd, cwd, home, False, _state=state)
+    except Budget:
+        return [], []
+    return state["trace"], state["bodies"]
 
 
 def _session(toks, i):
@@ -617,9 +658,15 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
     such a body is walked unescaped (both ways when the quoting cannot be told).
     When no candidate parses, one "body" entry reports the text."""
     pre = ""
-    if is_eval:
+    if is_eval or "bodies" in state:  # trace() also hands a bash -c body the outer
+        # assignments: in double quotes the outer shell expands them, and an exported one is inherited
         pre = "".join(f"{k}={v}; " for k, v in env.items() if scan.literal(v) and re.fullmatch(r"\w+", k)
                       and re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
+    if "bodies" in state:  # trace() only: a value with spaces or quotes goes in single quotes
+        pre += "".join(f"{k}='{v}'; " for k, v in env.items() if scan.literal(v) and re.fullmatch(r"\w+", k)
+                       and "'" not in v and "\\" not in v and "\n" not in v
+                       and not re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
+    if is_eval:
         pre += "".join(f"{k}=$(mktemp -d); " for k in temps if re.fullmatch(r"\w+", k))
     if legacy:
         return walk(pre + body, cwd, None, legacy, depth, why, temp, inherit, taint, state)
@@ -638,6 +685,8 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
         if len(r) == 1 and r[0]["kind"] == "body" and r[0]["text"] == pre + c:
             failed += 1
             continue
+        if "bodies" in state:
+            state["bodies"].append((pre + c, cwd))
         if n == 0 and len(cands) > 1:
             # A path with a quote or backslash in it is the text read wrongly
             # (the quotes belonged to the outer word): the unescaped text has the real one.

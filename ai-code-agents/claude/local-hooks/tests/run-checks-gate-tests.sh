@@ -225,6 +225,7 @@ check "W=<repo>; cd \"\$W\" && gh pr create with record silent" silent "$(bp "W=
 check "W=<repo>; (cd \"\$W\" && git push) with record silent" silent "$(bp "W=$r; (cd \"\$W\" && git push origin feat)")"
 check "W=<repo>; cd; git push with semicolons resolves, record silent" silent "$(bp "W=$r; cd \"\$W\"; git push origin feat")"
 check "W=<repo> eval resolves, record silent" silent "$(bp "W=$r; eval 'cd \$W && git push origin feat'")"
+unk "backtick reassignment drops the stale recorded repo" "W=$r; W=\`echo $r\`; cd \"\$W\" && git push origin feat"
 check "resolved W without record: normal deny" deny "$(bp "W=$p && cd \"\$W\" && git push origin feat")"
 mode_warn; check "resolved W without record: normal warn" warn "$(bp "W=$p && cd \"\$W\" && git push origin feat")"; mode_deny
 out="$(printf '%s' "$(bp "W=$p && cd \"\$W\" && git push origin feat")" | $gate | jq -r .hookSpecificOutput.permissionDecisionReason)"

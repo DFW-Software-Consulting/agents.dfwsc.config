@@ -8,6 +8,12 @@ Newest first. Check here before proposing a fix.
 - Fix: also list index entries under the path; skip only files over 2 MB of added text and warn how many were not scanned; compare against the empty tree when HEAD does not exist.
 - Date: 2026-11-15
 
+## Push through a variable directory slipped past the checks gate (checks-gate.sh, `_checks-gate-check.py`)
+- Signature: `W=<path> && cd "$W" && git push ...` or `git -C "$W" push ...` (also `gh pr create`) ran with no check record although `MODE=deny`; the gate printed nothing.
+- Cause: the shared scanner follows `cd` and `-C` only for literal paths; with a variable it reported no directory and the gate treated "no directory" as "nothing to judge".
+- Fix: an unknown directory now denies (deny mode) or warns, with "could not tell which repository"; text-only exemptions (dry run, delete, tags-only) still apply; a variable is resolved only from a standalone literal assignment certain to have run (a prefix assignment, a conditional or nested one, unset, read and the like leave it unknown, which denies); `bash -c`/`sh -c`/`eval` bodies are followed. Write the directory literally (`git -C /absolute/path push ...`). The scanner was not changed.
+- Date: 2026-11-15
+
 ## Directory or fresh symlink counts as a fresh off-file (`gate_off_file_state_for`, `_gate-common.sh`)
 - Cause: the helper tested the path with `-e` and read `stat -c %Y`, which does not follow links. A recently modified directory at the off-file path, or a new link to an old file, reported `fresh` and switched the gate off.
 - Fix: require `[ -f ]` (regular file, links followed; directories and dangling links count as no file) and read the time with `stat -L`, so a link is judged by its target.

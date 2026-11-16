@@ -17,6 +17,7 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 - `run-pr-gate-tests.sh` : pr-gate (319 passed when written): rule A including an upstream that is the default branch, secrets, template locations and letter case, modes and date, SOP repos, placeholders, size, issues, skipped forms, body from file and stdin. Local bare origin whose URL is a fake one rewritten to the local path.
 - `run-checks-tests.sh` : run-checks.sh, `_run_checks.py`, `_checks_stamp.py`; needs no toolchain or network.
 
+- `run-repo-hygiene-tests.sh` : fails when a tracked file under `docs/` or any tracked Markdown file contains a leftover conflict marker line (`<<<<<<< ` or `>>>>>>> `); proves itself on a scratch repository; optional argument is a repository root.
 - `run-git-facts-tests.sh` : git-facts.sh and `_git_facts.py`; throwaway repos with local bare remotes, no network.
 - `run-agent-skills-tests.sh` : checks each skill in the `skills:` list of `agents/git-workflow.md` exists with a matching `name` and is preloadable; optional argument is another agent file.
 

@@ -7,6 +7,19 @@
 # when the repo has no checks, or every change since the base is documentation.
 # Not pushed: --dry-run/-n, --delete/-d, tags-only, a ref that is not the
 # current branch, `gh pr create --repo`.
+# Unknown directory: when the directory a push or `gh pr create` runs in cannot
+# be established (cd/pushd/-C with a variable or substitution, any --git-dir,
+# --work-tree, GIT_DIR= or GIT_WORK_TREE= on a push, `cd -`, popd, a `bash -c`/
+# `sh -c`/`eval` body doing so) the gate denies/warns ("could not tell which
+# repository ... write the directory literally"); dry-run, delete (also `:ref`)
+# and tags-only stay exempt. A variable resolves only from a standalone literal
+# assignment certain to have run (never a prefix assignment or a conditional one).
+# This gate has its own walker so the shared scanner stays unchanged; the variable
+# handling is meant to move into the shared scanner in a follow-up.
+# Known limits: an unparseable command line, bash -c/eval nesting over 3 levels,
+# git aliases, xargs/find -exec/ssh wrappers and lines over ~128 KB are not
+# followed; a `cd` to a missing directory or after `false &&` is followed as if
+# it ran (as before); word splitting under a changed IFS is not modelled.
 #
 # Mode (data file, never sourced): ${CLAUDE_CHECKS_GATE_CONF:-~/.claude/checks-gate.conf}
 #   MODE=warn|deny (default warn), DENY_AFTER=YYYY-MM-DD (deny from that date).

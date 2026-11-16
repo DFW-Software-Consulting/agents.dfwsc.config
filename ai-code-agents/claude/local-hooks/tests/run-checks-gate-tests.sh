@@ -161,10 +161,139 @@ check "gh pr create outside any repo allowed" silent "$(bp 'gh pr create --title
 # --- directory ---
 check "git -C <repo> push judged from another cwd" deny "$(bp "git -C $p push origin feat")"
 check "cd <repo> && git push judged" deny "$(bp "cd $p && git push origin feat")"
-check "undeterminable cd allowed" silent "$(bp 'cd "$X" && git push origin feat')"
-check "undeterminable -C allowed" silent "$(bp 'git -C "$X" push origin feat')"
+check "undeterminable cd (deny mode) now denied" deny "$(bp 'cd "$X" && git push origin feat')"
+check "undeterminable -C (deny mode) now denied" deny "$(bp 'git -C "$X" push origin feat')"
 check "missing directory allowed" silent "$(bp 'git push origin feat' "$T/nope")"
 check "subagent payload judged too" deny "$(push | jq '.agent_id="a1"')"
+
+# --- unknown directory: fail closed ---
+sp="$T/sp dir"; mkdir "$sp"; ln -s "$p" "$sp/wt1"   # $S/wt1 resolves to the unstamped repo p
+unk() {  # NAME COMMAND: deny in deny mode, warn in warn mode, from an unrelated cwd
+  mode_deny; check "$1 (deny)" deny "$(bp "$2")"
+  mode_warn; check "$1 (warn)" warn "$(bp "$2")"
+  mode_deny
+}
+unk "reproduced: W=<abs> && cd \"\$W\" && git push" "W=$p && cd \"\$W\" && git push -u origin feat"
+unk "reproduced: S=<abs>; cd \$S/wt1 && git push" 'S=$(echo /x); cd $S/wt1 && git push -u origin feat/x'
+unk 'cd "$W" && git push' 'cd "$W" && git push origin feat'
+unk 'cd $W/sub && git push' 'cd $W/sub && git push origin feat'
+unk 'pushd "$W" && git push' 'pushd "$W" && git push origin feat'
+unk 'cd $(pwd)/x && git push' 'cd $(pwd)/x && git push origin feat'
+unk 'cd - && git push' 'cd - && git push origin feat'
+unk 'git -C "$W" push' 'git -C "$W" push origin feat'
+unk 'git -C "$(pwd)/x" push' 'git -C "$(pwd)/x" push origin feat'
+unk 'GIT_DIR=$X git push' 'GIT_DIR=$X git push origin feat'
+unk 'git --git-dir="$X" push' 'git --git-dir="$X" push origin feat'
+unk 'git --work-tree $X push' 'git --work-tree $X push origin feat'
+unk '(cd "$W" && git push)' '(cd "$W" && git push origin feat)'
+unk 'popd then push' 'popd && git push origin feat'
+unk 'cd "$W" && gh pr create' 'cd "$W" && gh pr create --title x'
+unk 'cd $W/sub && gh pr create' 'cd $W/sub && gh pr create --title x'
+unk 'pushd "$W" && gh pr create' 'pushd "$W" && gh pr create --title x'
+unk '(cd "$W" && gh pr create)' '(cd "$W" && gh pr create --title x)'
+unk 'bash -c with variable cd and push' "bash -c 'cd \"\$W\" && git push origin feat'"
+unk 'sh -c with git -C variable' "sh -c 'git -C \$W push origin feat'"
+unk 'eval with variable cd and push' 'eval "cd $W && git push origin feat"'
+unk 'bash -c with gh pr create after variable cd' "bash -c 'cd \$W && gh pr create --title x'"
+unk 'push of another branch ref is not exempt with unknown dir' 'cd "$W" && git push origin other:other'
+unk 'cd back to unknown after a known dir' "cd $p && cd \"\$W\" && git push origin feat"
+mode_deny
+msg="$(printf '%s' "$(bp 'cd "$W" && git push -u origin feat/x')" | $gate | jq -r .hookSpecificOutput.permissionDecisionReason)"
+case "$msg" in
+  *"could not tell which repository"*"git -C /absolute/path push"*"cd /absolute/path && git push"*"another branch"*"CLAUDE_CHECKS_GATE=off"*) ok "unknown-dir message: could not tell, literal-path advice, repo-only exemptions, escape hatch";;
+  *) bad "unknown-dir message" "$msg";;
+esac
+out="$(printf '%s' "$(bp 'cd "$W" && gh pr create')" | $gate | jq -r .hookSpecificOutput.permissionDecisionReason)"
+case "$out" in *"could not tell which repository this gh pr create"*) ok "unknown-dir message names gh pr create";; *) bad "gh message" "$out";; esac
+# text-only exemptions still apply with an unknown directory
+for ex in 'git push --dry-run origin feat' 'git push -n origin feat' 'git push origin --delete old' 'git push -d origin old' 'git push --tags'; do
+  check "unknown dir, text-only exemption silent: $ex" silent "$(bp "cd \"\$W\" && $ex")"
+  check "unknown -C, text-only exemption silent: $ex" silent "$(bp "git -C \"\$W\" ${ex#git }")"
+done
+# a passing record plus a literal path stays silent; so does the resolved simple assignment
+check "literal cd with passing record silent" silent "$(bp "cd $r && git push origin feat")"
+check "literal git -C with passing record silent" silent "$(bp "git -C $r push origin feat")"
+check "unknown cd then literal absolute cd with record silent" silent "$(bp "cd \"\$W\" && cd $r && git push origin feat")"
+check "unknown cd then git -C literal with record silent" silent "$(bp "cd \"\$W\" && git -C $r push origin feat")"
+# item 3: a plain literal assignment earlier in the line is resolved
+check "W=<repo>; cd \"\$W\" with record silent" silent "$(bp "W=$r && cd \"\$W\" && git push origin feat")"
+check "W=<repo>; cd \$W with record silent" silent "$(bp "W=$r; cd \$W && git push origin feat")"
+check "W=\"<repo>\"; cd \"\${W}\" with record silent" silent "$(bp "W=\"$r\"; cd \"\${W}\" && git push origin feat")"
+check "W=<repo>; git -C \"\$W\" with record silent" silent "$(bp "W=$r; git -C \"\$W\" push origin feat")"
+check "W=<dir>; cd \"\$W\"/sub resolved, record silent" silent "$(bp "W=$T; cd \"\$W\"/r && git push origin feat")"
+check "W=<repo>; cd \"\$W\" && gh pr create with record silent" silent "$(bp "W=$r; cd \"\$W\" && gh pr create --title x")"
+check "W=<repo>; (cd \"\$W\" && git push) with record silent" silent "$(bp "W=$r; (cd \"\$W\" && git push origin feat)")"
+check "W=<repo>; cd; git push with semicolons resolves, record silent" silent "$(bp "W=$r; cd \"\$W\"; git push origin feat")"
+check "W=<repo> eval resolves, record silent" silent "$(bp "W=$r; eval 'cd \$W && git push origin feat'")"
+check "resolved W without record: normal deny" deny "$(bp "W=$p && cd \"\$W\" && git push origin feat")"
+mode_warn; check "resolved W without record: normal warn" warn "$(bp "W=$p && cd \"\$W\" && git push origin feat")"; mode_deny
+out="$(printf '%s' "$(bp "W=$p && cd \"\$W\" && git push origin feat")" | $gate | jq -r .hookSpecificOutput.permissionDecisionReason)"
+case "$out" in *"no passing check record for $(git -C "$p" rev-parse HEAD | cut -c1-10)"*) ok "resolved W without record names the commit";; *) bad "resolved W message" "$out";; esac
+check "W assigned a substitution is not resolved (denied)" deny "$(bp "W=\$(echo $r) && cd \"\$W\" && git push origin feat")"
+check "reassigned W: last literal assignment wins" deny "$(bp "W=$r; W=$p; cd \"\$W\" && git push origin feat")"
+check "assignment scoped by a subshell does not leak" deny "$(bp "(W=$r); cd \"\$W\" && git push origin feat")"
+# false alarms: nothing is pushed, or the text is only data
+check "W=/x; cd \"\$W\" && git status" silent "$(bp 'W=/x; cd "$W" && git status')"
+check "cd \"\$W\" && git fetch" silent "$(bp 'cd "$W" && git fetch')"
+check "cd \"\$W\" && git commit -m notes about git push" silent "$(bp 'cd "$W" && git commit -m "notes about git push"')"
+check "git commit -m explain git push" silent "$(bp 'git commit -m "explain git push"')"
+check "echo \"cd \$W && git push\"" silent "$(bp 'echo "cd $W && git push"')"
+check "echo \"git push\"" silent "$(bp 'echo "git push"')"
+check "echo 'gh pr create' after variable cd" silent "$(bp 'cd "$W" && echo "gh pr create"')"
+check "gh pr view after variable cd" silent "$(bp 'cd "$W" && gh pr view 12')"
+check "gh pr list after variable cd" silent "$(bp 'cd "$W" && gh pr list')"
+check "bash -c with echo of git push" silent "$(bp "bash -c 'echo git push'")"
+check "bash -c with variable cd and no push" silent "$(bp "bash -c 'cd \"\$W\" && git status'")"
+check "grep for git push after variable cd" silent "$(bp 'cd "$W" && grep -r "git push" .')"
+check "GIT_DIR=\$X git status" silent "$(bp 'GIT_DIR=$X git status')"
+# literal --git-dir / --work-tree / GIT_DIR / GIT_WORK_TREE on a push: directory cannot be established (denied)
+unk "literal --git-dir= on a push" "git --git-dir=$p/.git push origin feat"
+unk "literal --work-tree on a push" "git --work-tree $p push origin feat"
+unk "literal GIT_DIR= on a push" "GIT_DIR=$p/.git git push origin feat"
+unk "literal GIT_WORK_TREE= on a push" "GIT_WORK_TREE=$p git push origin feat"
+check "literal GIT_DIR= on git status stays silent" silent "$(bp "GIT_DIR=$p/.git git status")"
+check "unknown dir, colon-form delete silent" silent "$(bp 'cd "$W" && git push origin :old')"
+check "unknown -C, colon-form delete silent" silent "$(bp 'git -C "$W" push origin :old')"
+# the variable is certain only after a standalone assignment that surely ran; each of these must not be silent
+# ($r has a passing record, $p has none; the shell is in $p)
+notsilent() { check "uncertain variable not resolved: $1" deny "$(bp "$2" "$p")"; mode_warn; check "uncertain variable not resolved (warn): $1" warn "$(bp "$2" "$p")"; mode_deny; }
+notsilent 'prefix assignment on cd' "W=$r cd \"\$W\" && git push origin feat"
+notsilent 'prefix assignment on git -C' "W=$r git -C \"\$W\" push origin feat"
+notsilent 'assignment in a skipped if' "W=$p; if false; then W=$r; fi; cd \"\$W\" && git push origin feat"
+notsilent 'after false &&' "false && W=$r; cd \"\$W\" && git push origin feat"
+notsilent 'after true ||' "true || W=$r; cd \"\$W\" && git push origin feat"
+notsilent 'after cmd && assignment' "true && W=$r; cd \"\$W\" && git push origin feat"
+notsilent 'unset' "W=$r; unset W; cd \"\$W\"; git push origin feat"
+notsilent 'read' "W=$r; read W; cd \"\$W\"; git push origin feat"
+notsilent 'plus-equals' "W=$r; W+=/x; cd \"\$W\"; git push origin feat"
+notsilent 'non-literal reassignment' "W=$r; W=\$(pwd); cd \"\$W\"; git push origin feat"
+notsilent 'reference to another variable' "V=$r; W=\$V; cd \"\$W\"; git push origin feat"
+notsilent 'export non-literal' "W=$r; export W=\$X; cd \"\$W\"; git push origin feat"
+notsilent 'local' "W=$r; local W; cd \"\$W\"; git push origin feat"
+notsilent 'declare' "W=$r; declare W=$p; cd \"\$W\"; git push origin feat"
+notsilent 'typeset' "W=$r; typeset W; cd \"\$W\"; git push origin feat"
+notsilent 'readonly' "W=$r; readonly W=$p; cd \"\$W\"; git push origin feat"
+notsilent 'for loop' "W=$r; for W in $p; do cd \"\$W\"; git push origin feat; done"
+notsilent 'assignment after a loop' "for x in 1; do W=$r; done; cd \"\$W\" && git push origin feat"
+notsilent 'assignment in a function' "f() { W=$r; }; f; cd \"\$W\" && git push origin feat"
+notsilent 'assignment in a subshell' "(W=$r); cd \"\$W\" && git push origin feat"
+notsilent 'assignment in a case branch' "case x in x) W=$r;; esac; cd \"\$W\" && git push origin feat"
+notsilent 'assignment in a pipeline' "W=$r | cat; cd \"\$W\" && git push origin feat"
+notsilent 'background assignment' "W=$r & cd \"\$W\" && git push origin feat"
+notsilent 'bash -c does not see an outer plain variable' "W=$r; bash -c 'cd \$W && git push origin feat'"
+notsilent 'bash -c prefix assignment' "W=$r bash -c 'cd \$W && git push origin feat'"
+notsilent 'eval after an unset' "W=$r; unset W; eval 'cd \$W && git push origin feat'"
+notsilent 'gh pr create after prefix assignment' "W=$r cd \"\$W\" && gh pr create --title x"
+notsilent 'gh pr create after skipped if' "W=$p; if false; then W=$r; fi; cd \"\$W\" && gh pr create --title x"
+notsilent 'arithmetic command ((W=1))' "W=$r; ((W=1)); cd \"\$W\"; git push origin feat"
+notsilent 'arithmetic command ((W++))' "W=$r; ((W++)); cd \"\$W\"; git push origin feat"
+notsilent 'let W=1' "W=$r; let W=1; cd \"\$W\"; git push origin feat"
+notsilent 'arithmetic expansion assigns' "W=$r; : \$((W=1)); cd \"\$W\"; git push origin feat"
+check "plain: W=<repo> && cd && push resolves (record silent)" silent "$(bp "W=$r && cd \"\$W\" && git push origin feat" "$p")"
+check "plain: W=<repo>; cd; push resolves (record silent)" silent "$(bp "W=$r; cd \"\$W\"; git push origin feat" "$p")"
+out="$(printf '%s' "$(bp "bash -c 'cd \"\$W\" && gh pr create --title \"x'")" | $gate | jq -r .hookSpecificOutput.permissionDecisionReason)"
+case "$out" in *"this gh pr create runs in"*) ok "unparseable body with gh pr create: message says gh pr create";; *) bad "kind in message" "$out";; esac
+check "no cwd in payload: variable cd stays silent (malformed input)" silent "$(jq -n '{tool_name:"Bash",tool_input:{command:"cd \"$W\" && git push"}}')"
 
 # --- broken checks file, escape, config as data ---
 git -C "$T/broken" reset -q --hard HEAD; printf 'none\ntrue\n' > "$T/broken/.claude/git-checks"; git -C "$T/broken" commit -qam brk

@@ -21,6 +21,7 @@ Findings:
 - Branch feat/split-git-workflow-skills (not a numbered pull request): splits the git-workflow skill into git-commit, git-push, git-pr and git-issue beside git-verify, adds `git-facts.sh` and its suite, turns the agent into a router and the old skill into a stub; drops the PR template's AI usage section.
 - Adds commit-gate (secrets, conflict markers, secret files; subject format warn-only) and pr-gate (push state, secrets, template sections, placeholders, size by mode). A review round fixed: upstream-is-default-branch misread, `*.pub` and env-var `.npmrc` false denials, the provider example key, path-limited commits, glob adds, capped reads.
 - Last review round of commit-gate: directory and glob commits cover staged files, first commits compare with the empty tree, oversized files are skipped one by one with a warning, `.npmrc` comments and variable-only tokens, payment-key prefixes keep underscore as a boundary (a missed live key costs more than a reworded line).
+- Branch fix/checks-gate-unknown-dir: checks-gate no longer stays silent on a push or `gh pr create` whose directory it cannot establish (a `cd`, `-C`, `--git-dir` or `GIT_DIR=` with a variable or substitution, `cd -`, `popd`, an unfollowable `bash -c`/`eval` body): deny in deny mode, warn in warn mode. A plain literal assignment that is certain to have run is resolved first. The shared scanner is untouched.
 Lessons:
 - Test the whole `ai-code-agents/claude/` tree, not just `local-hooks/`.
 - Do not stack pull requests on a base that will be squash-merged.
@@ -32,3 +33,4 @@ Lessons:
 - Verify tool names in command headers; wrong names pre-approve nothing.
 - A hook decision of "ask" is soft: keep judging the rest of the command line before answering.
 - A new branch's upstream may be the default branch; judge a push from the remote ref named after the branch, not from `@{u}`.
+- A gate that lets a command through when it cannot tell where it runs is a bypass: fail closed on an unknown directory, fail open only on malformed input.

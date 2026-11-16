@@ -233,6 +233,63 @@ for name, line, want in (
         passed += 1; print(f"ok   - {name}")
     else:
         failed += 1; print(f"FAIL - {name}: {cd.fed_texts(line)}")
+# a prefix assignment holding a substitution: the command after it is found, the variable unresolvable
+case("GIT_DIR=$(cmd)/suffix prefix on git", "GIT_DIR=$(pwd)/.git git commit -m x", ["git:commit@/w[unknown]"])
+case("GIT_DIR=`cmd`/suffix prefix on git", "GIT_DIR=`pwd`/.git git commit -m x", ["git:commit@/w[unknown]"])
+case("GIT_DIR=$(cmd) prefix without a suffix", "GIT_DIR=$(pwd) git commit -m x", ["git:commit@/w[unknown]"])
+case("env GIT_DIR=$(cmd)/suffix", "env GIT_DIR=$(pwd)/.git git commit -m x", ["git:commit@/w[unknown]"])
+case("substitution prefix inside bash -c", "bash -c 'GIT_DIR=$(pwd)/.git git commit -m x'", ["git:commit@/w[unknown]^1"])
+case("substitution prefix inside eval", "eval 'GIT_DIR=$(pwd)/.git git commit -m x'", ["git:commit@/w[unknown]^1"])
+case("other variable with a substitution prefix", "X=$(pwd)/a git commit -m x", ["git:commit@/w"])
+case("substitution prefix on gh", "X=$(pwd)/a gh pr create --title t", ["gh@/w"])
+case("substitution prefix after a cd", "cd /p && X=$(pwd)/a git commit -m x", ["git:commit@/p"])
+case("commands inside the substituted text are still walked", "X=$(git -C /q push)/a gh pr view 3", ["gh@/w", "git:push@/q"])
+case("standalone assignment with a suffix is unchanged", "X=$(pwd)/a; git commit -m x", ["git:commit@/w"])
+case("a substitution inside quotes is left alone", "X=\"$(pwd)/a\" git commit -m x", ["git:commit@/w"])
+case("a here-document body with a substitution prefix is not a command", "cat <<EOF\nX=$(a)/b git push\nEOF", [])
+for label, cmd, mode in (("prefix is clean", "GIT_DIR=/r/.git gh pr create", False),
+                         ("env prefix is clean", "env GIT_DIR=/r/.git gh pr create", False),
+                         ("export alone is clean", "export GIT_DIR=/r/.git; gh pr create", False),
+                         ("assigned without export is ambiguous", "GIT_DIR=/r/.git; gh pr create", True),
+                         ("exported then unset is ambiguous", "export GIT_DIR=/r/.git; unset GIT_DIR; gh pr create", True),
+                         ("env -u is ambiguous", "export GIT_DIR=/r/.git; env -u GIT_DIR gh pr create", True),
+                         ("env -i is ambiguous", "export GIT_DIR=/r/.git; env -i gh pr create", True),
+                         ("a subshell that unsets is ambiguous", "export GIT_DIR=/r/.git; (unset GIT_DIR; gh pr create)", True),
+                         ("a bash -c that unsets is ambiguous", "export GIT_DIR=/r/.git; bash -c 'unset GIT_DIR; gh pr create'", True),
+                         ("a conditional export is ambiguous", "false && export GIT_DIR=/r/.git; gh pr create", True),
+                         ("export inherited by bash -c is clean", "export GIT_DIR=/r/.git; bash -c 'gh pr create'", False),
+                         ("prefix inherited by bash -c is clean", "GIT_DIR=/r/.git bash -c 'gh pr create'", False),
+                         ("plain assignment inherited by bash -c is ambiguous", "GIT_DIR=/r/.git; bash -c 'gh pr create'", True),
+                         ("no GIT_DIR at all is not ambiguous", "gh pr create", False)):
+    es = [e for e in cd.walk(cmd, "/w", home=H) if e["kind"] == "gh"]
+    if es and es[0]["xmaybe"] == mode:
+        passed += 1; print(f"ok   - gh entry GIT_DIR: {label}")
+    else:
+        failed += 1; print(f"FAIL - gh entry GIT_DIR: {label}: {[e['xmaybe'] for e in es]}")
+for label, cmd, want in (("literal GIT_DIR", "GIT_DIR=/r/.git gh pr create", ("literal", "/r/.git")),
+                         ("relative GIT_DIR joins the directory", "GIT_DIR=.git gh pr create", ("literal", "/w/.git")),
+                         ("variable GIT_DIR resolved on the line", "G=/r/.git; GIT_DIR=$G gh pr create", ("literal", "/r/.git")),
+                         ("unresolvable GIT_DIR", "GIT_DIR=$X gh pr create", ("unknown", None)),
+                         ("substitution GIT_DIR", "GIT_DIR=$(pwd)/.git gh pr create", ("unknown", None))):
+    es = [e for e in cd.walk(cmd, "/w", home=H) if e["kind"] == "gh"]
+    got = (es[0]["xgd"]["state"], es[0]["xgd"]["path"]) if es and es[0]["xgd"] else None
+    if got == want:
+        passed += 1; print(f"ok   - gh entry xgd: {label}")
+    else:
+        failed += 1; print(f"FAIL - gh entry xgd: {label}: {got}")
+for label, line in (("GIT_DIR=$(cmd) prefix", "GIT_DIR=$(pwd)/.git git commit -m x"), ("env GIT_DIR=$(cmd) prefix", "env GIT_DIR=$(pwd)/.git git commit -m x")):
+    n = len(cd.cheap_commands(line))
+    if n == 1:
+        passed += 1; print(f"ok   - cheap_commands finds the command: {label}")
+    else:
+        failed += 1; print(f"FAIL - cheap_commands finds the command: {label}: {n}")
+n = len([e for e in cd.cheap_gates("GIT_DIR=$(pwd)/.git gh pr create --title x") if e["kind"] == "gh"])
+if n == 1:
+    passed += 1; print("ok   - cheap_gates finds gh after a substitution prefix")
+else:
+    failed += 1; print(f"FAIL - cheap_gates: {n}")
+# legacy mode (checks-gate) is frozen: the substitution prefix is not rewritten there
+case("legacy: substitution prefix unchanged", "GIT_DIR=$(pwd)/.git git commit -m x", [], legacy=True)
 # checks-gate's legacy results are pinned (see the fixture and its generator note)
 import importlib.util, json
 spec = importlib.util.spec_from_file_location("cgc", os.path.join(os.environ["HOOKS"], "_checks-gate-check.py"))

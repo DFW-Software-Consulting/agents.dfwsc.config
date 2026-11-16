@@ -232,6 +232,11 @@ check "env -C <private> commit allowed" allow "$(bp "env -C $PRIV git commit -m 
 # explicit git directories are judged by their work tree
 check "GIT_DIR=<public>/.git commit denied" deny "$(bp "GIT_DIR=$PUB/.git git commit -m 'fakehost-01'" "$plain")"
 check "GIT_DIR=<private>/.git commit allowed" allow "$(bp "GIT_DIR=$PRIV/.git git commit -m 'fakehost-01'" "$PUB")"
+check "GIT_DIR=\$(pwd)/.git commit with a hit denied (substitution in the prefix)" deny "$(bp "GIT_DIR=\$(pwd)/.git git commit -m 'fakehost-01'" "$plain")"
+check "GIT_DIR=backtick commit with a hit denied" deny "$(bp "GIT_DIR=\`pwd\`/.git git commit -m 'fakehost-01'" "$plain")"
+check "env GIT_DIR=\$(pwd)/.git commit with a hit denied" deny "$(bp "env GIT_DIR=\$(pwd)/.git git commit -m 'fakehost-01'" "$plain")"
+check "bash -c with GIT_DIR=\$(pwd)/.git commit with a hit denied" deny "$(bp "bash -c 'GIT_DIR=\$(pwd)/.git git commit -m \"fakehost-01\"'" "$plain")"
+check "GIT_DIR=\$(pwd)/.git commit with a clean text allowed" allow "$(bp "GIT_DIR=\$(pwd)/.git git commit -m 'feat: x'" "$plain")"
 check "--git-dir/--work-tree on the public repo denied" deny "$(bp "git --git-dir=$PUB/.git --work-tree=$PUB commit -m 'fakehost-01'" "$plain")"
 # a directory that cannot be established: a hit is denied, a clean text is silent
 for form in 'cd "$W" && git commit -m "TEXT"' \

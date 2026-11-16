@@ -273,6 +273,10 @@ for c in 'F=/abs/x; F=`mktemp`; echo hi > "$F"' 'F=/abs/x; F=$(mktemp); echo hi 
   check "allow: $c" allow "$gate" "$(bash_payload "$c")"
 done
 check "deny: assignment after the write does not hide it" deny "$gate" "$(bash_payload 'F=/abs/x; echo hi > "$F"; F=`mktemp`')"
+for c in 'D=$(pwd)/x tee "$D" </dev/null' 'D=`pwd`/x tee "$D" </dev/null' 'env D=$(pwd)/x tee "$D" </dev/null' "bash -c 'D=\$(pwd)/x tee \"\$D\" </dev/null'" \
+  'GIT_DIR=$(pwd)/.git git status > "$OUT"'; do
+  check "allow: substitution in a prefix assignment, target unresolvable: $c" allow "$gate" "$(bash_payload "$c")"
+done
 
 # --- commit message file with the option attached (-Fmsg.txt) ---
 for c in 'git commit -Fbad.txt' 'git commit -aFbad.txt' 'git commit -sF bad.txt' 'git commit -a -F bad.txt' 'git commit --file=bad.txt'; do

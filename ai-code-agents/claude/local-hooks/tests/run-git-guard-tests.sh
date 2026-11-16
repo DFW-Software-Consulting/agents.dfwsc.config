@@ -422,6 +422,72 @@ check "assigned path via export: push origin main denied" deny "$(bp "export W=$
 check "doubtful assignment is unknown: push origin main denied" deny "$(bp "true && W=$R; git -C \"\$W\" push origin main" "$X")"
 check "assigned path then wrapper body judged in that repo" deny "$(bp "W=$R; eval 'cd \"\$W\" && git push origin main'" "$X")"
 
+# --- review round: escapes, prefixes, fed text, refspec spellings, directories not there yet, big lines ---
+dq() { local t="${1//\\/\\\\}"; t="${t//\"/\\\"}"; t="${t//\$/\\\$}"; printf 'bash -c "%s"' "$t"; }
+d1="$(dq 'git push --force origin x')"; d2="$(dq "$d1")"; d3="$(dq "$d2")"
+check "double-quoted body with escaped quotes: push --force denied" deny "$(bp "$(dq 'cd "$V" && git push --force')" "$X")"
+check "two levels of escaped quotes denied" deny "$(bp "$d2" "$X")"
+check "three levels of escaped quotes denied" deny "$(bp "$d3" "$X")"
+check "three levels of escaped quotes: commit --no-verify denied" deny "$(bp "$(dq "$(dq "$(dq 'git commit --no-verify -m "m"')")")" "$X")"
+check "escaped quotes, plain feature push allowed" allow "$(bp "$(dq 'cd "$V" && git push -u origin feat/x')" "$X")"
+check "unparseable body holding a force push denied" deny "$(bp "bash -c \"git push --force 'oops\"" "$X")"
+check "unparseable nested body holding a push denied" deny "$(bp "$(dq "bash -c \"git push origin feat 'oops\"")" "$X")"
+check "unparseable body holding a hook bypass denied" deny "$(bp "sh -c \"git commit --no-verify -m 'oops\"" "$X")"
+silent "unparseable body with no git command is silent" "$(bp "bash -c \"echo 'oops\"" "$X")"
+check "commit message mentioning a force push inside a body is data" allow "$(bp "bash -c 'git commit -m \"do not git push --force\"'" "$X")"
+check "env -C x bash -c push --force denied" deny "$(bp "env -C x bash -c 'git push --force'" "$X")"
+check "builtin cd and push --force denied" deny "$(bp 'builtin cd "$V" && git push -f' "$X")"
+check "builtin cd \$V && push origin main denied" deny "$(bp 'builtin cd "$V" && git push origin main' "$X")"
+check "command cd \$V && bare push denied" deny "$(bp 'command cd "$V" && git push' "$X")"
+# prefix commands that hide the command position
+for f in 'timeout 5 git push --force' 'timeout -k 2 10 git push --force' 'timeout 5s git commit --no-verify -m m' 'stdbuf -oL git push -f' \
+  'setsid git push --force' 'setsid -w git push --force' 'ionice -c 3 git push --force' 'ionice git commit -n -m m' 'nice git push --force' \
+  'nice -n 5 git push --force' 'doas git push --force' 'doas -u root git push -f' 'sudo -u root git push --force' \
+  "env -S 'git push --force'" "env -S 'git commit --no-verify -m m'" 'env -i git push --force' 'env -u FOO git push --force' \
+  'time git push --force' 'exec git push --force' 'nohup git push --force' 'xargs -n 1 git push --force' 'sudo timeout 5 nice git push -f'; do
+  check "prefix: $f denied" deny "$(bp "$f" "$X")"
+done
+check "timeout 5 git push -u origin feat/x allowed" allow "$(bp 'timeout 5 git push -u origin feat/x' "$X")"
+check "stdbuf -oL git status allowed" allow "$(bp 'stdbuf -oL git status' "$X")"
+check "env -S with a plain commit allowed" allow "$(bp "env -S 'git commit -m m'" "$X")"
+# text fed to a shell
+for f in "echo 'git push --force' | bash" "echo 'git push --force origin x' | sh" 'echo git push --force | bash' "printf '%s\n' 'git commit --no-verify -m m' | sh" \
+  "bash <<< 'git push --force'" "bash -s <<< 'git push -f origin x'" $'bash <<EOF\ngit push --force\nEOF' $'cat <<EOF | bash\ngit push --force\nEOF' \
+  $'sh <<\'EOF\'\ngit commit --no-verify -m m\nEOF' "echo 'git push --mirror' | bash" "echo 'cd \$V && git push --force' | sudo bash"; do
+  check "fed to a shell: ${f//$'\n'/ ; } denied" deny "$(bp "$f" "$X")"
+done
+check "pipe to a shell, harmless text allowed" allow "$(bp "echo 'git status' | bash" "$X")"
+check "pipe to a shell, feature push allowed" allow "$(bp "echo 'git push -u origin feat/x' | bash" "$X")"
+check "text piped to cat is data" allow "$(bp "echo 'git push --force' | cat" "$X")"
+check "text piped to grep is data" allow "$(bp "echo 'git push --force' | grep push" "$X")"
+check "here-document into cat is data" allow "$(bp $'cat <<EOF\ngit push --force\nEOF' "$X")"
+check "here-string into cat is data" allow "$(bp "cat <<< 'git push --force'" "$X")"
+check "bash script file after a pipe is not fed text" allow "$(bp "echo 'git push --force' | bash ./run.sh" "$X")"
+check "bash -c body after a pipe judged as a body" deny "$(bp "echo hi | bash -c 'git push --force'" "$X")"
+# refspec spellings with an unknown directory
+check "unknown dir: push origin @ denied" deny "$(bp 'git -C "$V" push origin @' "$X")"
+check "unknown dir: push origin : denied" deny "$(bp 'git -C "$V" push origin :' "$X")"
+check "unknown dir: push origin feat:heads/main denied" deny "$(bp 'git -C "$V" push origin feat:heads/main' "$X")"
+check "unknown dir: push origin HEAD:heads/master denied" deny "$(bp 'git -C "$V" push origin HEAD:heads/master' "$X")"
+check "unknown dir: --repo=origin feat allowed" allow "$(bp 'git -C "$V" push --repo=origin feat' "$X")"
+check "unknown dir: --repo origin feat allowed" allow "$(bp 'git -C "$V" push --repo origin feat' "$X")"
+check "unknown dir: --repo=origin main denied" deny "$(bp 'git -C "$V" push --repo=origin main' "$X")"
+check "unknown dir: push origin tag v1 allowed" allow "$(bp 'git -C "$V" push origin tag v1' "$X")"
+check "unknown dir: push origin heads/feat allowed" allow "$(bp 'git -C "$V" push origin heads/feat' "$X")"
+# a directory that does not exist yet is judged by its nearest existing ancestor
+check "mkdir t && cd t && push origin main in the repo denied" deny "$(bp 'mkdir t && cd t && git push origin main' "$R")"
+check "cd newdir/deeper && bare push in the repo denied" deny "$(bp "cd $R/newdir/deeper && git push" "$X")"
+check "mkdir t && cd t && push origin feature allowed" allow "$(bp 'mkdir t && cd t && git push origin feature' "$R")"
+# mktemp gets no exception, whatever its form
+check "mktemp -p repo then push main denied" deny "$(bp "T=\$(mktemp -d -p $R); cd \"\$T\" && git push origin main" "$X")"
+# a line over the analysis budget keeps the rules that need no directory
+big="$(for k in $(seq 400); do printf 'git status; '; done)"
+check "400 git commands then a force push denied" deny "$(bp "${big}git push --force origin x" "$X")"
+check "400 git commands then a hook bypass denied" deny "$(bp "${big}git commit --no-verify -m m" "$X")"
+check "400 git commands then --mirror denied" deny "$(bp "${big}git push --mirror" "$X")"
+check "400 git commands then a plain push allowed" allow "$(bp "${big}git push -u origin feat/x" "$X")"
+check "400 git commands, no push at all allowed" allow "$(bp "${big}git log" "$X")"
+
 # --- escape ---
 export CLAUDE_GIT_GUARD=off
 check "CLAUDE_GIT_GUARD=off allows" allow "$(bp 'git push origin main')"

@@ -10,10 +10,13 @@ violation, or nothing.
 
 Commands come from _cmd_dirs.py (quote-aware, built on _git-cmd-scan.py; text
 inside quotes, heredocs or another command's arguments is not a git command).
-It also finds commands inside `bash -c`/`sh -c`/`eval` bodies (3 levels deep)
+It also finds commands inside `bash -c`/`sh -c`/`eval`/`env -S` bodies (3 levels deep)
 and commands with GIT_DIR=, GIT_WORK_TREE=, --git-dir, --work-tree or `env -C`.
 Rules that need no repository (hook bypass, force push, --all, --mirror) apply
-to all of them. The default-branch rule needs the directory; when it is unknown
+to all of them, and to text fed to a shell (`x | bash`, `bash <<< '...'`, a
+here-document into bash/sh) and to a line over the analysis budget (see
+_cmd_dirs.Budget). An unparseable wrapper body that holds a push or a hook
+bypass is denied (rule unparsed-body). The default-branch rule needs the directory; when it is unknown
 (a variable that is not certain, a substitution, `cd -`, an explicit git dir, a
 temporary directory: no exception, a clone there can still push to a real
 remote) a push is denied if it names main or master as destination or names no
@@ -21,8 +24,9 @@ destination (the current branch cannot be known), and allowed if it names
 another branch. Only read-only git queries are run (symbolic-ref, rev-parse,
 config). Malformed input prints nothing (allow). A payload without a cwd keeps
 the old behaviour (directory rules skipped).
-Known limits: an unparseable wrapper body, nesting deeper than 3, aliases and
-xargs/find -exec/ssh wrappers are not followed.
+Known limits: nesting deeper than 3, aliases, xargs/find -exec/ssh wrappers and
+text a shell reads from a file or a command's output are not followed; a
+directory that does not exist yet is judged by its nearest existing ancestor.
 
 Env: CMD, CWD, GATE_HOME.
 """
@@ -304,13 +308,18 @@ def default_rule(c):
 def unknown_default_rule(c, longs, shorts, refspecs):
     """Default-branch rule when the directory is unknown: only the text is
     available. Deny a destination of main or master (any spelling that can
-    mean it) or no destination at all; allow any other explicit branch."""
+    mean it) or no usable destination (none, HEAD, @, a bare colon); allow any
+    other explicit branch or a tag."""
     why = c.get("why") or "a directory that is not written literally"
     tail = (f"the gate cannot tell which repository this push runs in ({why}); write the "
             f"directory literally (git -C /absolute/path push ...) or name the branch")
+    _l, _s, pos = parse(c["args"], PUSH_LONG_VALUE, PUSH_VALUE_LETTERS)
+    if any(a == "--repo" or a.startswith("--repo=") for a in longs):
+        refspecs = pos  # the remote came from --repo: every positional is a refspec
+    tag_pair = any(p == "tag" and k >= 1 and k + 1 < len(pos) for k, p in enumerate(pos))
     if not refspecs:
         if (has_long("push", longs, "--tags") or has_long("push", longs, "--delete")
-                or "d" in shorts):
+                or "d" in shorts or tag_pair):
             return None
         return ("default-branch-push",
                 f"git push names no destination, so the current branch (possibly the default branch) is used, and {tail}")
@@ -318,13 +327,17 @@ def unknown_default_rule(c, longs, shorts, refspecs):
         dst = r.split(":", 1)[1] if ":" in r else r
         if "$" in r or "`" in r:
             return ("default-branch-push", f"the refspec {r} cannot be resolved here and {tail}")
+        if r.lstrip("+") == ":":
+            return ("default-branch-push", f"the refspec {r} pushes every matching branch, the default branch included, and {tail}")
         if "*" in dst and any(fnmatch.fnmatchcase(x, dst) for x in
                               ("main", "master", "refs/heads/main", "refs/heads/master")):
             return ("default-branch-push", f"the refspec {r} may cover main or master and {tail}")
-        if dst.startswith("refs/heads/"):
-            dst = dst[len("refs/heads/"):]
-        if dst == "HEAD" and ":" not in r:
-            return ("default-branch-push", f"the refspec HEAD pushes the current branch, which is unknown, and {tail}")
+        for pre in ("refs/heads/", "heads/"):
+            if dst.startswith(pre):
+                dst = dst[len(pre):]
+                break
+        if dst in ("HEAD", "@") and ":" not in r:
+            return ("default-branch-push", f"the refspec {r} pushes the current branch, which is unknown, and {tail}")
         if dst in ("main", "master"):
             return ("default-branch-push", f"the refspec {r} targets {dst} and {tail}")
     return None
@@ -395,22 +408,41 @@ ADVICE = {
 }
 
 
-REDIRECT_WHY = "a --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE: the repository is not the one in the directory"
+def _command(e):
+    """A git entry of the walker as the dict the rules use: "dir" (None unless
+    known; the nearest existing ancestor of a path that is not there yet),
+    "unknown" (True when the directory rules must work from the text alone)
+    and "why"."""
+    state, d, why = cd.effective(e)
+    known = state == "known"
+    return {"dir": (cd.existing_dir(d) or d) if known else None, "sub": e["sub"], "args": e["args"],
+            "env": e["env"], "config": e["config"],
+            "unknown": not known and (bool(e["redirect"]) or e["why"] != cd.NO_CWD), "why": why}
 
 
 def commands(cmd, cwd):
-    """Every git command on the line, wrapper bodies included, as dicts with
-    "dir" (None unless known), "sub", "args", "env", "config", and "unknown"
-    (True when the directory rules must work from the text alone) with "why"."""
+    """Every git command on the line, wrapper bodies included, as dicts (see
+    _command), plus {"body": text} for a wrapper body that cannot be parsed and
+    holds a guarded command. A line over the analysis budget yields its git
+    commands without directories; text fed to a shell (`x | bash`, a here-string
+    or here-document) is scanned for commands as well."""
     out = []
-    for e in cd.walk(cmd, cwd):
-        if e["kind"] != "git" or not e["sub"]:
-            continue
-        known = e["state"] == "known" and not e["redirect"]
-        out.append({"dir": e["dir"] if known else None, "sub": e["sub"], "args": e["args"],
-                    "env": e["env"], "config": e["config"],
-                    "unknown": not known and (bool(e["redirect"]) or e["why"] != cd.NO_CWD),
-                    "why": REDIRECT_WHY if e["redirect"] else e["why"]})
+    try:
+        entries = cd.walk(cmd, cwd)
+    except cd.Budget:
+        entries = cd.cheap_commands(cmd)
+    for e in entries:
+        if e["kind"] == "body":
+            if cd.body_guarded(e, "guard"):
+                out.append({"body": e["text"]})
+        elif e["kind"] == "git" and e["sub"]:
+            out.append(_command(e))
+    for text in cd.fed_texts(cmd):
+        try:
+            fed = cd.walk(text, "")
+        except cd.Budget:
+            fed = cd.cheap_commands(text)
+        out.extend(_command(e) for e in fed if e["kind"] == "git" and e["sub"])
     return out
 
 
@@ -419,6 +451,10 @@ def judge(cmd, cwd):
     (an ask is soft: later commands are still judged); otherwise None."""
     asks = []
     for c in commands(cmd, cwd):
+        if "body" in c:
+            return ("unparsed-body", "a shell script body that cannot be parsed holds a git command "
+                    "the guard judges (push, hook bypass), so it cannot be judged; write the command "
+                    "outside the script text")
         # Flag rules need no repository; only the default-branch rule does.
         why = hook_bypass(c)
         if why:

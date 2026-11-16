@@ -301,6 +301,30 @@ check "gh pr list after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr lis
 check "gh pr checks after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr checks fakehost-01' "$PRIV")"
 check "git commit --dry-run after an unknown cd allowed" allow "$(bp 'cd "$W" && git commit --dry-run -m "move to fakehost-01"' "$PRIV")"
 
+# --- review round: bodies on an over-budget line, -R=, -h as a value, missing shared module ---
+for body in "bash -c 'git commit -m \"move to fakehost-01\"'" "sh -c 'git commit -m \"move to fakehost-01\"'" "eval 'git commit -m \"move to fakehost-01\"'" "env -S 'git commit -m \"move to fakehost-01\"'" "bash -c 'gh pr create --title \"fakehost-01\" --body x'"; do
+  check "over-budget line: a hit inside a body denied: $body" deny "$(bp "${many}$body" "$PRIV")"
+done
+check "over-budget line: a clean text inside a body silent" allow "$(bp "${many}bash -c 'git commit -m \"fix parser\"'" "$PRIV")"
+check "over-budget line: a body that is not a commit or gh command silent" allow "$(bp "${many}bash -c 'echo fakehost-01'" "$PRIV")"
+check "-R=owner/repo public: denied" deny "$(bp 'cd "$W" && gh pr create -R=owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+check "-R=owner/repo private: silent" allow "$(bp 'cd "$W" && gh pr create -R=owner-x/private-z --title fakehost-01 --body x' "$PUB")"
+check "-m -h is a message: a hit after it is judged" deny "$(bp 'git commit -m -h -m "move to fakehost-01"' "$PUB")"
+check "git commit -h is a help request: silent" allow "$(bp 'git commit -h -m "move to fakehost-01"' "$PUB")"
+# without _cmd_dirs.py the gate falls back to the literal-directory scan
+iso4="$(mktemp -d "$work/iso4.XXXXXX")"; cp -r "$hooks" "$iso4/local-hooks"; cp -r "$hooks/../hooks" "$iso4/hooks"; rm -f "$iso4/local-hooks/_cmd_dirs.py"
+isocheck() {  # NAME EXPECT PAYLOAD
+  local out; out="$(printf '%s' "$3" | bash "$iso4/local-hooks/public-repo-text-gate.sh" 2>/dev/null)"
+  { [ "$2" = deny ] && grep -q '"permissionDecision": *"deny"' <<<"$out"; } || { [ "$2" = allow ] && [ -z "$out" ]; }; ok "$1" $?
+}
+isocheck "without _cmd_dirs.py: a hit in a public literal directory denied" deny "$(bp 'git commit -m "move to fakehost-01"' "$PUB")"
+isocheck "without _cmd_dirs.py: --repo public denied" deny "$(bp 'gh pr create --repo owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+isocheck "without _cmd_dirs.py: a private literal directory silent" allow "$(bp 'git commit -m "move to fakehost-01"' "$PRIV")"
+isocheck "without _cmd_dirs.py: an unknown directory is not judged (the old behaviour)" allow "$(bp 'cd "$W" && git commit -m "move to fakehost-01"' "$PRIV")"
+errout="$(CMD='git commit -m "move to fakehost-01"' CWD="$PUB" python3 -I "$iso4/local-hooks/_public-text-check.py" 2>&1 >/dev/null)"
+[ "$(wc -l <<<"$errout")" -eq 1 ] && grep -q '_cmd_dirs.py could not be loaded' <<<"$errout"; ok "without _cmd_dirs.py: one line on standard error" $?
+rm -rf "$iso4"
+
 # --- message on stdin ---
 check "git commit -F - heredoc denied" deny "$(bp $'git commit -F - <<EOF\nmove to fakehost-01\nEOF')"
 check "git commit -F- heredoc denied" deny "$(bp $'git commit -F- <<\'EOF\'\nbox 10.2.3.4\nEOF')"

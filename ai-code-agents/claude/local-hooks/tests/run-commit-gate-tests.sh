@@ -575,6 +575,48 @@ check "line over the analysis budget with a commit denied" deny "$(bp "${many}gi
 check "line over the analysis budget without a commit allowed" allow "$(bp "${many}git status # commit" "$CLEAN")"
 check "line over the analysis budget: message secret denied" deny "$(bp "${many}git commit -m 'feat: $AWS'" "$CLEAN")"
 
+# --- review round: bodies on an over-budget line, linked worktrees, -h as a value, missing shared module ---
+for body in "bash -c 'git commit -m x'" "sh -c 'git commit -m x'" "eval 'git commit -m x'" "env -S 'git commit -m x'" "bash -c \"cd $DIRTY && git commit -m x\"" "bash -c 'bash -c \"git commit -m x\"'"; do
+  check "over-budget line: commit inside a body denied: $body" deny "$(bp "${many}$body" "$CLEAN")"
+done
+reason_has "over-budget line: a body with a commit is denied as unknown-directory" "$(bp "${many}bash -c 'git commit -m x'" "$CLEAN")" "unknown-directory.*too many commands"
+check "over-budget line: a body with a message secret denied" deny "$(bp "${many}bash -c 'git commit -m \"feat: $AWS\"'" "$CLEAN")"
+check "over-budget line: a body without a commit allowed" allow "$(bp "${many}bash -c 'git status'; echo commit" "$CLEAN")"
+check "over-budget line: a body with a dry run allowed" allow "$(bp "${many}bash -c 'git commit --dry-run -m x'" "$CLEAN")"
+# a linked worktree's git directory is judged by its work tree
+newrepo; LMAIN="$R"; git -C "$LMAIN" worktree add -q -b linkedwt "$T/linked1" 2>/dev/null
+echo "v=1" > "$T/linked1/.env"; git -C "$T/linked1" add .env
+LGD="$(git -C "$T/linked1" rev-parse --absolute-git-dir)"
+check "GIT_DIR=<linked worktree git dir> commit: staged .env denied" deny "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")"
+check "--git-dir=<linked worktree git dir> commit: staged .env denied" deny "$(bp "git --git-dir=$LGD commit -m 'feat: x'" "$elsewhere")"
+git -C "$T/linked1" reset -q; echo ok > "$T/linked1/ok.txt"; git -C "$T/linked1" add ok.txt
+check "GIT_DIR=<linked worktree git dir> commit: clean worktree allowed" allow "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")"
+rm -f "$LGD/gitdir"
+check "linked worktree git dir whose work tree cannot be resolved: denied as unknown" deny "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")"
+reason_has "unresolvable linked worktree: the denial says the directory could not be worked out" "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")" "unknown-directory.*could not be worked out"
+# -h and --help only in option position
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env; HR="$R"
+check "-m -h is a message, not a help request: staged .env denied" deny "$(bp 'git commit -m -h' "$HR")"
+check "-am -h is a message: staged .env denied" deny "$(bp 'git commit -am -h' "$HR")"
+check "-m --help is a message: staged .env denied" deny "$(bp 'git commit -m --help' "$HR")"
+check "-m x -h is a help request: allowed" allow "$(bp 'git commit -m x -h' "$HR")"
+check "git commit -h is a help request: allowed" allow "$(bp 'git commit -h' "$HR")"
+check "git commit --help is a help request: allowed" allow "$(bp 'git commit --help' "$HR")"
+check "-m --dry-run is a message: staged .env denied" deny "$(bp 'git commit -m --dry-run' "$HR")"
+# without _cmd_dirs.py the gate falls back to the literal-directory scan
+iso2="$(mktemp -d "$HOME/iso2.XXXXXX")"; cp -r "$hooks" "$iso2/lh"; rm -f "$iso2/lh/_cmd_dirs.py"
+isocheck() {  # NAME EXPECT PAYLOAD: run the copy without _cmd_dirs.py
+  local out; out="$(printf '%s' "$3" | bash "$iso2/lh/commit-gate.sh" 2>/dev/null)"
+  if { [ "$2" = deny ] && grep -q '"permissionDecision": *"deny"' <<<"$out"; } || { [ "$2" = allow ] && [ -z "$out" ]; }; then ok "$1"; else bad "$1 (expected $2)" "output: $out"; fi
+}
+isocheck "without _cmd_dirs.py: staged .env in a literal directory denied" deny "$(bp 'git commit -m "feat: x"' "$HR")"
+isocheck "without _cmd_dirs.py: cd <repo> && commit denied" deny "$(bp "cd $HR && git commit -m 'feat: x'" "$elsewhere")"
+isocheck "without _cmd_dirs.py: clean repository allowed" allow "$(bp 'git commit -m "feat: x"' "$CLEAN")"
+isocheck "without _cmd_dirs.py: a message secret in a literal directory denied" deny "$(bp "git commit -m 'feat: $AWS'" "$CLEAN")"
+isocheck "without _cmd_dirs.py: an unknown directory is not judged (the old behaviour)" allow "$(bp 'cd "$W" && git commit -m "feat: x"' "$HR")"
+errout="$(CMD='git commit -m "feat: x"' CWD="$HR" python3 "$iso2/lh/_commit-gate-check.py" 2>&1 >/dev/null)"
+[ "$(wc -l <<<"$errout")" -eq 1 ] && grep -q '_cmd_dirs.py could not be loaded' <<<"$errout"; ok "without _cmd_dirs.py: one line on standard error"
+rm -rf "$iso2"
 newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env   # the repository the escape tests below commit in
 # --- escape ---
 export CLAUDE_GIT_GUARD=off

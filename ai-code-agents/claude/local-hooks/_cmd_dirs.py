@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Shared library (no entry point): find every git and gh command on a Bash
 command line and say which directory each one runs in. Used by
-_checks-gate-check.py, _git-guard-check.py, _worktree-gate-check.py, _commit-gate-check.py,
-_pr-gate-check.py and _public-text-check.py.
+_checks-gate-check.py, _git-guard-check.py and _worktree-gate-check.py.
 
 walk(cmd, cwd) returns one dict per command, in the order they appear,
 including commands inside `bash -c`/`sh -c`/`eval`/`env -S` bodies (followed 3
@@ -51,10 +50,6 @@ the name unknown, never its earlier value. Command prefixes
 (`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
 effective(entry) is the one place that turns an entry into the directory to
 judge. Never runs anything and never touches a repository.
-Gate helpers for the content gates (commit-gate, pr-gate, public-repo-text-gate):
-gate_entries (walk, or cheap_gates over the budget), gate_dirs (how to judge one
-entry: known / temp / unknown / none) and explicit_work_dirs. Added alongside;
-nothing above changes.
 Known limits: an unparseable top-level line yields nothing; `bash -c`/`eval`
 nesting deeper than 3, aliases, xargs/find -exec/ssh wrappers, lines over about
 128 KB and word splitting under a changed IFS are not followed; a `cd` to a
@@ -107,9 +102,6 @@ UNESC = re.compile(r'\\(["\\$`])')
 # Text of an unparseable wrapper body that makes it a guarded command.
 BODY_GUARDS = {
     "worktree": re.compile(r"\bgit\b[^;&|]*\b(?:%s)\b" % "|".join(sorted(scan.MUTATING))),
-    "commit": re.compile(r"\bgit\b[^;&|]*\bcommit\b(?![^;&|]*--dry-run)"),
-    "pr": re.compile(r"\bgh\b\s+(?:pr|issue)\b[^;&|]*\b(?:create|edit|comment|review)\b"),
-    "text": re.compile(r"\bgit\b[^;&|]*\b(?:commit|tag)\b|\bgh\b\s+(?:pr|issue)\b"),
     "guard": re.compile(r"\bgit\b[^;&|]*(?:\bpush\b|--no-verify|hooksPath)|\b(?:HUSKY|SKIP)=[^;&|]*\bgit\b"),
 }
 
@@ -777,14 +769,37 @@ def fed_texts(cmd):
     return texts
 
 
-# ---------- helpers for the content gates ----------
+# ======================================================================
+# Helpers for the content gates (_commit-gate-check.py, _pr-gate-check.py,
+# _public-text-check.py). Added as one block; nothing above uses it.
+# gate_entries: walk(), or cheap_gates() over the analysis budget;
+# gate_dirs: how to judge one entry (known / temp / unknown / none);
+# explicit_work_dirs: the work trees of a literal --git-dir/GIT_DIR=;
+# unknown_denial and body_guarded keys "commit", "pr", "pr_create", "text".
+# ======================================================================
+BODY_GUARDS.update({
+    "commit": re.compile(r"\bgit\b[^;&|]*\bcommit\b(?![^;&|]*--dry-run)"),
+    "pr": re.compile(r"\bgh\b\s+(?:pr|issue)\b[^;&|]*\b(?:create|edit|comment|review)\b"),
+    "pr_create": re.compile(r"\bgh\b\s+pr\s+create\b(?![^;&|]*(?:--web|--fill|--template))"),
+    "text": re.compile(r"\bgit\b[^;&|]*\b(?:commit|tag)\b|\bgh\b\s+(?:pr|issue)\b"),
+})
 BUDGET_WHY = "the line has too many commands to analyse"
+
+
+def unknown_denial(gate, what, why, effect, example):
+    """The standard denial of a content gate that could not establish the
+    directory: what ("the commit", "gh pr create"), why, what cannot be done
+    without it (effect) and an example of the literal form."""
+    return (f"{gate} (unknown-directory): could not tell which repository {what} runs in "
+            f"({why}), so {effect}. Write the directory literally, for example: {example}")
 
 
 def cheap_gates(cmd):
     """Like cheap_commands but gh commands too (kind "gh", args the words after
-    gh); every directory is unknown with reason BUDGET_WHY, so a gate that needs
-    the repository can say so. For a line over the analysis budget."""
+    gh) and the text of every `bash -c`/`sh -c`/`eval`/`env -S` body as an
+    entry of kind "body" (not followed: a gate asks body_guarded whether it
+    holds a command it judges). Every directory is unknown with reason
+    BUDGET_WHY. For a line over the analysis budget."""
     try:
         toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
     except ValueError:
@@ -792,18 +807,22 @@ def cheap_gates(cmd):
     out = []
     for i, (kind, t) in enumerate(toks):
         name = os.path.basename(t) if kind == "w" else ""
-        if name not in ("git", "gh"):
+        if name not in ("git", "gh", "eval", "env") and name not in SHELLS:
             continue
         ok, idx, _ = prefix_span(toks, i, False)
         if not ok:
             continue
+        args = words_after(toks, i + 1)
         if name == "gh":
-            out.append(_entry("gh", None, BUDGET_WHY, False, args=words_after(toks, i + 1),
-                              env=prefix_env(toks, idx)))
-            continue
-        r = git_target(words_after(toks, i + 1), None, BUDGET_WHY, False, {}, set())
-        out.append(_entry("git", None, BUDGET_WHY, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
-                          redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
+            out.append(_entry("gh", None, BUDGET_WHY, False, args=args, env=prefix_env(toks, idx)))
+        elif name == "git":
+            r = git_target(args, None, BUDGET_WHY, False, {}, set())
+            out.append(_entry("git", None, BUDGET_WHY, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
+                              redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
+        else:
+            body = shell_body(name, args)
+            if body:
+                out.append(_entry("body", None, BUDGET_WHY, False, text=body, depth=1))
     return out
 
 
@@ -824,12 +843,26 @@ def _git_out(cwd, *args):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def _linked_work_tree(gd):
+    """The work tree of a linked worktree's git directory (the parent of the
+    `.git` file path recorded in <gd>/gitdir), or None."""
+    try:
+        with open(os.path.join(gd, "gitdir"), encoding="utf-8", errors="replace") as f:
+            rec = f.read().strip()
+    except OSError:
+        return None
+    if os.path.basename(rec.rstrip("/")) != ".git":
+        return None
+    return os.path.dirname(rec.rstrip("/")) or None
+
+
 def explicit_work_dirs(e):
     """([work trees], unknown reason or None) for an entry with a literal
     --git-dir/--work-tree/GIT_DIR=/GIT_WORK_TREE=: the --work-tree value, the
-    parent of a git directory named `.git`, else what git reports. A linked
-    worktree's git directory gives ([], None) (not judged)."""
+    parent of a git directory named `.git`, the work tree recorded by a linked
+    worktree's git directory, else what git reports."""
     gd, wt = e["gitdir"], e["worktree"]
+    why = "the work tree of the explicit git directory could not be worked out"
     dirs = []
     if wt:
         dirs.append(wt)
@@ -843,13 +876,14 @@ def explicit_work_dirs(e):
             if both and len(both.splitlines()) == 2:
                 a, b = both.splitlines()
                 if os.path.realpath(a) != os.path.realpath(b):
-                    return [], None
+                    linked = _linked_work_tree(gd)
+                    return ([linked], None) if linked else ([], why)
             top = _git_out(here, "--git-dir=" + gd, "rev-parse", "--show-toplevel")
             if not top:
-                return [], "the work tree of the explicit git directory could not be worked out"
+                return [], why
             dirs.append(top)
     if not dirs:
-        return [], "the work tree of the explicit git directory could not be worked out"
+        return [], why
     return dirs, None
 
 
@@ -858,7 +892,7 @@ def gate_dirs(e):
       "known"    dirs: the directories (work trees) to judge; they may not exist
       "temp"     a bare mktemp -d directory: no repository to inspect yet
       "unknown"  the repository cannot be established; why says why
-      "none"     nothing to judge (no payload cwd, or a linked worktree's git directory)"""
+      "none"     nothing to judge (no payload cwd)"""
     if e["kind"] == "body":
         return "unknown", [], e["why"]
     if e["redirect"] == "unknown":

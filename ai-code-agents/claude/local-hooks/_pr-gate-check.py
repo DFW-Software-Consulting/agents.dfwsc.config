@@ -24,7 +24,12 @@ this gate skips anyway (--web, --fill*, --template, no body, --head owner:branch
 -R/--repo); rule B always runs on the title and body text, and the repository
 rules (A, C, D, E, F) are skipped. A directory made by a bare `mktemp -d` and a
 payload without a cwd are treated the same, minus the denial. A literal
-directory behaves exactly as before.
+directory behaves exactly as before. Rule B also runs on any title or body text in the forms the gate
+skips (--web, --fill*, --template, -f, no body, unreadable body); -R=owner/repo reads like -R owner/repo.
+On a line over the analysis budget a wrapper body holding gh pr create is denied as unknown. Without
+_cmd_dirs.py the previous literal-directory scan runs and one line goes to standard error. Not judged:
+GIT_DIR=<repo>/.git gh pr create against that repository; a cd that would fail or not run is still
+followed; nesting deeper than 3, lines over about 128 KB and text piped into a shell.
 """
 import datetime
 import os
@@ -34,7 +39,10 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _git_gates_lib as L  # noqa: E402
-import _cmd_dirs as cd  # noqa: E402
+try:
+    import _cmd_dirs as cd  # noqa: E402
+except Exception:  # missing or broken shared walker: fall back to the literal-directory scan
+    cd = None
 
 VALUE_FLAGS = {"--assignee", "-a", "--label", "-l", "--milestone", "-m", "--project", "-p",
                "--reviewer", "-r", "--recover", "--body-file", "-F", "--title", "-t",
@@ -54,8 +62,11 @@ GENERATED = re.compile(
 
 
 # ---------- gh flag parsing ----------
-def parse_gh(args, cmddir, bodies, used, ptc):
-    """(info dict, None) or (None, reason) when the command cannot be judged."""
+def parse_gh(args, cmddir, bodies, used, ptc, lenient=False):
+    """(info dict, None) or (None, reason) when the command cannot be judged.
+    lenient: never give up on a form the gate skips (--web, --fill, --template,
+    no body, an unreadable body): return what text there is (title, body or
+    None) so the secret rule can still run on it."""
     kind, sub = args[0], args[1]
     o = {"kind": kind, "sub": sub, "title": "", "body": None, "repo": "",
          "head": None, "base": None}
@@ -66,9 +77,17 @@ def parse_gh(args, cmddir, bodies, used, ptc):
         has_next = i + 1 < len(args)
         name, eq, val = t.partition("=") if t.startswith("--") else (t, "", "")
         if t in BODY_UNJUDGEABLE or (t.startswith("--") and name in BODY_UNJUDGEABLE):
-            return None, "body cannot be judged"
+            if not lenient:
+                return None, "body cannot be judged"
+            if t in ("--template", "-T") and has_next:
+                i += 1  # the template name is not text
+            i += 1
+            continue
         if kind == "pr" and sub == "create" and t == "-f":
-            return None, "body cannot be judged"
+            if not lenient:
+                return None, "body cannot be judged"
+            i += 1
+            continue
         if t.startswith("--") and eq:
             if name == "--title":
                 o["title"] = val
@@ -98,7 +117,7 @@ def parse_gh(args, cmddir, bodies, used, ptc):
             elif t in ("--repo", "-R"):
                 o["repo"] = v
         elif not t.startswith("--") and re.match(r"^-[tbFHBR].", t):
-            v = t[2:]
+            v = t[3:] if t[2] == "=" else t[2:]  # -R=owner/repo is -R owner/repo
             if t[1] == "t":
                 o["title"] = v
             elif t[1] == "b":
@@ -116,6 +135,10 @@ def parse_gh(args, cmddir, bodies, used, ptc):
         if kind == "pr" and sub == "edit" and o["title"] and "$(" not in o["title"] \
                 and "`" not in o["title"]:
             return o, None  # title only: still checked for secrets
+        if lenient:
+            if "$(" in o["title"] or "`" in o["title"]:
+                o["title"] = ""
+            return o, None
         return None, "no body"
 
     def heredoc():
@@ -144,6 +167,10 @@ def parse_gh(args, cmddir, bodies, used, ptc):
     else:
         text = v
     if text is None:
+        if lenient:
+            if "$(" in o["title"] or "`" in o["title"]:
+                o["title"] = ""
+            return o, None
         return None, "body unreadable"
     o["body"] = text
     if "$(" in o["title"] or "`" in o["title"]:
@@ -454,27 +481,41 @@ def judge_text(o):
 
 
 def unknown_denial(why):
-    return (f"pr-gate (unknown-directory): could not tell which repository gh pr create runs in "
-            f"({why}), so the head branch cannot be checked against its remote. Write the directory "
-            f"literally, for example: cd <path> && gh pr create ... or gh -R owner/name pr create ...")
+    return cd.unknown_denial("pr-gate", "gh pr create", why,
+                             "the head branch cannot be checked against its remote",
+                             "cd <path> && gh pr create ... or gh -R owner/name pr create ...")
 
 
-BODY_CREATE = re.compile(r"\bgh\b\s+pr\s+create\b(?![^;&|]*(?:--web|--fill|--template))")
+def legacy_hits(cmd, cwd, ptc, cfg):
+    """The scan used before the shared walker (literal directories only); the
+    fallback when _cmd_dirs.py cannot be loaded. -> (hard, soft)."""
+    scan = L.load_scan()
+    stripped, bodies = ptc.split_heredocs(cmd)
+    toks = scan.bwc.tokenize(stripped)
+    hard, soft, used = [], [], [0]
+    for kind, d, args in ptc.find_hits(toks, cwd, scan):
+        if kind != "gh" or len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in ("create", "edit"):
+            continue
+        if args[0] == "issue" and args[1] != "create":
+            continue
+        if not d or not os.path.isdir(d):
+            continue
+        o, _why = parse_gh(args, d, bodies, used, ptc)
+        if not o:
+            continue
+        h, s = judge(o, d, cfg)
+        hard += h
+        soft += s
+    return hard, soft
 
 
-def main():
-    cmd = os.environ.get("CMD", "")
-    cwd = os.environ.get("CWD", "")
-    if "gh" not in cmd:
-        return
-    ptc = L.load_text_check()
-    cfg = L.parse_config()
+def walked_hits(cmd, cwd, ptc, cfg):
     stripped, bodies = ptc.split_heredocs(cmd)
     hard, soft, used = [], [], [0]
     for e in cd.gate_entries(cmd, cwd, home=os.environ.get("HOME", "")):
         if e["kind"] == "body":
             if cd.body_guarded(e, "pr"):
-                if BODY_CREATE.search(e["text"]):
+                if cd.body_guarded(e, "pr_create"):
                     hard.append(unknown_denial(e["why"]))
                 for kind, first in L.find_secrets(e["text"]):
                     hard.append(f"pr-gate (secret-in-text): the command text contains a {kind} "
@@ -488,26 +529,43 @@ def main():
         if args[0] == "issue" and args[1] != "create":
             continue
         status, dirs, why = cd.gate_dirs(e)
+        d = dirs[0] if status == "known" else None
+        if status == "known" and (not d or not os.path.isdir(d)):
+            continue
+        o, _why = parse_gh(args, d, bodies, used, ptc)
+        if not o:
+            # A form the gate skips (--web, --fill, --template, no body, an
+            # unreadable body): the secret rule still runs on any text present.
+            o2, _w = parse_gh(args, d, bodies, [used[0]], ptc, lenient=True)
+            if o2:
+                hard += judge_text(o2)
+            continue
         if status == "known":
-            d = dirs[0]
-            if not d or not os.path.isdir(d):
-                continue
-            o, _why = parse_gh(args, d, bodies, used, ptc)
-            if not o:
-                continue
             h, s = judge(o, d, cfg)
             hard += h
             soft += s
             continue
         # No repository to read: the text is judged alone; a pr create whose
         # directory is unknown is denied (unless the command is one the gate skips).
-        o, _why = parse_gh(args, None, bodies, used, ptc)
-        if not o:
-            continue
         if status == "unknown" and o["kind"] == "pr" and o["sub"] == "create" \
                 and not o["repo"] and not (o["head"] and ":" in o["head"]):
             hard.append(unknown_denial(why))
         hard += judge_text(o)
+    return hard, soft
+
+
+def main():
+    cmd = os.environ.get("CMD", "")
+    cwd = os.environ.get("CWD", "")
+    if "gh" not in cmd:
+        return
+    ptc = L.load_text_check()
+    cfg = L.parse_config()
+    if cd is None:
+        sys.stderr.write("pr-gate: _cmd_dirs.py could not be loaded; using the literal-directory scan\n")
+        hard, soft = legacy_hits(cmd, cwd, ptc, cfg)
+    else:
+        hard, soft = walked_hits(cmd, cwd, ptc, cfg)
     if not hard and not soft:
         return
     deny_soft = soft_denies(cfg)

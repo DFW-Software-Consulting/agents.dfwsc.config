@@ -14,6 +14,7 @@
 # assignments, GIT_DIR=, `bash -c`/`eval` bodies). A commit whose directory cannot
 # be established is denied (write the directory literally); a bare `mktemp -d`
 # directory is allowed; the message secret scan runs whatever the directory.
+# Without _cmd_dirs.py the previous literal-directory scan runs.
 # Only read-only git queries, inside a small time budget. Fails open: bad input,
 # missing jq/python3/git, an unparseable command, an internal error.
 #

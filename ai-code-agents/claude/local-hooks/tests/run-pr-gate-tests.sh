@@ -343,7 +343,8 @@ noconf
 
 # --- skipped forms ---
 newrepo; mktemplate .github/pull_request_template.md; git -C "$R" checkout -q -b local-only
-check "--web skipped (even unpushed, bad body)" allow "$(bp "gh pr create --web --title x --body 'y $AWS'")"
+check "--web skipped (even unpushed, clean body)" allow "$(bp "gh pr create --web --title x --body 'y'")"
+check "--web with a secret in the body denied (the secret rule runs in every form)" deny "$(bp "gh pr create --web --title x --body 'y $AWS'")"
 check "--fill skipped" allow "$(bp 'gh pr create --fill')"
 check "--fill-first skipped" allow "$(bp 'gh pr create --fill-first')"
 check "-f skipped" allow "$(bp 'gh pr create -f')"
@@ -484,6 +485,47 @@ many="$(for i in $(seq 1 320); do printf 'cd %s; ' "$PUSHED"; done)"
 check "line over the analysis budget with gh pr create denied" deny "$(bp "${many}$(prc 'body text')" "$PUSHED")"
 check "line over the analysis budget with a secret denied" deny "$(bp "${many}gh issue create --title x --body 'y $AWS'" "$PUSHED")"
 check "line over the analysis budget without gh create allowed" allow "$(bp "${many}gh pr view 3" "$PUSHED")"
+# --- review round: bodies on an over-budget line, secrets in skipped forms, -R=, missing shared module ---
+for body in "bash -c 'gh pr create --title x --body y'" "sh -c 'gh pr create --title x --body y'" "eval 'gh pr create --title x --body y'" "env -S 'gh pr create --title x --body y'" "bash -c 'bash -c \"gh pr create --title x --body y\"'"; do
+  check "over-budget line: gh pr create inside a body denied: $body" deny "$(bp "${many}$body" "$PUSHED")"
+done
+reason_has "over-budget line: a body with gh pr create is denied as unknown-directory" "$(bp "${many}bash -c 'gh pr create --title x --body y'" "$PUSHED")" "unknown-directory.*too many commands"
+check "over-budget line: a secret in a body is denied" deny "$(bp "${many}bash -c 'gh issue create --title x --body \"$AWS\"'" "$PUSHED")"
+check "over-budget line: a body with gh pr view allowed" allow "$(bp "${many}bash -c 'gh pr view 3'" "$PUSHED")"
+check "over-budget line: a body with gh pr create --web allowed" allow "$(bp "${many}bash -c 'gh pr create --web'" "$PUSHED")"
+# the secret rule runs in every form, also those the gate skips otherwise
+for f in --fill --fill-first --web -f "--template bug.md" "-T bug.md"; do
+  check "secret in the body denied with $f" deny "$(bp "gh pr create $f --title x --body 'y $AWS'" "$PUSHED")"
+  check "secret in the title denied with $f" deny "$(bp "gh pr create $f --title 'y $AWS'" "$PUSHED")"
+  check "clean text with $f stays allowed" allow "$(bp "gh pr create $f --title x --body y" "$PUSHED")"
+  check "unknown directory: secret in the body denied with $f" deny "$(bp "cd \"\$W\" && gh pr create $f --title x --body 'y $AWS'" "$PUSHED")"
+  check "unknown directory: clean text with $f stays allowed" allow "$(bp "cd \"\$W\" && gh pr create $f --title x --body y" "$PUSHED")"
+done
+check "secret in the title with no body denied" deny "$(bp "gh pr create --title 'y $AWS'" "$PUSHED")"
+check "secret in a body from an unreadable file: title judged, body skipped" allow "$(bp 'gh pr create --title x --body-file /nonexistent/b.md' "$PUSHED")"
+check "secret in the title with an unreadable body denied" deny "$(bp "gh pr create --title 'y $AWS' --body \"\$BODY\"" "$PUSHED")"
+reason_lacks "skipped form: the secret is never shown in full" "$(bp "gh pr create --web --title x --body 'y $AWS'" "$PUSHED")" "$AWS"
+check "gh issue create --web with a secret in the title denied" deny "$(bp "gh issue create --web --title 'y $AWS'" "$PUSHED")"
+# -R=owner/repo is -R owner/repo
+newrepo plain5
+check "-R=owner/repo naming this repo is judged" deny "$(bp "gh pr create -R=owner/plain5 --title x --body 'y $AWS'")"
+check "-R=owner/repo naming another repo skipped" allow "$(bp "gh pr create -R=owner/elsewhere --title x --body 'y $AWS'")"
+check "unknown directory: -R=owner/repo not denied as unknown" allow "$(bp 'cd "$W" && gh pr create -R=owner/elsewhere --title x --body y' "$PUSHED")"
+check "-t=title attached value with a secret denied" deny "$(bp "gh pr create -t=\"y $AWS\" --body y" "$PUSHED")"
+# without _cmd_dirs.py the gate falls back to the literal-directory scan
+iso3="$(mktemp -d "$HOME/iso3.XXXXXX")"; cp -r "$hooks" "$iso3/lh"; rm -f "$iso3/lh/_cmd_dirs.py"
+isocheck() {  # NAME EXPECT PAYLOAD
+  local out; out="$(printf '%s' "$3" | bash "$iso3/lh/pr-gate.sh" 2>/dev/null)"
+  if { [ "$2" = deny ] && grep -q '"permissionDecision": *"deny"' <<<"$out"; } || { [ "$2" = allow ] && [ -z "$out" ]; }; then ok "$1"; else bad "$1 (expected $2)" "output: $out"; fi
+}
+isocheck "without _cmd_dirs.py: an unpushed branch in a literal directory denied" deny "$(bp "$(prc 'body text')" "$LOCAL")"
+isocheck "without _cmd_dirs.py: cd <repo> && gh pr create unpushed denied" deny "$(bp "cd $LOCAL && $(prc 'body text')" "$elsewhere")"
+isocheck "without _cmd_dirs.py: a secret in a literal directory denied" deny "$(bp "$(prc "x $AWS")" "$PUSHED")"
+isocheck "without _cmd_dirs.py: a pushed branch allowed" allow "$(bp "$(prc 'body text')" "$PUSHED")"
+isocheck "without _cmd_dirs.py: an unknown directory is not judged (the old behaviour)" allow "$(bp "cd \"\$W\" && $(prc 'body text')" "$LOCAL")"
+errout="$(CMD='gh pr create --title x --body y' CWD="$PUSHED" python3 "$iso3/lh/_pr-gate-check.py" 2>&1 >/dev/null)"
+[ "$(wc -l <<<"$errout")" -eq 1 ] && grep -q '_cmd_dirs.py could not be loaded' <<<"$errout"; ok "without _cmd_dirs.py: one line on standard error"
+rm -rf "$iso3"
 newrepo  # leave R on a fresh repository for the sections below
 
 

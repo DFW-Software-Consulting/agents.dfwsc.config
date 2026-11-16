@@ -21,7 +21,12 @@ runs). The message secret scan runs on the message text whatever the directory
 state; a literal directory behaves exactly as before. A payload without a cwd, a
 literal directory that does not exist or is not a repository, and a dry run are
 not judged (only the message scan runs for the first).
-Limits (fail open): shell aliases are not parsed; text fed to a shell (`| bash`)
+Without _cmd_dirs.py (missing or broken) the previous literal-directory scan runs and one line goes to
+standard error. On a line over the analysis budget a wrapper body holding a commit is denied as unknown and
+scanned for secrets. -h/--help/--dry-run skip a commit only in option position (not as the value of -m).
+An explicit git directory of a linked worktree is judged by its work tree (unreadable: unknown).
+Limits (fail open): shell aliases are not parsed; a cd that would fail or not run is still followed; nesting
+deeper than 3, lines over about 128 KB and text piped into a shell are not judged; text fed to a shell (`| bash`)
 is not followed; a same-line `git add` with a non-literal argument is treated like
 `git add -A`; a file with over 2 MB of added text (or an .npmrc over 64 KB) is not
 scanned and the warning says so; skipped files do not use the scan budget. A path
@@ -36,7 +41,10 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _git_gates_lib as L  # noqa: E402
-import _cmd_dirs as cd  # noqa: E402
+try:
+    import _cmd_dirs as cd  # noqa: E402
+except Exception:  # missing or broken shared walker: fall back to the literal-directory scan
+    cd = None
 
 SECRET_NAMES = [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
                 "credentials.json", "*.p12", "*.pfx"]
@@ -296,7 +304,7 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
     if not top:
         return [], []
     args = c["args"]
-    if "--dry-run" in args or "-h" in args or "--help" in args:
+    if ptc.commit_flags(args) & {"--dry-run", "-h", "--help"}:
         return [], []
     o = parse_commit(args)
     allow = cfg["ALLOW_PATHS"]
@@ -454,25 +462,34 @@ def judge_commit(c, adds, cfg, ptc, bodies, cmd):
 
 
 def unknown_denial(why):
-    return (f"commit-gate (unknown-directory): could not tell which repository the commit runs in "
-            f"({why}), so the staged content cannot be inspected. Write the directory literally, "
-            f"for example: git -C <path> commit ... or cd <path> && git commit ... (a directory "
-            f"made with mktemp -d on the same line is fine).")
+    return cd.unknown_denial("commit-gate", "the commit", why, "the staged content cannot be inspected",
+                             "git -C <path> commit ... or cd <path> && git commit ... "
+                             "(a directory made with mktemp -d on the same line is fine)")
 
 
-def main():
-    cmd = os.environ.get("CMD", "")
-    cwd = os.environ.get("CWD", "")
-    if "commit" not in cmd:
-        return
-    ptc = L.load_text_check()
-    cfg = L.parse_config()
-    _, bodies = ptc.split_heredocs(cmd)
+def legacy_commits(cmd, cwd, ptc, cfg, bodies):
+    """The scan used before the shared walker (literal directories only); the
+    fallback when _cmd_dirs.py cannot be loaded. -> (denials, warns)."""
+    denials, warns, adds = [], [], []
+    for c in L.load_scan().commands(cmd, cwd):
+        if c["sub"] == "add":
+            adds.append(c)
+        elif c["sub"] == "commit" and c["dir"] and os.path.isdir(c["dir"]):
+            d, w = judge_commit(c, adds, cfg, ptc, bodies, cmd)
+            denials += d
+            warns += w
+    return denials, warns
+
+
+def walked_commits(cmd, cwd, ptc, cfg, bodies):
     denials, warns, adds = [], [], []
     for e in cd.gate_entries(cmd, cwd, home=os.environ.get("HOME", "")):
         if e["kind"] == "body":
             if cd.body_guarded(e, "commit"):
                 denials.append(unknown_denial(e["why"]))
+                for kind, first in L.find_secrets(e["text"]):
+                    denials.append(f"commit-gate (secret-in-message): the command text contains a "
+                                   f"{kind} ({first}...). Remove it from the message.")
             continue
         if e["kind"] != "git" or not e["sub"]:
             continue
@@ -484,7 +501,7 @@ def main():
         if e["sub"] != "commit":
             continue
         args = e["args"]
-        if "--dry-run" in args or "-h" in args or "--help" in args:
+        if ptc.commit_flags(args) & {"--dry-run", "-h", "--help"}:
             continue
         if status == "known":
             for d in dirs:
@@ -497,6 +514,22 @@ def main():
         denials += message_denials(args, None, ptc, bodies)[0]
         if status == "unknown":
             denials.append(unknown_denial(why))
+    return denials, warns
+
+
+def main():
+    cmd = os.environ.get("CMD", "")
+    cwd = os.environ.get("CWD", "")
+    if "commit" not in cmd:
+        return
+    ptc = L.load_text_check()
+    cfg = L.parse_config()
+    _, bodies = ptc.split_heredocs(cmd)
+    if cd is None:
+        sys.stderr.write("commit-gate: _cmd_dirs.py could not be loaded; using the literal-directory scan\n")
+        denials, warns = legacy_commits(cmd, cwd, ptc, cfg, bodies)
+    else:
+        denials, warns = walked_commits(cmd, cwd, ptc, cfg, bodies)
     note = os.environ.get("NOTE", "")
     if denials:
         reason = " ".join(dict.fromkeys(denials))

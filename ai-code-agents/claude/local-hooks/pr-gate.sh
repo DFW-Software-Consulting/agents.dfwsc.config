@@ -20,7 +20,8 @@
 # `gh pr create` is denied (write the directory literally) except in the skipped
 # forms and --head owner:branch/-R; secrets in the title or body are judged from
 # the text whatever the directory; template, placeholder and size rules are
-# skipped. Only read-only git queries, inside a small time budget, no network.
+# skipped (the secret rule also runs in the skipped forms). Without _cmd_dirs.py
+# the previous literal-directory scan runs. Only read-only git queries, inside a small time budget, no network.
 # Fails open: bad input, missing jq/python3/git, an unparseable command, any error.
 #
 # Config (data only, never sourced): ${CLAUDE_GIT_GATES_CONF:-~/.claude/git-gates.conf};

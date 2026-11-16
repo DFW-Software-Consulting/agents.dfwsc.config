@@ -46,5 +46,5 @@ Repository hooks (husky, lint-staged, commitlint) run once, inside `git commit` 
 
 ## Decisions
 - `gh` is needed for git-pr and git-issue only. Without it they return `blocked` (`gh-missing`) with the filled body and the command to run by hand.
-- Skills are named in the agent's prose; the agent has no Skill tool and no `skills:` frontmatter (same as before the split), so check that the skill text actually reaches it when you change this.
+- The agent gets the skills through the `skills:` list in its frontmatter (the five names). Their full content is injected into its context at start. It has no Skill tool and none is needed. A name that matches no skill is skipped silently, and a skill with `disable-model-invocation: true` cannot be preloaded. `local-hooks/tests/run-agent-skills-tests.sh` guards this: it fails if a listed name has no `skills/<name>/SKILL.md` with that `name`.
 - The sibling tool ports (codex, opencode, gemini, cline, hermes) still carry the old single skill.

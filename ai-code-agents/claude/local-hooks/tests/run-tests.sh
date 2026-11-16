@@ -277,6 +277,12 @@ for c in 'D=$(pwd)/x tee "$D" </dev/null' 'D=`pwd`/x tee "$D" </dev/null' 'env D
   'GIT_DIR=$(pwd)/.git git status > "$OUT"'; do
   check "allow: substitution in a prefix assignment, target unresolvable: $c" allow "$gate" "$(bash_payload "$c")"
 done
+# an unresolvable target is never a denial here, glued substitutions included
+for c in 'echo x > $(pwd)/f' 'echo x > "$(pwd)"/f' 'echo x > pre$(pwd)post' 'echo x > `pwd`/f' 'tee $(pwd)/f </dev/null' \
+  'git -C $(pwd)/a push origin main > "$OUT"' 'git -C `pwd`/a commit -m x > "$OUT"' 'git --git-dir=$(pwd)/.git status > "$OUT"' \
+  "bash -c 'git -C \$(pwd)/a push origin main > \"\$OUT\"'" 'eval git -C $(pwd)/a push origin main'; do
+  check "allow: unresolvable target with a glued substitution: $c" allow "$gate" "$(bash_payload "$c")"
+done
 
 # --- commit message file with the option attached (-Fmsg.txt) ---
 for c in 'git commit -Fbad.txt' 'git commit -aFbad.txt' 'git commit -sF bad.txt' 'git commit -a -F bad.txt' 'git commit --file=bad.txt'; do

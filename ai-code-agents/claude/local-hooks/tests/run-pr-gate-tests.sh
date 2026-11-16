@@ -594,6 +594,15 @@ done
 reason_has "unresolvable GIT_DIR: the unknown-directory denial" "$(bp 'GIT_DIR=$X gh pr create --title x --body y' "$PUSHED")" "unknown-directory.*$UNK"
 check "unresolvable GIT_DIR with -R other repo: not denied as unknown" allow "$(bp 'GIT_DIR=$X gh pr create -R owner/elsewhere --title x --body y' "$PUSHED")"
 check "unresolvable GIT_DIR with --web: not denied as unknown" allow "$(bp 'GIT_DIR=$X gh pr create --web --title x --body y' "$PUSHED")"
+# a substitution glued to more text in an argument keeps the command visible
+check "glued substitution in --repo: secret denied" deny "$(bp "gh pr create --repo \$(pwd)/o --title x --body 'y $AWS'" "$PUSHED")"
+check "glued substitution in an earlier git command: secret in gh pr create denied" deny "$(bp "git -C \$(pwd)/a status && gh pr create --title x --body 'y $AWS'" "$PUSHED")"
+# a secret inside an unquoted substitution glued to the text is still found (the walker shows the original text)
+check "secret inside a substitution glued to the body: denied" deny "$(bp "gh pr create --title x --body x\$(echo \"$AWS\")y" "$PUSHED")"
+check "secret inside a substitution glued to the title: denied" deny "$(bp "gh pr create --title x\$(echo \"$AWS\")y --body z" "$PUSHED")"
+check "secret inside a backtick substitution glued to the body: denied" deny "$(bp "gh pr create --title x --body x\`echo \"$AWS\"\`y" "$PUSHED")"
+check "clean substitution glued to the body: allowed" allow "$(bp 'gh pr create --title x --body x$(echo ok)y' "$PUSHED")"
+check "gh pr create behind a glued substitution carrier is still judged" deny "$(bp "git -C \$(pwd)/a status; echo \"\$(gh pr create --title x --body '$AWS')\"" "$PUSHED")"
 # --- round 2: secrets always, matching of the override, git dirs judged as git dirs, ambiguity ---
 # D1: the secret rule runs for every recognised create, with or without a resolvable repository
 check "missing cd target: clean text allowed" allow "$(bp "cd $T/does-not-exist && gh pr create --title x --body y" "$elsewhere")"
@@ -788,7 +797,8 @@ silent "malformed JSON exits 0 silently" '{not json'
 silent "JSON non-object exits 0 silently" '[1,2]'
 silent "empty object exits 0 silently" '{}'
 silent "payload with non-string command exits 0 silently" '{"tool_input":{"command":123}}'
-silent "unterminated quote exits 0 silently" "$(bp "gh pr create --title 'oops --body x")"
+silent "unterminated quote without gh exits 0 silently" "$(bp "echo 'oops")"
+check "unterminated quote on a gh pr create line is denied (judged as text)" deny "$(bp "gh pr create --title 'oops --body x" "$PUSHED")"
 silent "no gh word exits 0 silently" "$(bp 'ls -la')"
 silent "empty gh command exits 0 silently" "$(bp 'gh')"
 silent "gh pr create with no flags exits 0 silently" "$(bp 'gh pr create')"

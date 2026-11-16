@@ -529,6 +529,25 @@ for form in 'GIT_DIR=$(pwd)/.git git commit -m "feat: x"' 'GIT_DIR=`pwd`/.git gi
 done
 check "substitution in another prefix assignment: the commit is judged (staged .env denied)" deny "$(bp 'X=$(pwd)/a git commit -m "feat: x"' "$DIRTY")"
 check "substitution in another prefix assignment: a clean repository allowed" allow "$(bp 'X=$(pwd)/a git commit -m "feat: x"' "$CLEAN")"
+# an unquoted substitution glued to more text in an argument: the commit stays visible and the unknown directory is denied
+for form in 'git -C $(pwd)/a commit -m "feat: x"' 'git -C `pwd`/a commit -m "feat: x"' 'git -C "$(pwd)"/a commit -m "feat: x"' \
+            'git -C pre$(pwd)post commit -m "feat: x"' 'git --git-dir=$(pwd)/.git commit -m "feat: x"' 'git --work-tree=$(pwd)/a commit -m "feat: x"' \
+            'git -C $(echo $(pwd)/a)/b commit -m "feat: x"' "bash -c 'git -C \$(pwd)/a commit -m \"feat: x\"'" \
+            'eval git -C $(pwd)/a commit -m "feat: x"' "git -C \$(pwd)/a commit -m \"key $AWS\"" 'sudo -u root git -C $(pwd)/a commit -m "feat: x"' 'echo "$(git -C $(pwd)/a commit -m "feat: x")"'; do
+  check "substitution glued to an argument: unknown directory denied: $form" deny "$(bp "$form" "$CLEAN")"
+done
+# a wrapper argument or a redirection before the subcommand no longer hides the commit (staged .env denied)
+for form in 'timeout $(echo 5)s git commit -m "feat: x"' 'git 2>&1 commit -m "feat: x"' 'sudo -u $(id -un)x git commit -m "feat: x"' \
+            'echo "$(git commit -m "feat: x")"' 'cat <<EOF'$'\n''$(git commit -m "feat: x")'$'\n''EOF'; do
+  check "wrapper argument or redirection before the subcommand: the commit is judged (staged .env denied): $form" deny "$(bp "$form" "$DIRTY")"
+  check "wrapper argument or redirection before the subcommand: a clean repository allowed: $form" allow "$(bp "$form" "$CLEAN")"
+done
+check "glued substitution in -C of a status is not a commit: allowed" allow "$(bp 'git -C $(pwd)/a status' "$CLEAN")"
+# a secret inside an unquoted substitution glued to message text is still found (the walker shows the original text)
+check "secret inside a substitution glued to the message: denied" deny "$(bp "git commit -m x\$(echo \"$AWS\")y" "$CLEAN")"
+check "secret inside a backtick substitution glued to the message: denied" deny "$(bp "git commit -m x\`echo \"$AWS\"\`y" "$CLEAN")"
+check "secret inside a substitution in a double-quoted message: denied" deny "$(bp "git commit -m \"x\$(echo $AWS)y\"" "$CLEAN")"
+check "clean substitution glued to the message: allowed" allow "$(bp 'git commit -m x$(echo ok)y' "$CLEAN")"
 # explicit git directories are judged by their work tree
 check "GIT_DIR=<repo>/.git commit: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git GIT_WORK_TREE=$DIRTY git commit -m 'feat: x'" "$elsewhere")"
 check "GIT_DIR=<repo>/.git alone: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git git commit -m 'feat: x'" "$elsewhere")"
@@ -663,7 +682,8 @@ silent "JSON non-object exits 0 silently" '[1,2]'
 silent "JSON string exits 0 silently" '"git commit -m x"'
 silent "empty object exits 0 silently" '{}'
 silent "payload with non-string command exits 0 silently" '{"tool_input":{"command":123}}'
-silent "unterminated quote exits 0 silently" "$(bp "git commit -m 'oops")"
+silent "unterminated quote without a commit exits 0 silently" "$(bp "echo 'oops")"
+check "unterminated quote on a commit line is denied (judged as text)" deny "$(bp "git commit -m 'oops" "$CLEAN")"
 silent "no git word exits 0 silently" "$(bp 'ls -la')"
 silent "path-less hook environment (no python3 helper break) still silent on non-git" "$(bp 'echo hi')"
 

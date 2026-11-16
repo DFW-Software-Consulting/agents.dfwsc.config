@@ -7,8 +7,9 @@ walk(cmd, cwd) returns one dict per command, in the order they appear,
 including commands inside `bash -c`/`sh -c`/`eval`/`env -S` bodies (followed 3
 levels deep, at the position of the wrapper, in the directory in effect there,
 `env -C` included):
-  kind      "git", "gh", or "body" (a wrapper body that cannot be parsed; then
-            only "text", "state" "unknown" and "why" are meaningful)
+  kind      "git", "gh", or "body" (a wrapper body, or a whole command line, that
+            cannot be parsed; then only "text", "state" "unknown" and "why" are
+            meaningful; the gates judge its text with BODY_GUARDS)
   sub       git: the subcommand (None when there is none); gh: None
   args      git: the words after the subcommand; gh: the words after `gh`
   pre       git: the global words before the subcommand (-C, -c, ... pairs)
@@ -50,11 +51,31 @@ the name unknown, never its earlier value. Command prefixes
 (`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
 effective(entry) is the one place that turns an entry into the directory to
 judge. Never runs anything and never touches a repository.
-Known limits: an unparseable top-level line yields nothing; `bash -c`/`eval`
-nesting deeper than 3, aliases, xargs/find -exec/ssh wrappers, lines over about
-128 KB and word splitting under a changed IFS are not followed; a `cd` to a
-missing directory or after `false &&` is followed as if it ran.
+Substitutions: a line is first read by _lex, one linear pass that knows quotes,
+`$'...'`, comments, here-documents (quoted or not, `<<-`, several per line),
+`case` patterns, `${ }`, `$(( ))` and every substitution form (`$( )`,
+backticks, `<( )`, `>( )`). Each outermost substitution is one placeholder
+inside whatever word holds it, so a word is never split at a substitution
+(`git -C $(pwd)/a push`, `sudo -u $(id -un)x git push`) and its text is
+restored after tokenizing: every rule sees the words as written. The command
+text inside each substitution is walked at the token that holds it, in the
+directory in effect there (a `cd` inside does not leak out), with the certain
+variables of the line seeded; that covers substitutions inside double quotes,
+`${ }`, `$(( ))` and unquoted here-document bodies too. A redirection inside a
+command (`git 2>&1 push`) is skipped, not the end of the command. A line the
+lexer cannot parse (unclosed quote or substitution, nesting over MAX_NEST) is
+one "body" entry holding the whole text: the gates judge it with BODY_GUARDS, so
+it fails closed. legacy=True does not use the lexer (frozen).
+Known limits: `bash -c`/`eval` nesting deeper than 3, aliases,
+xargs/find -exec/ssh wrappers, lines over about 128 KB and word splitting under a
+changed IFS are not followed; a command word that is itself an expansion
+(`$(echo git) push`, `"$cmd" push`) is not a command; the refspec of a push
+(`git push origin $(echo main)`) is not resolved; a `cd` to a missing directory
+or after `false &&` is followed as if it ran; the lexer reads a few degenerate
+forms differently from bash (an empty `$(()` fallback, a backtick inside a
+here-document delimiter, `#` inside `${ }` in a substitution).
 """
+import bisect
 import importlib.util
 import os
 import re
@@ -94,7 +115,6 @@ VAL_OPTS = {
     "timeout": {"-k", "-s", "--kill-after", "--signal"},
     "xargs": {"-n", "-I", "-L", "-P", "-s", "-d", "-E"},
 }
-ASSIGN_WORD = re.compile(r"^[A-Za-z_]\w*=")
 DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 TEMP_VAR = re.compile(r"^\$\{?(\w+)\}?(/[^$`*?]*)?$")
 TEMP_SUB = re.compile(r"^(?:\$\(\s*mktemp(?P<a>(?:\s+-[dq]+)*)\s*\)"
@@ -167,123 +187,496 @@ def temp_path(word, temps, ok=True):
     return bool(m and m.group(1) in temps and ".." not in (m.group(2) or "").split("/"))
 
 
-def _skip_quoted(cmd, j):
-    """Index just after the quoted string starting at cmd[j] (a quote)."""
-    q = cmd[j]
-    if q == "'":
-        k = cmd.find("'", j + 1)
+# ======================================================================
+# The lexer: one linear pre-pass that finds the command substitutions and the
+# here-documents of a line, so the tokenizer never splits a word at one.
+# ======================================================================
+_PO, _PC = "", ""  # placeholder brackets: PH(n) = "$" + _PO + n + _PC
+MAX_NEST = 16
+_DELIM = frozenset(" \t\n;&|()<>")
+_RESERVED = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "{", "time", "}", "fi", "done"})
+TRACKED_RE = re.compile(r"\b(?:cd|pushd|popd|git|gh|eval|env|bash|sh|zsh|dash|ksh)\b")
+REDIR_OPS = frozenset({">", ">>", "<", ">&", "<&", "&>", "&>>", ">|", "<>", "<<<", "<<", "<<-"})
+
+
+class LexError(ValueError):
+    """The line cannot be lexed. kind "syntax": an unclosed quote, substitution,
+    backtick or `${`, or a here-document inside `$( )` not ended by a newline;
+    kind "limit": nesting deeper than MAX_NEST, or the placeholder characters
+    already in the input."""
+
+    def __init__(self, kind, msg):
+        super().__init__(f"{kind}: {msg}")
+        self.kind = kind
+
+
+def _ph(n):
+    return "$" + _PO + str(n) + _PC
+
+
+class _Lexer:
+    """Frames: command (top level, `$( )`, `<( )`, `>( )`), double quote,
+    `${ }`, `$(( ))`, here-document body. Every character is visited once per
+    nesting level; nesting is capped at MAX_NEST."""
+
+    def __init__(self, s):
+        self.s, self.n = s, len(s)
+        self.top = []        # (start, end, kind, inner): outermost substitutions
+        self.bodies = []     # (start, end): top-level here-document bodies with their delimiter lines
+        self.body_subs = []  # (anchor, start, end, kind, inner): substitutions in unquoted top-level bodies
+        self.noarith = set()  # positions where `$((` / `((` turned out not to be arithmetic
+        self.carry = []       # here-documents a just-closed substitution left pending (their bodies follow in the outer text)
+
+    def sq(self, i):
+        k = self.s.find("'", i + 1)
         if k < 0:
-            raise ValueError("unclosed '")
+            raise LexError("syntax", "unclosed '")
         return k + 1
-    k = j + 1
-    while k < len(cmd) and cmd[k] != q:
-        k += 2 if cmd[k] == "\\" else 1
-    if k >= len(cmd):
-        raise ValueError("unclosed quote")
-    return k + 1
 
+    def ansi(self, i):  # at "$'"
+        s, n, k = self.s, self.n, i + 2
+        while k < n and s[k] != "'":
+            k += 2 if s[k] == "\\" else 1
+        if k >= n:
+            raise LexError("syntax", "unclosed $'")
+        return k + 1
 
-def _word_scan(cmd, i):
-    """(end, subs) for the shell word starting at cmd[i]: end is the index of the
-    unquoted blank or operator that closes it; subs the (start, end, inner) of
-    each unquoted `$( )` and backtick substitution in it (arithmetic `$(( ))`
-    and `${ }` are skipped over)."""
-    n, j, subs = len(cmd), i, []
-    while j < n:
-        c = cmd[j]
-        if c in "'\"":
-            j = _skip_quoted(cmd, j)
-        elif c == "\\":
-            j += 2
-        elif c == "`":
-            k = j + 1
-            while k < n and cmd[k] != "`":
-                k += 2 if cmd[k] == "\\" else 1
-            if k >= n:
-                raise ValueError("unclosed backtick")
-            subs.append((j, k + 1, cmd[j + 1:k]))
-            j = k + 1
-        elif cmd.startswith("$((", j) or cmd.startswith("${", j):
-            op, cl = ("(", ")") if cmd[j + 1] == "(" else ("{", "}")
-            depth, k = 0, j + 1
-            while k < n:
-                if cmd[k] == op:
-                    depth += 1
-                elif cmd[k] == cl:
-                    depth -= 1
-                    if depth == 0:
-                        break
-                k += 1
-            if k >= n:
-                raise ValueError("unclosed expansion")
-            j = k + 1
-        elif cmd.startswith("$(", j):
-            depth, k = 0, j + 1
-            while k < n:
-                if cmd[k] in "'\"":
-                    k = _skip_quoted(cmd, k)
+    def dollar(self, i, nest, rec, dq=False):
+        """At `$` or a backtick: the end of the expansion that starts there, or None."""
+        s = self.s
+        if s[i] == "`":
+            return self.bt(i, nest, rec)
+        if s.startswith("$((", i):
+            if i not in self.noarith:
+                e = self.try_arith(i, 3, nest, rec)
+                if e is not None:
+                    return e
+            return self.csub(i, nest, rec, 2, "$(")
+        if s.startswith("$(", i):
+            return self.csub(i, nest, rec, 2, "$(")
+        if s.startswith("${", i):
+            return self.param(i, nest, rec)
+        if s.startswith("$'", i) and not dq:
+            return self.ansi(i)
+        return None
+
+    @staticmethod
+    def record(rec, start, end, kind, inner):
+        if rec is not None:
+            rec.append((start, end, kind, inner))
+
+    def bt(self, i, nest, rec):
+        s, n, k = self.s, self.n, i + 1
+        while k < n and s[k] != "`":
+            k += 2 if s[k] == "\\" else 1
+        if k >= n:
+            raise LexError("syntax", "unclosed backtick")
+        if nest + 1 > MAX_NEST:
+            raise LexError("limit", "nesting too deep")
+        inner = s[i + 1:k].replace("\\`", "`").replace("\\$", "$").replace("\\\\", "\\")
+        self.record(rec, i, k + 1, "`", inner)
+        return k + 1
+
+    def csub(self, i, nest, rec, skip, kind):
+        if nest + 1 > MAX_NEST:
+            raise LexError("limit", "nesting too deep")
+        self.carry = []
+        end = self.cmd(i + skip, ")", nest + 1, i)
+        self.record(rec, i, end, kind, self.s[i + skip:end - 1])
+        return end
+
+    def try_arith(self, i, skip, nest, rec):
+        """End of the arithmetic `$((...))` / `((...))` at i, or None when it is
+        not arithmetic (then it is a subshell, as bash does). A failed try leaves
+        nothing recorded, and its position is remembered so no try repeats."""
+        mark = len(rec) if rec is not None else 0
+        try:
+            return self.arith(i, skip, nest, rec)
+        except LexError as e:
+            if rec is not None:
+                del rec[mark:]
+            if e.kind == "limit":
+                raise
+            self.noarith.add(i)
+            return None
+
+    def arith(self, i, skip, nest, rec):
+        s, n, k, depth = self.s, self.n, i + skip, 2
+        while k < n:
+            c = s[k]
+            if c == "\\":
+                k += 2
+                continue
+            if c in "$`":
+                e = self.dollar(k, nest, rec)
+                if e is not None:
+                    k = e
                     continue
-                if cmd[k] == "(":
-                    depth += 1
-                elif cmd[k] == ")":
-                    depth -= 1
-                    if depth == 0:
-                        break
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 1:
+                    if k + 1 < n and s[k + 1] == ")":
+                        return k + 2
+                    raise LexError("syntax", "not arithmetic")
+            k += 1
+        raise LexError("syntax", "unclosed arithmetic")
+
+    def param(self, i, nest, rec):
+        """`${...}`: ends at the first unquoted `}`; only a nested `${` (and the
+        quotes and substitutions inside) nests, a plain `{` does not (as in bash)."""
+        s, n, k = self.s, self.n, i + 2
+        while k < n:
+            c = s[k]
+            if c == "\\":
+                k += 2
+                continue
+            if c == "'":
+                k = self.sq(k)
+                continue
+            if c == '"':
+                k = self.dq(k, nest, rec)
+                continue
+            if c in "$`":
+                e = self.dollar(k, nest, rec)
+                if e is not None:
+                    k = e
+                    continue
+            if c == "}":
+                return k + 1
+            k += 1
+        raise LexError("syntax", "unclosed ${")
+
+    def dq(self, i, nest, rec):
+        s, n, k = self.s, self.n, i + 1
+        while k < n:
+            c = s[k]
+            if c == "\\":
+                k += 2
+                continue
+            if c == '"':
+                self.carry = []
+                return k + 1
+            if c in "$`":
+                e = self.dollar(k, nest, rec, True)
+                if e is not None:
+                    k = e
+                    continue
+            k += 1
+        raise LexError("syntax", 'unclosed "')
+
+    def body_scan(self, a, b, nest, rec):
+        """Substitutions in an unquoted here-document body s[a:b] (scanned like double
+        quotes). The shell expands a body only when it runs, so an expansion it cannot
+        parse is no syntax error of the line: the scan stops there and keeps what it
+        found before it (a nesting limit still raises)."""
+        s, k = self.s, a
+        try:
+            while k < b:
+                c = s[k]
+                if c == "\\":
+                    k += 2
+                    continue
+                if c in "$`":
+                    e = self.dollar(k, nest, rec, True)
+                    if e is not None:
+                        k = e
+                        continue
                 k += 1
-            if k >= n:
-                raise ValueError("unclosed $(")
-            subs.append((j, k + 1, cmd[j + 2:k]))
-            j = k + 1
-        elif c in " \t\n;&|<>()":
-            break
-        else:
-            j += 1
-    return j, subs
+        except LexError as e:
+            if e.kind == "limit":
+                raise
 
-
-def _embed(cmd):
-    """(cmd2, inner). A prefix assignment whose value holds an unquoted `$( )` or
-    backtick substitution (`NAME=$(x)/s gh ...`, also after `env`) comes out of
-    the tokenizer in pieces, so the command after it was not found, or its
-    assignment lost. It is rewritten to NAME="$(?)" (one word, never a
-    literal); inner lists the substitutions' texts, which the walker still
-    walks. Anything that does not parse leaves the line as it is."""
-    if "$(" not in cmd and "`" not in cmd:
-        return cmd, []
-    try:
-        out, inner, i, n, start = [], [], 0, len(cmd), True
-        while i < n:
-            c = cmd[i]
-            if c in "'\"":
-                j = _skip_quoted(cmd, i)
-                out.append(cmd[i:j])
-                i, start = j, False
-            elif c == "\\":
-                out.append(cmd[i:i + 2])
-                i, start = i + 2, False
-            elif c == "#" and start:
-                j = cmd.find("\n", i)
-                j = n if j < 0 else j
-                out.append(cmd[i:j])
-                i = j
-            elif c in " \t\n;&|<>(){}":
-                out.append(c)
-                i, start = i + 1, True
-            else:
-                j, subs = _word_scan(cmd, i)
-                w = cmd[i:j]
-                k = j
-                while k < n and cmd[k] in " \t":
-                    k += 1
-                if start and subs and ASSIGN_WORD.match(w) and k > j and k < n and cmd[k] not in ";&|<>)#\n":
-                    out.append(w.partition("=")[0] + '="$(?)"')
-                    inner.extend(t for _, _, t in subs)
+    def heredoc_bodies(self, k, pending, nest):
+        """k is just after a newline: read the pending bodies; the index after them."""
+        s, n = self.s, self.n
+        for (delim, quoted, strip, anchor) in pending:
+            start = k
+            while True:
+                if k >= n:
+                    end = body_end = n
+                    break
+                e = s.find("\n", k)
+                line_end = n if e < 0 else e
+                line = s[k:line_end]
+                text = line.lstrip("\t") if strip else line
+                if text == delim:
+                    body_end = k
+                    end = n if e < 0 else e + 1
+                    break
+                if nest and text.startswith(delim + ")"):
+                    body_end = k  # inside `$( )` the delimiter may be followed by the closing parenthesis
+                    end = k + (len(line) - len(text)) + len(delim)
+                    break
+                k = n if e < 0 else e + 1
+            if not quoted:
+                if nest == 0:
+                    tmp = []
+                    self.body_scan(start, body_end, nest, tmp)
+                    self.body_subs.extend((anchor, a2, b2, kind, inner) for a2, b2, kind, inner in tmp)
                 else:
-                    out.append(w)
-                i, start = max(j, i + 1), False
-        return "".join(out), inner
-    except (ValueError, IndexError):
-        return cmd, []
+                    self.body_scan(start, body_end, nest, None)
+            if nest == 0:
+                self.bodies.append((start, end))
+            k = end
+        pending.clear()
+        return k
+
+    def read_delim(self, k):
+        """After `<<` / `<<-`: (end, delimiter, quoted)."""
+        s, n = self.s, self.n
+        while k < n and s[k] in " \t":
+            k += 1
+        out, quoted = [], False
+        while k < n and s[k] not in _DELIM:
+            c = s[k]
+            if c == "'":
+                e = self.sq(k)
+                out.append(s[k + 1:e - 1])
+                quoted = True
+                k = e
+            elif c == '"':
+                e = k + 1
+                while e < n and s[e] != '"':
+                    e += 2 if s[e] == "\\" else 1
+                if e >= n:
+                    raise LexError("syntax", "unclosed delimiter quote")
+                out.append(s[k + 1:e])
+                quoted = True
+                k = e + 1
+            elif c == "\\":
+                if k + 1 < n:
+                    out.append(s[k + 1])
+                quoted = True
+                k += 2
+            else:
+                out.append(c)
+                k += 1
+        return k, "".join(out), quoted
+
+    def cmd(self, i, close, nest, anchor0=0):
+        """Command context from i; close is ")" inside `$( )` / `<( )`, None at
+        the top. The index just after the closing parenthesis (n at the top).
+        anchor0 is where the enclosing substitution starts: a here-document left
+        pending at its `)` reads its body from the outer text and is anchored there."""
+        s, n = self.s, self.n
+        rec = self.top if nest == 0 else None
+        k = i
+        word_start = cmd_start = True  # the next char starts a word / the next word is a command
+        last = ""                      # the previous whole word
+        paren = 0
+        case = []                      # per `case`: "subject", "pattern" or "body"
+        pending = []                   # here-documents waiting for the next newline
+        while k < n:
+            c = s[k]
+            if c == "\n":
+                k += 1
+                if pending:
+                    k = self.heredoc_bodies(k, pending, nest)
+                word_start = cmd_start = True
+                continue
+            if c in " \t":
+                word_start = True
+                k += 1
+                continue
+            if c == "#" and word_start:
+                e = s.find("\n", k)
+                k = n if e < 0 else e
+                continue
+            if c == "\\":
+                k += 2
+                word_start = cmd_start = False
+                continue
+            if c == "'":
+                k = self.sq(k)
+                word_start = cmd_start = False
+                continue
+            if c == '"':
+                k = self.dq(k, nest, rec)
+                word_start = cmd_start = False
+                continue
+            if c in "$`":
+                e = self.dollar(k, nest, rec)
+                k = k + 1 if e is None else e
+                if self.carry:
+                    pending.extend(self.carry)
+                    self.carry = []
+                word_start = cmd_start = False
+                continue
+            if c in "<>" and s.startswith("(", k + 1) and not (k > 0 and s[k - 1] in "<>"):
+                k = self.csub(k, nest, rec, 2, c + "(")
+                pending.extend(self.carry)
+                self.carry = []
+                word_start = cmd_start = False
+                continue
+            if s.startswith("<<<", k):
+                k += 3
+                word_start, cmd_start = True, False
+                continue
+            if c == "<" and s.startswith("<<", k):
+                strip = s.startswith("<<-", k)
+                anchor = k
+                k, delim, quoted = self.read_delim(k + (3 if strip else 2))
+                if delim:  # none: not a here-document (the shell rejects the line, the lexer need not)
+                    pending.append((delim, quoted, strip, anchor))
+                word_start, cmd_start = True, False
+                continue
+            if c == "(":
+                if case and case[-1] == "pattern":
+                    k += 1  # the optional opener of a pattern
+                    continue
+                if s.startswith("((", k) and (cmd_start or last == "for") and k not in self.noarith:
+                    e = self.try_arith(k, 2, nest, rec)
+                    if e is not None:  # an arithmetic command: no here-document inside
+                        k = e
+                        word_start, cmd_start = True, False
+                        continue
+                paren += 1
+                k += 1
+                word_start = cmd_start = True
+                continue
+            if c == ")":
+                if case and case[-1] == "pattern":
+                    case[-1] = "body"
+                    k += 1
+                    word_start = cmd_start = True
+                    continue
+                if paren:
+                    paren -= 1
+                    k += 1
+                    word_start = cmd_start = True
+                    continue
+                if close == ")":
+                    self.carry = [(d, q, st, anchor0) for d, q, st, _a in pending]
+                    return k + 1
+                k += 1
+                word_start = cmd_start = True
+                continue
+            if c in ";&|":
+                if c == ";" and case and case[-1] == "body" and (s.startswith(";;", k) or s.startswith(";&", k)):
+                    case[-1] = "pattern"
+                    k += 3 if s.startswith(";;&", k) else 2
+                else:
+                    k += 1
+                word_start = cmd_start = True
+                continue
+            if c in "<>":
+                k += 1
+                word_start, cmd_start = True, False
+                continue
+            e = k  # a run of plain characters
+            while e < n and s[e] not in _DELIM and s[e] not in "'\"\\$`#":
+                e += 1
+            if e == k:  # a `#` inside a word
+                e = k + 1
+            run = s[k:e]
+            if word_start and (e >= n or s[e] in _DELIM):
+                last = run
+                if cmd_start and run == "case":
+                    case.append("subject")
+                    cmd_start = False
+                elif case and case[-1] == "subject" and run == "in":
+                    case[-1] = "pattern"
+                    cmd_start = True
+                elif case and run == "esac" and (case[-1] == "pattern" or cmd_start):
+                    case.pop()
+                    cmd_start = False
+                else:
+                    cmd_start = run in _RESERVED or (cmd_start and "=" in run and run[0].isalpha())
+            else:
+                cmd_start = False
+            word_start = False
+            k = e
+        if close == ")":
+            raise LexError("syntax", "unclosed $(")
+        return n
+
+    def lex(self):
+        self.cmd(0, None, 0)
+        spans = [(a, b, 0, (kind, inner)) for a, b, kind, inner in self.top]
+        spans += [(a, b, 1, None) for a, b in self.bodies]
+        spans.sort(key=lambda x: (x[0], x[2]))
+        out, subs, anchors, pos, olen = [], [], [], 0, 0
+        cmd = self.s
+        body_subs = sorted(self.body_subs, key=lambda x: x[:2])
+        bi = 0
+
+        def anchor_upto(limit):
+            nonlocal bi
+            while bi < len(body_subs) and (limit is None or body_subs[bi][0] <= limit):
+                anc, a2, b2, kind, inner = body_subs[bi]
+                subs.append({"kind": kind, "raw": cmd[a2:b2], "inner": inner})
+                anchors.append((olen + (anc - pos), len(subs) - 1))
+                bi += 1
+
+        for a, b, what, data in spans:
+            if a < pos:
+                continue
+            anchor_upto(a)
+            seg = cmd[pos:a]
+            out.append(seg)
+            olen += len(seg)
+            if what == 0:
+                kind, inner = data
+                subs.append({"kind": kind, "raw": cmd[a:b], "inner": inner})
+                p = _ph(len(subs) - 1)
+                anchors.append((olen, len(subs) - 1))
+                out.append(p)
+                olen += len(p)
+            pos = b
+        anchor_upto(None)
+        out.append(cmd[pos:])
+        return "".join(out), subs, anchors
+
+
+def _lex(cmd):
+    """(text, subs, anchors) for one command line; raises LexError.
+    text     cmd with every outermost substitution (`$( )`, backticks, `<( )`,
+             `>( )`) replaced by the placeholder PH(n) = "$" + _PO + n + _PC and
+             every top-level here-document body (with its delimiter line)
+             removed. The placeholder starts with `$` and holds no blank, quote,
+             operator, parenthesis, brace or `#`, so the tokenizer keeps it
+             inside whatever word it sits in and every literal test refuses it.
+    subs     [{kind, raw, inner}]: raw is the span as written, inner the command
+             text (backtick escapes undone)
+    anchors  [(position in text, n)]: the placeholder position, or for a
+             substitution inside an unquoted here-document body the position of
+             its `<<` operator."""
+    if _PO in cmd or _PC in cmd:
+        raise LexError("limit", "placeholder characters in the input")
+    return _Lexer(cmd).lex()
+
+
+def _restore(word, subs):
+    """word with every placeholder put back to the text it replaced."""
+    if _PO not in word:
+        return word
+    out, i = [], 0
+    while True:
+        j = word.find("$" + _PO, i)
+        if j < 0:
+            out.append(word[i:])
+            return "".join(out)
+        k = word.find(_PC, j)
+        out.append(word[i:j])
+        out.append(subs[int(word[j + 2:k])]["raw"])
+        i = k + 1
+
+
+def _tokens(cmd):
+    """(toks, subs_at): the tokens of a line with every placeholder restored to
+    the original text, and {token index: [inner command texts]} for the
+    substitutions that sit in that token. Raises ValueError (LexError included)."""
+    text, subs, anchors = _lex(cmd)
+    starts = []
+    toks = scan.bwc.tokenize(text, starts)
+    toks = [(k, _restore(t, subs) if k == "w" else t) for k, t in toks]
+    subs_at = {}
+    for pos, n in anchors:
+        subs_at.setdefault(max(0, bisect.bisect_right(starts, pos) - 1), []).append(subs[n]["inner"])
+    return toks, subs_at
+
 
 
 def prefix_span(toks, i, legacy):
@@ -335,7 +728,7 @@ def prefix_span(toks, i, legacy):
                 elif not eq and name in VAL_OPTS.get(mode, ()) and p < i:
                     idx.append(p)
                     p += 1
-            elif mode == "timeout" and not seen_duration and DURATION.match(o):
+            elif mode == "timeout" and not seen_duration and (DURATION.match(o) or not scan.literal(o)):
                 seen_duration = True
                 idx.append(p)
                 p += 1
@@ -347,32 +740,24 @@ def prefix_span(toks, i, legacy):
     return p == i, idx, chdirs
 
 
-def words_after(toks, k):
+def words_after(toks, k, redirs=None):
     """The words of the command whose arguments start at toks[k], like
-    bwc.args_until_op, except that an unquoted `$(...)` or backtick
-    substitution (which the tokenizer splits into `$`, `(`, ..., `)`) is one
-    word, so `git -C $(x) commit` keeps its subcommand."""
+    bwc.args_until_op, except that a redirection (an operator of REDIR_OPS and
+    its target word) inside the command is skipped instead of ending it, so
+    `git 2>&1 push` keeps its subcommand. Substitutions are already whole words
+    (see _lex). When `redirs` is a list it receives the redirection operators skipped."""
     out, n = [], k
-    while n < len(toks) and toks[n][0] == "w":
-        t = toks[n][1]
-        if t.endswith("$") and n + 1 < len(toks) and toks[n + 1] == ("o", "("):
-            depth, m, parts = 0, n + 1, []
-            while m < len(toks):
-                if toks[m] == ("o", "("):
-                    depth += 1
-                elif toks[m] == ("o", ")"):
-                    depth -= 1
-                    if depth == 0:
-                        break
-                parts.append(toks[m][1])
-                m += 1
-            if depth:
-                break
-            out.append(t + "(" + " ".join(parts[1:]) + ")")
-            n = m + 1
-            continue
-        out.append(t)
-        n += 1
+    while n < len(toks):
+        kind, t = toks[n]
+        if kind == "w":
+            out.append(t)
+            n += 1
+        elif t in REDIR_OPS:
+            if redirs is not None:
+                redirs.append(t)
+            n += 2 if n + 1 < len(toks) and toks[n + 1][0] == "w" else 1
+        else:
+            break
     return out
 
 
@@ -714,26 +1099,39 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
     state = _state or {"start": time.monotonic(), "count": 0}
     out = []
     orig = cmd
-    inner = []
-    if not legacy:
-        cmd, inner = _embed(cmd)
+    subs_at = {}
     try:
-        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
-    except ValueError:
-        if _depth:
-            out.append(_entry("body", None, "a shell script body that cannot be parsed", False,
+        if legacy:
+            toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
+        else:
+            toks, subs_at = _tokens(cmd)
+    except ValueError:  # LexError included: a line that cannot be parsed is judged as text
+        if _depth or not legacy:
+            out.append(_entry("body", None, "a shell script body that cannot be parsed" if _depth
+                              else "a command line that cannot be parsed", False,
                               text=cmd, depth=_depth))
         return out
     if not cwd and _why is None and not _depth:
         cwd, _why = None, NO_CWD
     cwd = cwd or None
     why, temp, inherit = _why, _temp, _inherit or []
-    start = (cwd, why, temp)
     gd_in = state.get("gd_in", "none")
     # Anything on the line that could redirect a mktemp path makes it unknown.
     line_taint = _taint or "TMPDIR" in orig or bool(REDIRECTING.search(orig)) or not (legacy or temp_root_ok())
     stack = []
     for i, (kind, t) in enumerate(toks):
+        for inner in subs_at.get(i, ()):
+            # A substitution runs where the token that holds it runs, before the command, and
+            # sees every variable (exported or not): seed the certain ones, as eval does.
+            pre = ""
+            if TRACKED_RE.search(inner):
+                state["count"] += 1
+                if state["count"] > MAX_CMDS or time.monotonic() - state["start"] > BUDGET_SECS:
+                    raise Budget()
+                tset = set()
+                senv = {} if "((" in orig else certain_env(toks, i, tset, line_taint)
+                pre = _seed(senv, tset)
+            out.extend(walk(pre + inner, cwd, None, legacy, _depth, why, temp, inherit, _taint, state))
         if kind == "o":
             if t == "(":
                 stack.append((cwd, why, temp))
@@ -811,8 +1209,6 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
                                      tainted, state))
                 finally:
                     state["gd_in"] = gd_in
-    for text in inner:  # commands inside the substitutions _embed took out of prefix assignments
-        out.extend(walk(text, start[0], None, legacy, _depth, start[1], start[2], _inherit, _taint, state))
     return out
 
 
@@ -831,6 +1227,14 @@ def trace(cmd, cwd, home=None):
     except Budget:
         return [], []
     return state["trace"], state["bodies"]
+
+
+def _seed(env, temps):
+    """`K=V; ` text for the certain variables (and mktemp -d names) in effect, to put in front of
+    the text of a substitution so its own walk resolves them like the outer line does."""
+    pre = "".join(f"{k}={v}; " for k, v in env.items() if scan.literal(v) and re.fullmatch(r"\w+", k)
+                  and re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
+    return pre + "".join(f"{k}=$(mktemp -d); " for k in temps if re.fullmatch(r"\w+", k))
 
 
 def _session(toks, i):
@@ -902,7 +1306,7 @@ def cheap_commands(cmd):
     directories (every entry's directory is unknown with reason NO_CWD), no
     wrapper bodies. For the rules that need no directory."""
     try:
-        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(_embed(cmd)[0]))
+        toks = _tokens(cmd)[0]
     except ValueError:
         return []
     out = []
@@ -924,7 +1328,7 @@ def fed_texts(cmd):
     words with a space, the arguments of echo/printf, here-document bodies. []
     when no shell reads from a pipe, here-string or here-document."""
     try:
-        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
+        toks = _tokens(cmd)[0]
     except ValueError:
         return []
     fed = False
@@ -934,12 +1338,12 @@ def fed_texts(cmd):
         ok, idx, _ = prefix_span(toks, i, False)
         if not ok:
             continue
-        args = words_after(toks, i + 1)
+        redirs = []
+        args = words_after(toks, i + 1, redirs)
         if any(not a.startswith("-") or re.match(r"-\w*c", a) for a in args):
             continue  # a script file, or a -c body (walk() follows those)
         s = i - len(idx)
-        after = toks[i + 1 + len(args)] if i + 1 + len(args) < len(toks) else None
-        if (s > 0 and toks[s - 1] in (("o", "|"), ("o", "|&"))) or (after and after[0] == "o" and after[1].startswith("<<")):
+        if (s > 0 and toks[s - 1] in (("o", "|"), ("o", "|&"))) or any(r.startswith("<<") for r in redirs):
             fed = True
             break
     if not fed:
@@ -990,7 +1394,7 @@ def cheap_gates(cmd):
     holds a command it judges). Every directory is unknown with reason
     BUDGET_WHY. For a line over the analysis budget."""
     try:
-        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(_embed(cmd)[0]))
+        toks = _tokens(cmd)[0]
     except ValueError:
         return []
     out = []

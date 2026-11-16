@@ -50,7 +50,8 @@ class Stop(Exception):
 
 
 def literal(p):
-    return bool(p) and "$" not in p and "`" not in p and "*" not in p and "?" not in p
+    return (bool(p) and "$" not in p and "`" not in p and "*" not in p and "?" not in p
+            and "<(" not in p and ">(" not in p)
 
 
 def join(base, p):

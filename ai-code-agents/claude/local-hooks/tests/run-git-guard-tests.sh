@@ -334,6 +334,38 @@ check "GIT_DIR=backtick push --force denied" deny "$(bp 'GIT_DIR=`pwd`/.git git 
 check "env GIT_DIR=\$(pwd)/.git push --force denied" deny "$(bp 'env GIT_DIR=$(pwd)/.git git push --force origin x' "$X")"
 check "bash -c with GIT_DIR=\$(pwd)/.git push --force denied" deny "$(bp "bash -c 'GIT_DIR=\$(pwd)/.git git push --force origin x'" "$X")"
 check "X=\$(pwd)/a push --force denied" deny "$(bp 'X=$(pwd)/a git push --force origin x' "$X")"
+# an unquoted substitution glued to more text in an argument keeps the push visible (the unknown directory is judged like the quoted form)
+for form in 'git -C $(pwd)/a push origin main' 'git -C `pwd`/a push origin main' 'git -C "$(pwd)"/a push origin main' \
+            'git -C pre$(pwd)post push origin main' 'git -C ${V:-$(pwd)}/a push origin main' \
+            'git --git-dir=$(pwd)/.git push origin main' 'git --work-tree=$(pwd)/a push origin main' \
+            'git -C $(echo $(pwd)/a)/b push origin main' "bash -c 'git -C \$(pwd)/a push origin main'" \
+            'eval git -C $(pwd)/a push origin main' 'git -C $(pwd)/a push --force origin x' 'git -C <(pwd)/a push origin main'; do
+  check "substitution glued to an argument: push denied: $form" deny "$(bp "$form" "$X")"
+done
+# the same forms after a here-document whose body holds an apostrophe (the old rewrite lost its place there), and behind each carrier
+HD=$'cat <<\'E\'\nit\'s\nE\n'
+for form in 'git -C $(pwd)/a push origin main' 'sudo -u root git -C $(pwd)/a push origin main' 'sudo -u $(id -un)x git push origin main' \
+            'env -C $(pwd)/a git push origin main' 'env -u $(echo V)x git push origin main' 'nice -n $(echo 5)x git push origin main' \
+            'timeout $(echo 5)s git push origin main' 'timeout 5 git -C $(pwd)/a push origin main' 'command git -C $(pwd)/a push origin main' \
+            '\git -C $(pwd)/a push origin main' "'git' -C \$(pwd)/a push origin main" \
+            'A=V git -C $(pwd)/a push origin main' 'X=$(pwd)/a git push origin main' '( git -C $(pwd)/a push origin main )' \
+            '{ git -C $(pwd)/a push origin main; }' 'true && git -C $(pwd)/a push origin main' 'true | git -C $(pwd)/a push origin main' \
+            'x=$(git -C $(pwd)/a push origin main)' 'echo `git -C $(pwd)/a push origin main`' 'echo "$(git -C $(pwd)/a push origin main)"' \
+            'cat <(git -C $(pwd)/a push origin main)' 'echo "$(echo $(git push origin main))"' 'echo $(echo `git push origin main`)' \
+            'echo ${V:-$(git push origin main)}' 'echo $(( $(git push origin main; echo 1) + 1 ))' 'git 2>&1 push origin main' \
+            'git >/dev/null push origin main'; do
+  check "after an apostrophe here-document: $form" deny "$(bp "$HD$form" "$R")"
+done
+check "substitution in an unquoted here-document body is walked (push denied)" deny "$(bp $'cat <<EOF\n$(git push origin main)\nEOF' "$R")"
+check "a quoted here-document body is data (push text allowed)" allow "$(bp $'cat <<\'EOF\'\n$(git push origin main)\nEOF' "$X")"
+check "phantom here-document: a quoted <<EOF does not hide the next line" deny "$(bp $'echo "x<<EOF"\ngit push origin main' "$R")"
+check "phantom here-document in a commit message does not hide the next line" deny "$(bp $'git commit -m "use <<END in docs"\ngit push origin main' "$R")"
+check "an arithmetic shift is not a here-document" deny "$(bp $'(( x = 1 << 3 ))\ngit push origin main' "$R")"
+check "a comment with a parenthesis inside a substitution does not end it" deny "$(bp $'echo $(echo hi # )\n) $(git push origin main)' "$R")"
+check "case pattern parenthesis inside a substitution does not end it" deny "$(bp 'echo $(case x in a) git push origin main;; esac)' "$R")"
+check "an escaped parenthesis inside a substitution does not end it" deny "$(bp 'echo $(echo \) ; git push origin main)' "$R")"
+check "a brace in a parameter default holding a substitution" deny "$(bp 'echo ${V:-$(echo }; git push origin main)}' "$R")"
+check "an unparseable line after complete lines is judged as text (push denied)" deny "$(bp $'git push origin main\necho \'oops' "$R")"
 check "GIT_DIR=\$(pwd)/.git push to a feature branch: unknown directory is not a denial here" allow "$(bp 'GIT_DIR=$(pwd)/.git git push origin feat' "$X")"
 check "GIT_WORK_TREE=x push -f denied" deny "$(bp 'GIT_WORK_TREE=x git push -f origin x' "$X")"
 check "--git-dir=x push --force denied" deny "$(bp 'git --git-dir=x push --force origin x' "$X")"
@@ -376,7 +408,8 @@ check "bash -c push origin feat/x allowed" allow "$(bp "bash -c 'git push origin
 check "bash -c push origin main from a non-repo directory allowed (directory known)" allow "$(bp "bash -c 'git push origin main'" "$X")"
 check "bash -c push origin main from the repo denied" deny "$(bp "bash -c 'git push origin main'" "$R")"
 check "bash -c with a script file allowed" allow "$(bp 'bash ./deploy.sh' "$X")"
-silent "bash -c with an unparseable body is silent" "$(bp "bash -c 'git push --force \\'oops'" "$X")"
+check "bash -c line that cannot be parsed and holds a force push denied" deny "$(bp "bash -c 'git push --force \\'oops'" "$X")"
+silent "bash -c line that cannot be parsed and holds no guarded command is silent" "$(bp "bash -c 'echo \\'oops'" "$X")"
 # text as data
 check "echo with a force push inside quotes allowed" allow "$(bp 'echo "git push --force"' "$X")"
 check "commit message mentioning a force push allowed" allow "$(bp 'git commit -m "never run git push --force or git commit --no-verify"' "$R")"
@@ -528,7 +561,8 @@ silent "JSON non-object exits 0 silently" '[1,2]'
 silent "JSON string exits 0 silently" '"git push --force"'
 silent "empty object exits 0 silently" '{}'
 silent "payload with non-string command exits 0 silently" '{"tool_input":{"command":123}}'
-silent "unterminated quote exits 0 silently" "$(bp "git push origin main 'oops")"
+silent "unterminated quote without a guarded command exits 0 silently" "$(bp "echo 'oops")"
+check "unterminated quote on a line holding a push is denied (judged as text)" deny "$(bp "git push origin main 'oops")"
 
 # --- denial shape ---
 nasty=$'git push origin main; echo "q\\"uote" \'s\'\n# newline\ttab'

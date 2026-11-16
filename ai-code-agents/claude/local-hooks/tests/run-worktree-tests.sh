@@ -125,7 +125,8 @@ check "git add in submodule of primary superproject denied" deny "$(bp 'git add 
 check "relative cd resolved against cwd" deny "$(bp 'cd src && git add -A' "$primary")"
 check "command without git word allowed" allow "$(bp 'ls -la' "$primary")"
 check "heredoc body mentioning git commit allowed" allow "$(bp $'cat <<EOF\ngit commit -m x\nEOF' "$primary")"
-check "unparseable command allowed" allow "$(bp "git commit -m 'oops" "$primary")"
+check "unparseable command without a guarded git command allowed" allow "$(bp "echo 'oops" "$primary")"
+check "unparseable command holding a commit denied (judged as text)" deny "$(bp "git commit -m 'oops" "$primary")"
 
 # --- read-only forms ---
 for c in 'git commit --help' 'git checkout -h' 'git --no-pager stash --help' 'git add -n .' 'git add --dry-run .' \
@@ -174,6 +175,21 @@ check "env GIT_DIR=\$(pwd)/.git commit denied" deny "$(bp 'env GIT_DIR=$(pwd)/.g
 check "bash -c with GIT_DIR=\$(pwd)/.git commit denied" deny "$(bp "bash -c 'GIT_DIR=\$(pwd)/.git git commit -m x'" "$plain")"
 check "X=\$(pwd)/a commit in the primary checkout denied" deny "$(bp 'X=$(pwd)/a git commit -m x' "$P")"
 check "X=\$(pwd)/a status in the primary checkout allowed" allow "$(bp 'X=$(pwd)/a git status' "$P")"
+# an unquoted substitution glued to more text in an argument: the commit stays visible, the unknown directory is denied
+for form in 'git -C $(pwd)/a commit -m x' 'git -C `pwd`/a commit -m x' 'git -C "$(pwd)"/a commit -m x' \
+            'git -C pre$(pwd)post commit -m x' 'git --git-dir=$(pwd)/.git commit -m x' 'git --work-tree=$(pwd)/a commit -m x' \
+            'git -C $(echo $(pwd)/a)/b commit -m x' "bash -c 'git -C \$(pwd)/a commit -m x'" 'eval git -C $(pwd)/a commit -m x' \
+            'sudo -u root git -C $(pwd)/a commit -m x'; do
+  check "substitution glued to an argument: commit denied: $form" deny "$(bp "$form" "$plain")"
+done
+# a wrapper argument or a redirection before the subcommand no longer hides the commit
+for form in 'timeout $(echo 5)s git commit -m x' 'git 2>&1 commit -m x' 'sudo -u $(id -un)x git commit -m x'; do
+  check "wrapper argument or redirection before the subcommand: commit in the primary checkout denied: $form" deny "$(bp "$form" "$P")"
+done
+check "substitution glued to an argument: status allowed" allow "$(bp 'git -C $(pwd)/a status' "$P")"
+check "a commit inside double quotes holding a substitution is judged (primary checkout denied)" deny "$(bp "echo \"\$(git -C $primary checkout x)\"" "$plain")"
+check "a command inside an unquoted here-document substitution is judged" deny "$(bp "cat <<EOF"$'\n'"\$(git -C $primary checkout x)"$'\n'"EOF" "$plain")"
+check "phantom here-document does not hide the next line" deny "$(bp $'echo "x<<EOF"\n'"git -C $primary checkout x" "$plain")"
 check "--git-dir=\$W commit denied" deny "$(bp 'git --git-dir="$W2" commit -m x' "$plain")"
 check "doubtful assignment is unknown: true && W=x; cd \$W denied" deny "$(bp "true && W=$wt; cd \"\$W\" && git commit -m x" "$plain")"
 check "conditional assignment is unknown denied" deny "$(bp "if true; then W=$wt; fi; cd \"\$W\" && git commit -m x" "$plain")"
@@ -316,7 +332,8 @@ silent "heredoc body after an unknown cd is silent" "$(bp $'cd "$X" && cat <<EOF
 silent "bash -c echo of a git commit is silent" "$(bp "bash -c 'cd \"\$X\" && echo \"git commit -m x\"'" "$primary")"
 silent "grep for git stash after an unknown cd is silent" "$(bp "cd \"\$X\" && grep -r 'git stash' ." "$primary")"
 silent "payload without a cwd and a plain commit is silent (fail open)" "$(jq -n '{tool_name:"Bash",tool_input:{command:"git commit -m x"}}')"
-silent "unparseable wrapper body is silent" "$(bp "bash -c 'git commit -m \\'oops'" "$primary")"
+check "unparseable wrapper line holding a commit denied (judged as text)" deny "$(bp "bash -c 'git commit -m \\'oops'" "$primary")"
+silent "unparseable wrapper line without a guarded command is silent" "$(bp "bash -c 'echo \\'oops'" "$primary")"
 # several commands on one line: any denial wins
 check "allowed worktree command then unknown-directory commit denied" deny "$(bp "git -C $wt commit -m a && cd \"\$X\" && git commit -m b" "$primary")"
 check "temporary and worktree commands only allowed" allow "$(bp "git -C $wt commit -m a && git -C \"\$(mktemp -d)\" commit -m b" "$primary")"

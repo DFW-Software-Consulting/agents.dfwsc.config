@@ -19,7 +19,8 @@ import sys
 SAFE = {"/dev/null", "/dev/stdout", "/dev/stderr"}
 REDIR = {">", ">>", "&>", "&>>", ">|"}
 CMD_PREV = {";", "&&", "||", "|", "|&", "&", "(", "{", "then", "do", "else", "!",
-            "sudo", "xargs", "exec", "time", "command"}
+            "if", "elif", "while", "until", "sudo", "xargs", "exec", "time",
+            "command", "env", "-exec", "-execdir", "-ok", "-okdir"}
 HOME = os.environ.get("GATE_HOME", "")
 SCRATCH = os.environ.get("GATE_SCRATCH", "")
 
@@ -56,16 +57,45 @@ def skip_parens(cmd, i, depth):
     raise ValueError("unbalanced")
 
 
+def skip_braces(cmd, i):
+    """i is just past `${`; return index just past the matching `}`."""
+    depth, n = 1, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c in "'\"":
+            j = i + 1
+            while j < n and cmd[j] != c:
+                j += 2 if (c == '"' and cmd[j] == "\\") else 1
+            if j >= n:
+                raise ValueError("unclosed quote in ${}")
+            i = j + 1
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    raise ValueError("unbalanced ${")
+
+
 def tokenize(cmd):
     """Hand-written shell scanner -> [("w", unquoted_word) | ("o", operator)].
 
     Single quotes are literal (also mid-word); double quotes are opaque with
     backslash escapes (accepted gap: `$(... > f)` inside double quotes is not
     scanned); backslash outside quotes escapes one char; `$(( ))` and `(( ))`
-    are opaque; a `#` starting a word is a comment. Raises ValueError when the
+    are opaque; `${ ... }` is opaque up to its matching brace; `$'...'` honours
+    backslash escapes; backticks are scanned like `$( )`; a `#` starting a word
+    is a comment. Raises ValueError when the
     input cannot be parsed (caller allows).
     """
     toks, buf, in_word, quoted = [], [], False, False
+    bt_open = False
     i, n = 0, len(cmd)
 
     def end_word():
@@ -103,6 +133,28 @@ def tokenize(cmd):
             if j >= n:
                 raise ValueError('unclosed "')
             buf.append(cmd[i + 1:j])
+            in_word = quoted = True
+            i = j + 1
+        elif c == "`":
+            end_word()
+            if bt_open:
+                toks.append(("o", ")"))
+            else:
+                toks.append(("w", "$"))  # unresolvable if used as a target
+                toks.append(("o", "("))
+            bt_open = not bt_open
+            i += 1
+        elif c == "$" and cmd.startswith("${", i):
+            i = skip_braces(cmd, i + 2)
+            buf.append("$")
+            in_word = True
+        elif c == "$" and cmd.startswith("$'", i):
+            j = i + 2
+            while j < n and cmd[j] != "'":
+                j += 2 if cmd[j] == "\\" else 1
+            if j >= n:
+                raise ValueError("unclosed $'")
+            buf.append(cmd[i + 2:j])
             in_word = quoted = True
             i = j + 1
         elif c == "$" and cmd.startswith("$((", i):
@@ -153,6 +205,8 @@ def tokenize(cmd):
             in_word = True
             i += 1
     end_word()
+    if bt_open:
+        raise ValueError("unclosed backtick")
     return toks
 
 
@@ -181,7 +235,10 @@ def allowlisted(p):
 def blocked_target(p):
     """Return p if writing it should be denied, else None."""
     p = resolve(p)
-    if not p or p in SAFE or unresolvable(p) or allowlisted(p):
+    if not p or p in SAFE or unresolvable(p):
+        return None
+    p = os.path.normpath(p)  # so ~/.claude/../x is not allowlisted
+    if allowlisted(p):
         return None
     return p
 

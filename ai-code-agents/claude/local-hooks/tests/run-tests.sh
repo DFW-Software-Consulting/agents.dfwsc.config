@@ -89,6 +89,18 @@ touch -d '+2 hours' "$off"
 check "future-mtime off-file means gate ON" deny "$gate" "$edit"
 rm -f "$off"
 
+# --- keywords, ${...}, normalisation, env/find/backtick/$'' ---
+for c in 'if [[ $a > b ]]; then echo; fi' 'while [[ $i > 0 ]]; do break; done' 'echo ${x:->}' 'echo ${x:-a>b}' \
+  'echo ${x//a/>}' 'echo ${x/>/b}' 'echo ${x:-"a}b>"}' "echo $HOME/.claude/x > $HOME/.claude/y"; do
+  check "allow: $c" allow "$gate" "$(bash_payload "$c")"
+done
+for c in 'if true; then echo x > f; fi' 'echo ${x} > f' "echo x > $HOME/.claude/../f" 'echo x > ~/.claude/../f' \
+  'env X=1 tee f' 'find . -exec sed -i s/a/b/ {} +' 'echo `date > f`' "echo \$'it\\'s' > f"; do
+  check "deny: $c" deny "$gate" "$(bash_payload "$c")"
+done
+check "allow: echo \$'a>b'" allow "$gate" "$(bash_payload "echo \$'a>b'")"
+check "allow: backtick without write" allow "$gate" "$(bash_payload 'echo `date`')"
+
 # --- Escape hatch: off-file TTL and env ---
 touch "$off"
 check "fresh off-file disables gate" allow "$gate" "$edit"

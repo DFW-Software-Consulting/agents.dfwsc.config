@@ -100,7 +100,7 @@ def skip_braces(cmd, i):
     raise ValueError("unbalanced ${")
 
 
-def tokenize(cmd):
+def tokenize(cmd, starts=None):
     """Hand-written shell scanner -> [("w", unquoted_word) | ("o", operator)].
 
     Single quotes are literal (also mid-word); double quotes are opaque with
@@ -109,16 +109,23 @@ def tokenize(cmd):
     are opaque; `${ ... }` is opaque up to its matching brace; `$'...'` honours
     backslash escapes; backticks are scanned like `$( )`; a `#` starting a word
     is a comment. Raises ValueError when the
-    input cannot be parsed (caller allows).
+    input cannot be parsed (caller allows). When `starts` is a list, it receives
+    the offset in `cmd` at which each returned token begins (same length as the result).
     """
     toks, buf, in_word, quoted = [], [], False, False
     bt_open = False
     i, n = 0, len(cmd)
+    wstart = 0
+
+    def push(tok, pos):
+        toks.append(tok)
+        if starts is not None:
+            starts.append(pos)
 
     def end_word():
         nonlocal buf, in_word, quoted
         if in_word:
-            toks.append(("w", "".join(buf)))
+            push(("w", "".join(buf)), wstart)
         buf, in_word, quoted = [], False, False
 
     def at_cmd_start():
@@ -129,6 +136,8 @@ def tokenize(cmd):
 
     while i < n:
         c = cmd[i]
+        if not in_word:
+            wstart = i
         if c == "\\":
             if i + 1 >= n:
                 raise ValueError("trailing backslash")
@@ -155,10 +164,10 @@ def tokenize(cmd):
         elif c == "`":
             end_word()
             if bt_open:
-                toks.append(("o", ")"))
+                push(("o", ")"), i)
             else:
-                toks.append(("w", "$"))  # unresolvable if used as a target
-                toks.append(("o", "("))
+                push(("w", "$"), i)  # unresolvable if used as a target
+                push(("o", "("), i)
             bt_open = not bt_open
             i += 1
         elif c == "$" and cmd.startswith("${", i):
@@ -179,8 +188,9 @@ def tokenize(cmd):
             buf.append("$")
             in_word = True
         elif c == "(" and not in_word and cmd.startswith("((", i) and at_cmd_start():
+            s0 = i
             i = skip_parens(cmd, i + 2, 2)
-            toks.append(("w", "(())"))
+            push(("w", "(())"), s0)
         elif c == "#" and not in_word:
             while i < n and cmd[i] != "\n":
                 i += 1
@@ -189,7 +199,7 @@ def tokenize(cmd):
             i += 1
         elif c == "\n":
             end_word()
-            toks.append(("o", ";"))
+            push(("o", ";"), i)
             i += 1
         elif c in OPCHARS:
             fd = in_word and not quoted and "".join(buf).isdigit() and c == ">"
@@ -215,7 +225,7 @@ def tokenize(cmd):
                     j += 1
             else:
                 j += 1
-            toks.append(("o", cmd[i:j]))
+            push(("o", cmd[i:j]), i)
             i = j
         else:
             buf.append(c)

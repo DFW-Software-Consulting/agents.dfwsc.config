@@ -237,6 +237,25 @@ check "GIT_DIR=backtick commit with a hit denied" deny "$(bp "GIT_DIR=\`pwd\`/.g
 check "env GIT_DIR=\$(pwd)/.git commit with a hit denied" deny "$(bp "env GIT_DIR=\$(pwd)/.git git commit -m 'fakehost-01'" "$plain")"
 check "bash -c with GIT_DIR=\$(pwd)/.git commit with a hit denied" deny "$(bp "bash -c 'GIT_DIR=\$(pwd)/.git git commit -m \"fakehost-01\"'" "$plain")"
 check "GIT_DIR=\$(pwd)/.git commit with a clean text allowed" allow "$(bp "GIT_DIR=\$(pwd)/.git git commit -m 'feat: x'" "$plain")"
+# a substitution glued to more text in an argument: the commit stays visible
+for form in 'git -C $(pwd)/a commit' 'git -C `pwd`/a commit' 'git -C pre$(pwd)post commit' \
+            'git --git-dir=$(pwd)/.git commit' 'git --work-tree=$(pwd)/a commit' 'eval git -C $(pwd)/a commit' \
+            'sudo -u root git -C $(pwd)/a commit'; do
+  check "substitution glued to an argument, text with a hit denied: $form" deny "$(bp "$form -m 'fakehost-01'" "$plain")"
+  check "substitution glued to an argument, clean text allowed: $form" allow "$(bp "$form -m 'feat: x'" "$plain")"
+done
+# a wrapper argument or a redirection before the subcommand no longer hides the commit (public repository)
+for form in 'timeout $(echo 5)s git commit' 'git 2>&1 commit' 'sudo -u $(id -un)x git commit'; do
+  check "wrapper argument or redirection before the subcommand, text with a hit denied: $form" deny "$(bp "$form -m 'fakehost-01'")"
+  check "wrapper argument or redirection before the subcommand, clean text allowed: $form" allow "$(bp "$form -m 'feat: x'")"
+done
+check "a term inside a substitution glued to the message is denied in a public repo" deny "$(bp 'git commit -m x$(echo "fakehost-01")y')"
+check "a clean substitution glued to the message is allowed in a public repo" allow "$(bp 'git commit -m x$(echo ok)y')"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: the over-budget path
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a term inside a substitution is denied in a public repo" deny "$(bp "${PAD}echo \$(git commit -m 'fakehost-01')")"
+check "over the budget: a clean text inside a substitution is allowed in a public repo" allow "$(bp "${PAD}echo \$(git commit -m 'feat: x')")"
 check "--git-dir/--work-tree on the public repo denied" deny "$(bp "git --git-dir=$PUB/.git --work-tree=$PUB commit -m 'fakehost-01'" "$plain")"
 # a directory that cannot be established: a hit is denied, a clean text is silent
 for form in 'cd "$W" && git commit -m "TEXT"' \

@@ -76,13 +76,14 @@ def parse_gh(args, cmddir, bodies, used, ptc, lenient=False):
     None) so the secret rule can still run on it."""
     kind, sub = args[0], args[1]
     o = {"kind": kind, "sub": sub, "title": "", "body": None, "repo": "",
-         "head": None, "base": None, "body_raw": None}
+         "head": None, "base": None, "body_raw": None, "rest": []}
     body_src = None
     i = 2
     while i < len(args):
         t = args[i]
         has_next = i + 1 < len(args)
         if t == "--":
+            o["rest"] = args[i + 1:]  # still scanned for secrets
             break  # everything after is positional, never a flag
         name, eq, val = t.partition("=") if t.startswith("--") else (t, "", "")
         if t in BODY_UNJUDGEABLE or (t.startswith("--") and name in BODY_UNJUDGEABLE):
@@ -533,7 +534,8 @@ def lift_repo(args):
 def judge_text(o):
     """Rule B alone, from the text: the denials for one parsed gh command."""
     hard = []
-    for where, text in (("title", o["title"]), ("body", o["body"]), ("body", o.get("body_raw"))):
+    for where, text in ([("title", o["title"]), ("body", o["body"]), ("body", o.get("body_raw"))]
+                        + [("arguments", t) for t in o.get("rest", [])]):
         for kind, first in L.find_secrets(text or ""):
             hard.append(f"pr-gate (secret-in-text): the {where} contains a {kind} ({first}...). "
                         f"Remove it before posting.")

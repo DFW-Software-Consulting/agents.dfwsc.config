@@ -5,6 +5,8 @@ Newest first. Check here before proposing a fix.
 ## Directory or fresh symlink counts as a fresh off-file (`gate_off_file_state_for`, `_gate-common.sh`)
 - Cause: the helper tested the path with `-e` and read `stat -c %Y`, which does not follow links. A recently modified directory at the off-file path, or a new link to an old file, reported `fresh` and switched the gate off.
 - Fix: require `[ -f ]` (regular file, links followed; directories and dangling links count as no file) and read the time with `stat -L`, so a link is judged by its target.
+- Date: 2026-11-15
+
 ## Branch created from the remote default branch reads as unpushed (git-facts.sh, git-push, git-pr)
 - Signature: `git worktree add -b x <path> origin/main` then `git-push` reports `new_branch: false`, or a branch pushed without `-u` is reported `unpushed` by git-pr.
 - Cause: the new branch's upstream is `origin/main`, so ahead/behind against it says nothing about the branch's own remote copy; a push without `-u` leaves no upstream at all.

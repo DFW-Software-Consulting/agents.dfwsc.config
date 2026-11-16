@@ -8,12 +8,12 @@ All five return the same envelope: `{"skill","status": ok|blocked|needs_input,"b
 | Skill | One job | Inputs | `result` | `next` |
 |---|---|---|---|---|
 | git-commit | commit approved groups | worktree, scope hint, `approved` | `proposed` (needs_input) or `committed`; `unstaged`, `skipped` (secret-looking files), `left_staged`; `log_tail`, `proposed_subject` on block | git-verify |
-| git-verify | run checks, write stamp | worktree, `build` | `head`, `stamp`, `status`, `results`, `failed` on block | git-push, or git-pr when already pushed |
+| git-verify | run checks, write stamp | worktree, `build` | `head`, `stamp`, `status`, `results` (failing commands are the entries with a non-zero `exit`) | git-push, or git-pr when already pushed |
 | git-push | publish the branch | worktree, branch, `head`, remote | `pushed_sha`, `remote`, `upstream`, `new_branch` | git-pr |
 | git-pr | open a PR from a pushed branch | worktree, branch, base, issue number, gate links, verify `results` | `pr_url`, `title`, `base`, `template_used`, `loc`, `codeowners`; `body` and `command` if gh is missing | none |
 | git-issue | create an issue | repo, description | `issue_url`, `number`, `template_used`, `open_questions`; `body` and `command` if gh is missing | none |
 
-`blocked_by` holds short codes only: `detached-head`, `head-mismatch`, `no-remote`, `behind`, `diverged`, `push-failed`, `unpushed`, `gh-missing`, `dirty-tree`, `checks-failed`, `conflict-markers`, `hook-failed`, `message-rejected`, `error`. `next` is a hint; the router decides.
+`blocked_by` holds short codes only: `detached-head`, `head-mismatch`, `no-remote`, `behind`, `diverged`, `push-failed`, `unpushed`, `gh-missing`, `dirty-tree`, `checks-failed`, `conflict-markers`, `hook-failed`, `hook-denied`, `message-rejected`, `error`. `next` is a hint; the router decides.
 
 ## Chains (set in the agent)
 - commit: git-commit; verify: git-verify; push: git-commit, git-verify, git-push
@@ -27,7 +27,7 @@ An empty `committed` list from git-commit continues the chain. git-pr reads the 
 `git-commit` without `approved` returns `needs_input` with the proposed groups. The agent counts the proposal as approved only when the caller's brief explicitly pre-approves committing; otherwise the caller re-invokes it with the approved groups. A `blocked` or `needs_input` envelope ends the chain and is returned as it is.
 
 ## Helper
-`local-hooks/git-facts.sh` prints repo facts as one JSON object (root, branch, default branch, upstream, ahead/behind, clean, linked worktree, PR and issue template paths, commitlint, husky, lint-staged, core.hooksPath, CODEOWNERS, changed lines against the default branch without lockfiles). Pushed state: `push_remote` (pushRemote setting, else `remote.pushDefault`, else the branch's remote, else origin), `push_ref` (`<remote>/<branch>` if it exists, else the upstream when that is not the default branch), `pushed`, `push_ahead`, `push_behind`. A branch made from `origin/main` tracks the default branch and reads as not pushed until its own remote branch exists. Read-only; sets PYTHONDONTWRITEBYTECODE; `--dir <path>`; a non-repo exits 2 with a JSON error. Suite: `run-git-facts-tests.sh`. Skills call it through the live path `~/.claude/local-hooks/git-facts.sh`.
+`local-hooks/git-facts.sh` prints repo facts as one JSON object (root, branch, default branch, upstream, ahead/behind, clean, linked worktree, PR and issue template paths, commitlint, husky, lint-staged, core.hooksPath, CODEOWNERS, changed lines against the default branch without lockfiles). Pushed state: `push_remote` (pushRemote setting, else `remote.pushDefault`, else the branch's remote, else origin, else the only remote; null when none or several and no origin), `push_ref`, `pushed`, `push_ahead`, `push_behind`. `pushed` is true only when `<push_remote>/<branch>` exists; the upstream is never used, so a branch cut from any remote branch (the default branch or another) reads as not pushed until pushed. Read-only; sets PYTHONDONTWRITEBYTECODE; `--dir <path>`; a non-repo exits 2 with a JSON error. Suite: `run-git-facts-tests.sh`. Skills call it through the live path `~/.claude/local-hooks/git-facts.sh`.
 
 ## Rules and where they are enforced
 | Rule | Enforced by |
@@ -37,8 +37,8 @@ An empty `committed` list from git-commit continues the chain. git-pr reads the 
 | No coding-agent credit in commit or `gh pr` text | `hooks/no-agent-mention.py` |
 | No private hostnames, addresses or emails in text on public repos | public-repo-text-gate.sh |
 | Checks pass for the current commit before push or PR create | checks-gate.sh reads the stamp git-verify writes (warn or deny by its config) |
-| Staged secret files, conflict markers, commit subject format | not enforced yet (skills only stage approved files) |
-| PR size cap, PR body sections, branch pushed before PR | skill only: git-pr warns on size and checks `ahead` |
+| Secret files, conflict markers | no hook yet; git-commit skips secret-looking files and blocks on conflict markers. Commit subject format: no hook, skill follows the repo's style |
+| PR size cap, PR body sections, branch pushed before PR | skill only: git-pr warns on size and checks `pushed` and `push_ahead` |
 
 Repository hooks (husky, lint-staged, commitlint) run once, inside `git commit` and `git push`; no skill runs them by hand. No skill edits source files.
 

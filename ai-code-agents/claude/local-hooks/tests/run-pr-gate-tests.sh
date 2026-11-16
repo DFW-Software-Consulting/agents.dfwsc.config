@@ -594,6 +594,10 @@ done
 reason_has "unresolvable GIT_DIR: the unknown-directory denial" "$(bp 'GIT_DIR=$X gh pr create --title x --body y' "$PUSHED")" "unknown-directory.*$UNK"
 check "unresolvable GIT_DIR with -R other repo: not denied as unknown" allow "$(bp 'GIT_DIR=$X gh pr create -R owner/elsewhere --title x --body y' "$PUSHED")"
 check "unresolvable GIT_DIR with --web: not denied as unknown" allow "$(bp 'GIT_DIR=$X gh pr create --web --title x --body y' "$PUSHED")"
+# the secret rule also scans what follows a bare --
+check "secret after a bare -- in pr create denied" deny "$(bp "gh pr create --title x --body y -- $AWS" "$PUSHED")"
+check "secret after a bare -- in pr create denied (no body)" deny "$(bp "gh pr create --fill -- $AWS" "$PUSHED")"
+check "clean text after a bare -- in pr create allowed" allow "$(bp "gh pr create --title x --body y -- notes" "$PUSHED")"
 # a substitution glued to more text in an argument keeps the command visible
 check "glued substitution in --repo: secret denied" deny "$(bp "gh pr create --repo \$(pwd)/o --title x --body 'y $AWS'" "$PUSHED")"
 check "glued substitution in an earlier git command: secret in gh pr create denied" deny "$(bp "git -C \$(pwd)/a status && gh pr create --title x --body 'y $AWS'" "$PUSHED")"

@@ -24,7 +24,7 @@ handback_is_exempt "$sub" && exit 0
 jq -e '.tool_input | type == "object" and (.prompt | type == "string")' >/dev/null 2>&1 <<<"$payload" || exit 0
 prompt="$(jq -r '.tool_input.prompt // empty | strings' <<<"$payload" 2>/dev/null)" || exit 0
 
-if grep -qiE '^[[:space:]]*(#+[[:space:]]*|\*\*)?[[:space:]]*(acceptance criteria|done when|definition of done|done means)' <<<"$prompt"; then
+if grep -qiE '^[[:space:]]*([-*+]|[0-9]+[.)])?[[:space:]]*(#+[[:space:]]*|\*\*)?[[:space:]]*(acceptance criteria|success criteria|done when|definition of done|done means)' <<<"$prompt"; then
   exit 0
 fi
 

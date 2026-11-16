@@ -59,4 +59,4 @@ Append newest first to `docs/context/errors.md`:
 
 ## Reporting
 
-End your report with `Context docs: updated <files>`, `Context docs: no change needed, <reason>`, or `Context docs: none in this repo`.
+The hand-back gate looks for the `Context docs` label at the start of a line (optionally after a bullet, number or `>`, optionally bold), followed by `:` or a dash. End your report with `Context docs: updated <files>`, `Context docs: no change needed, <reason>`, or `Context docs: none in this repo`.

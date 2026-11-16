@@ -113,6 +113,94 @@ call "$hb" "$(pre "$badmsg" "fb-$run" | jq 'del(.scratchpad_dir)')"
 ls "$XDG_CACHE_HOME"/claude-hooks/handback-fb-* >/dev/null 2>&1 && ok "state falls back to XDG cache dir" || bad "xdg fallback"
 unset XDG_CACHE_HOME
 
+# --- review fixes: Context docs variants (item 1) ---
+n=0
+okhdr=$'Acceptance check\n- a : met : e\n\n'
+for cd in '- Context docs: none' '> Context docs: updated x' '**Context docs**: none' '**Context docs:** updated x' 'Context docs : none' 'context docs - none' '* Context docs: none' '1. Context docs: none' 'Context docs – none' 'Context docs — none' '__Context docs__: none'; do
+  n=$((n + 1)); expect "Context docs variant allowed: $cd" "$hb" "$(pre "$okhdr$cd" "cdv$n-$run")" none
+done
+expect "Context docs mid-sentence still sent back" "$hb" "$(pre "${okhdr}I updated the Context docs: none needed" "cdm-$run")" deny
+
+# --- header variants (item 4) ---
+n=0
+for h in '## Acceptance check' '**Acceptance check**' 'Acceptance check:' '- Acceptance check' '1. Acceptance check' '### Acceptance check (4/4)' 'Acceptance checks' '# ACCEPTANCE CHECK'; do
+  n=$((n + 1)); expect "header variant allowed: $h" "$hb" "$(pre "$h"$'\n- a : met : e\n\nContext docs: none' "hv$n-$run")" none
+done
+expect "header variant with unmet line sent back" "$hb" "$(pre $'### Acceptance check (1/2)\n- a : not met : e\nContext docs: none' "hvu-$run")" deny
+
+# --- status parsing (item 2) ---
+n=0
+st() { n=$((n + 1)); expect "$1" "$hb" "$(pre $'Acceptance check\n'"$2"$'\n\nContext docs: none' "st$n-$run")" "$3"; }
+st "met line with 'not met' in evidence is met" '- X : met : the old method was not met by tests' none
+st "met with 'method' and 'metric' words" '- parameters and symmetric metric : met : method ok' none
+st "unmet sent back" '- X : unmet : broken' deny
+st "partially met sent back" '- X : partially met : half' deny
+st "not met with dash separator sent back" '- X - not met - failed' deny
+st "bold not met sent back" '- X : **not met** : failed' deny
+st "status followed by paren (not met)" '- X : not met (flaky)' deny
+st "status followed by paren (met)" '- X : met (all green)' none
+st "table row met allowed" '| X | met | ok |' none
+st "table row not met sent back" '| X | not met | fail |' deny
+st "em dash separators met" '- X — met — fine' none
+st "fallback whole-word: not met sent back" '- X was not met' deny
+st "fallback whole-word: met allowed" '- X was met' none
+st "check mark line met" '✓ X : met : ok' none
+st "cross mark line unmet" '✗ X : unmet : no' deny
+st "template line met | not met ignored" '- X : met | not met : e' none
+st "numbered criterion not met sent back" '1. X : not met : e' deny
+st "no criterion lines: plain not met line evaluated" 'X : not met : e' deny
+
+# --- section boundaries (item 3) ---
+expect "prose with 'not met' after bold label ignored" "$hb" "$(pre $'Acceptance check\n- a : met : e\n\n**Files changed**\nThe requirement was not met earlier but is now.\n\nContext docs: none' "sb1-$run")" none
+expect "prose after Open questions label ignored" "$hb" "$(pre $'**Acceptance check**\n- a : met : e\n**Open questions:**\nStill not met in staging\nContext docs: none' "sb2-$run")" none
+expect "prose after heading ignored" "$hb" "$(pre $'Acceptance check\n- a : met : e\n## Notes\n- b : not met : x\nContext docs: none' "sb3-$run")" none
+expect "non-criterion prose inside section ignored when bullets exist" "$hb" "$(pre $'Acceptance check\nIt was not met at first.\n- a : met : e\nContext docs: none' "sb4-$run")" none
+expect "section ends at Context docs line" "$hb" "$(pre $'Acceptance check\n- a : met : e\nContext docs: none, requirement not met elsewhere' "sb5-$run")" none
+
+# --- missing/null/non-string text (item 6) ---
+sid="nostr-$run"
+for body in '{}' '{"message":null}' '{"message":5}' '{"message":["x"]}'; do
+  call "$hb" "$(jq -n --argjson ti "$body" --arg id "$sid" --arg s "$scratch" '{hook_event_name:"PreToolUse",agent_id:$id,agent_type:"executor",scratchpad_dir:$s,tool_input:$ti}')"
+  [ "$rc" -eq 0 ] && [ -z "$out" ] && ok "PreToolUse message $body allowed" || bad "message $body" "$out"
+done
+call "$hb" "$(jq -n --arg id "$sid" --arg s "$scratch" '{hook_event_name:"SubagentStop",agent_id:$id,agent_type:"executor",scratchpad_dir:$s,last_assistant_message:null}')"
+[ "$rc" -eq 0 ] && [ -z "$out" ] && ok "SubagentStop null last_assistant_message allowed" || bad "null last msg"
+call "$hb" "$(jq -n --arg id "$sid" --arg s "$scratch" '{hook_event_name:"SubagentStop",agent_id:$id,agent_type:"executor",scratchpad_dir:$s}')"
+[ "$rc" -eq 0 ] && [ -z "$out" ] && ok "SubagentStop missing last_assistant_message allowed" || bad "missing last msg"
+[ ! -e "$scratch/handback-$sid.state" ] && ok "non-string messages not counted as send-backs" || bad "state written for non-string"
+
+# --- robustness (item 7) ---
+out="$(pre "$badmsg" "nohome-$run" | jq 'del(.scratchpad_dir)' | env -u HOME -u XDG_CACHE_HOME bash "$hb" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] && ok "HOME unset and no scratchpad_dir: allowed silently" || bad "HOME unset" "rc=$rc $out"
+ro="$HOME/ro"; mkdir -p "$ro"; chmod 500 "$ro"
+out="$(pre "$badmsg" "ro-$run" | jq --arg d "$ro/sub" '.scratchpad_dir=$d' | XDG_CACHE_HOME="$ro/cache" bash "$hb" 2>&1 >/dev/null)"
+[ -z "$out" ] && ok "unwritable state dir prints nothing to stderr" || bad "unwritable stderr" "$out"
+chmod 700 "$ro"
+longid="$(head -c 400 /dev/zero | tr '\0' 'a')$run"
+out="$(pre "$badmsg" "$longid" | bash "$hb" 2>&1 >/dev/null)"; [ -z "$out" ] && ok "over-long agent_id no stderr" || bad "long id" "$out"
+ls "$scratch" | awk '/^handback-a+/ && length($0) > 130 {f=1} END{exit f}' && ok "sanitised id length capped" || bad "id length"
+
+# --- state lifecycle (item 8) ---
+id="life-$run"
+expect "lifecycle: good handback passes" "$hb" "$(pre "$good" "$id")" none
+expect "lifecycle: SubagentStop after pass allowed" "$hb" "$(stp "$badmsg" "$id")" none
+[ ! -e "$scratch/handback-$id.state" ] && ok "lifecycle: SubagentStop cleared state" || bad "state not cleared"
+expect "lifecycle: resumed agent bad handback sent back again" "$hb" "$(pre "$badmsg" "$id")" deny
+expect "lifecycle: resumed agent second bad sent back" "$hb" "$(pre "$badmsg" "$id")" deny
+expect "lifecycle: resumed agent third allowed by cap" "$hb" "$(pre "$badmsg" "$id")" none
+expect "lifecycle: SubagentStop after cap does not re-block" "$hb" "$(stp "$badmsg" "$id")" none
+id="life2-$run"
+expect "lifecycle: pass then fresh count on next handback (1)" "$hb" "$(pre "$good" "$id")" none
+expect "lifecycle: bad handback after pass starts fresh (deny)" "$hb" "$(pre "$badmsg" "$id")" deny
+[ "$(cat "$scratch/handback-$id.state")" = 1 ] && ok "lifecycle: fresh count is 1" || bad "fresh count"
+
+# --- criteria prefixes and success criteria (item 5) ---
+expect "'- Done when tests pass' allowed" "$req" "$(ag $'Do it\n- Done when tests pass' executor)" none
+expect "'2. Acceptance criteria' allowed" "$req" "$(ag $'Do it\n2. Acceptance criteria' executor)" none
+expect "'Success criteria:' allowed" "$req" "$(ag $'Do it\nSuccess criteria:\n- x' executor)" none
+expect "'## Success criteria' allowed" "$req" "$(ag $'Do it\n## Success criteria' executor)" none
+expect "'success criteria' mid-sentence denied" "$req" "$(ag 'please define success criteria later' executor)" deny
+
 # --- fail open: malformed and empty stdin, every script ---
 for s in "$start" "$req" "$hb"; do
   n="$(basename "$s")"

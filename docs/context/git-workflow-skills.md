@@ -13,7 +13,7 @@ All five return the same envelope: `{"skill","status": ok|blocked|needs_input,"b
 | git-pr | open a PR from a pushed branch | worktree, branch, base, issue number, gate links, verify `results` | `pr_url`, `title`, `base`, `template_used`, `loc`, `codeowners`; `body` and `command` if gh is missing | none |
 | git-issue | create an issue | repo, description | `issue_url`, `number`, `template_used`, `open_questions`; `body` and `command` if gh is missing | none |
 
-`blocked_by` holds short codes only: `detached-head`, `head-mismatch`, `no-remote`, `behind`, `diverged`, `push-failed`, `unpushed`, `gh-missing`, `dirty-tree`, `checks-failed`, `conflict-markers`, `hook-failed`, `hook-denied`, `message-rejected`, `error`. `next` is a hint; the router decides.
+`blocked_by` holds short codes only: `detached-head`, `head-mismatch`, `no-remote`, `remote-ambiguous`, `behind`, `diverged`, `push-failed`, `unpushed`, `gh-missing`, `dirty-tree`, `checks-failed`, `conflict-markers`, `hook-failed`, `hook-denied`, `message-rejected`, `error`. `next` is a hint; the router decides.
 
 ## Chains (set in the agent)
 - commit: git-commit; verify: git-verify; push: git-commit, git-verify, git-push

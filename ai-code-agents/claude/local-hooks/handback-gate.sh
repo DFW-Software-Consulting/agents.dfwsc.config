@@ -74,8 +74,10 @@ finish() { if [ "$event" = "SubagentStop" ]; then rm -f "$state" 2>/dev/null; el
 
 problems=()
 max_chars="$(handback_max_chars)"
-if [ "${#text}" -gt "$max_chars" ]; then
-  problems+=("Your report is ${#text} characters, over the ${max_chars}-character limit. Cut it to under ${max_chars} characters and move detail (logs, diffs, listings, long output) into a file, and give that file's path in the report.")
+text_len="$(jq -r "$field | length" <<<"$payload" 2>/dev/null)" || text_len=0
+case "$text_len" in ''|*[!0-9]*) text_len=0 ;; esac
+if [ "$text_len" -gt "$max_chars" ]; then
+  problems+=("Your report is ${text_len} characters; the limit is ${max_chars} (a report of exactly ${max_chars} is fine). Shorten it by dropping detail and keeping the conclusions. If you can write files, put the detail in a file and give its path in the report.")
 fi
 # Parse the report. Prints NOSECTION, UNMET or OK.
 verdict=SKIP

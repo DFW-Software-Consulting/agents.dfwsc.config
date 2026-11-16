@@ -32,7 +32,8 @@ expect_stop() {
   fi
   [ "$rc" -eq 0 ] && [ "$got" = "$3" ] && ok "$1" || bad "$1" "(expected $3, got $got, rc=$rc) $out"
 }
-marker() { echo "$scratch/reply-cap-approval-$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_')"; }
+mdir="$HOME/.cache/claude-hooks"
+marker() { echo "$mdir/reply-cap-approval-$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_')"; }
 long="$(filler 1500)"; short="$(filler 500)"
 
 # --- measuring from last_assistant_message ---
@@ -67,17 +68,45 @@ expect_stop "fallback: junk lines skipped" "$(fb "$tr_dir/short.jsonl" "b7-$run"
 
 # --- approval phrases set a marker ---
 n=0
-for ph in "go long" "No Limit" "give me the full writeup" "FULL WRITE-UP please" "I need more detail." "expand" "  Expand  "; do
+yes_phrases=("go long" "No Limit" "give me the full writeup" "FULL WRITE-UP please" "I need more detail." "expand" "  Expand  " " Expand. " "explain the gate, go long" "go long on this one" "in more detail please." "Tell me about it, Full Write-Up, thanks!" $'first line\ngo long\nlast line' $'do the thing\n  More detail.  \nok' $'```\nx\n```\ngo long' "GO LONG")
+for ph in "${yes_phrases[@]}"; do
   n=$((n + 1)); s="ph$n-$run"; call "$pr" "$(up "$ph" "$s")"
   [ "$rc" -eq 0 ] && [ "$(cat "$(marker "$s")" 2>/dev/null)" = oneshot ] && ok "phrase sets one-shot marker: '$ph'" || bad "phrase '$ph'" "rc=$rc out=$out"
 done
-for ph in "expand the function" "going longer" "no limits" "more details" "please explain" "nolimit"; do
+no_phrases=("expand the function" "going longer" "no limits" "more details" "please explain" "nolimit" "add more detail to the docs" "there is no limit on retries" "what is the rate limit on this API" "we should go long on the stock" $'say go long here\nand more' $'```\ngo long\n```\nhello' $'before\n```\nmore detail\n```' "expand it please" "set the limit off for the rate limiter" "go long-term")
+for ph in "${no_phrases[@]}"; do
   n=$((n + 1)); s="np$n-$run"; call "$pr" "$(up "$ph" "$s")"
   [ ! -e "$(marker "$s")" ] && ok "no marker for '$ph'" || bad "unexpected marker for '$ph'"
 done
-s="lo-$run"; call "$pr" "$(up "limit off" "$s")"
-[ "$(cat "$(marker "$s")")" = session ] && ok "'limit off' sets session marker" || bad "limit off marker"
+n=0
+for ph in "limit off" "Limit OFF" "  limit off.  " "limit off!"; do
+  n=$((n + 1)); s="lo$n-$run"; call "$pr" "$(up "$ph" "$s")"
+  [ "$(cat "$(marker "$s")" 2>/dev/null)" = session ] && ok "whole prompt '$ph' sets session marker" || bad "limit off '$ph'"
+done
+for ph in "set the limit off for the rate limiter" "please turn limit off now" "limit off and go on" $'limit off\nplease'; do
+  n=$((n + 1)); s="lox$n-$run"; call "$pr" "$(up "$ph" "$s")"
+  [ ! -e "$(marker "$s")" ] && ok "'$ph' does not set session marker" || bad "limit off in sentence '$ph'"
+done
+# "limit on" clears only as a whole prompt
+for ph in "what is the rate limit on this API" "there is no limit on retries" "limit on retries"; do
+  n=$((n + 1)); s="lon$n-$run"; call "$pr" "$(up "limit off" "$s")"; call "$pr" "$(up "$ph" "$s")"
+  [ "$(cat "$(marker "$s")" 2>/dev/null)" = session ] && ok "'$ph' keeps the session approval" || bad "'$ph' cleared approval"
+done
+for ph in "limit on" "Limit On." "  LIMIT ON  "; do
+  n=$((n + 1)); s="lonc$n-$run"; call "$pr" "$(up "limit off" "$s")"; call "$pr" "$(up "$ph" "$s")"
+  [ ! -e "$(marker "$s")" ] && ok "whole prompt '$ph' clears approval" || bad "'$ph' did not clear"
+done
 s="lc-$run"; call "$pr" "$(up "limit once" "$s")"; [ ! -e "$(marker "$s")" ] && ok "'limit once' is not 'limit on'" || bad "limit once"
+
+# --- stale one-shot ---
+s="st-$run"; call "$pr" "$(up "go long" "$s")"
+call "$pr" "$(up "now fix the bug" "$s")"
+[ ! -e "$(marker "$s")" ] && ok "next prompt removes a left-over one-shot" || bad "stale one-shot kept"
+expect_stop "stale one-shot: long reply to unrelated prompt blocked" "$(stop "$long" "$s")" block
+s="st2-$run"; call "$pr" "$(up "limit off" "$s")"; call "$pr" "$(up "fix the bug" "$s")"
+[ "$(cat "$(marker "$s")")" = session ] && ok "session approval survives later prompts" || bad "session approval lost"
+s="st3-$run"; call "$pr" "$(up "go long" "$s")"; call "$pr" "$(up "go long again" "$s")"
+[ "$(cat "$(marker "$s")")" = oneshot ] && ok "new approving prompt re-arms the one-shot" || bad "re-arm"
 
 # --- reminders ---
 call "$pr" "$(up "hello" "r1-$run")"; plain="$out"
@@ -114,23 +143,23 @@ call "$pr" "$(up "go long" "iso1-$run")"
 expect_stop "other session does not share the marker" "$(stop "$long" "iso2-$run")" block
 expect_stop "own session still approved" "$(stop "$long" "iso1-$run")" none
 s="../a/b/c-$run"; call "$pr" "$(up "go long" "$s")"
-[ "$(cat "$scratch/reply-cap-approval-___a_b_c-$run" 2>/dev/null)" = oneshot ] && ok "slashes in session_id sanitised in marker name" || bad "sanitise"
+[ "$(cat "$mdir/reply-cap-approval-___a_b_c-$run" 2>/dev/null)" = oneshot ] && ok "slashes in session_id sanitised in marker name" || bad "sanitise"
 [ ! -e "$scratch/../a" ] && ok "no path escape" || bad "path escape"
 expect_stop "sanitised session id approves" "$(stop "$long" "$s")" none
-call "$pr" "$(up "go long" "")"; ls "$scratch"/reply-cap-approval- >/dev/null 2>&1 && bad "marker written without session_id" || ok "no marker without session_id"
+call "$pr" "$(up "go long" "")"; ls "$mdir"/reply-cap-approval-?* 2>/dev/null | grep -qE 'approval-$'  && bad "marker written without session_id" || ok "no marker without session_id"
 
-# --- cache fallback when no scratchpad_dir ---
+# --- one canonical marker location ---
 call "$pr" "$(up "go long" "c1-$run" "")"
 [ "$(cat "$HOME/.cache/claude-hooks/reply-cap-approval-c1-$run" 2>/dev/null)" = oneshot ] && ok "marker under HOME cache without scratchpad_dir" || bad "cache marker"
-expect_stop "Stop finds the cache marker" "$(stop "$long" "c1-$run" false "")" none
+call "$pr" "$(up "go long" "c3-$run")"
+[ "$(cat "$HOME/.cache/claude-hooks/reply-cap-approval-c3-$run" 2>/dev/null)" = oneshot ] && [ ! -e "$scratch/reply-cap-approval-c3-$run" ] && ok "scratchpad_dir does not move the marker" || bad "marker in scratchpad"
+expect_stop "prompt had scratchpad_dir, Stop does not: approval found" "$(stop "$long" "c3-$run" false "")" none
+call "$pr" "$(up "go long" "c4-$run" "")"
+expect_stop "Stop has scratchpad_dir, prompt did not: approval found" "$(stop "$long" "c4-$run")" none
 export XDG_CACHE_HOME="$HOME/xdg"
 call "$pr" "$(up "go long" "c2-$run" "")"
 [ -f "$HOME/xdg/claude-hooks/reply-cap-approval-c2-$run" ] && ok "XDG_CACHE_HOME honoured" || bad "xdg marker"
 unset XDG_CACHE_HOME
-# marker written with scratchpad_dir, Stop payload without it
-call "$pr" "$(up "go long" "c3-$run")"
-mkdir -p "$HOME/.cache/claude-hooks"
-expect_stop "Stop without scratchpad_dir does not see a marker kept under scratchpad_dir" "$(stop "$long" "c3-$run" false "")" block
 
 # --- shared file missing: old behaviour ---
 iso="$(mktemp -d)"; cp "$cap" "$pr" "$iso/"

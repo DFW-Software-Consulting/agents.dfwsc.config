@@ -4,41 +4,53 @@
 # that approve a long reply, and the approval marker paths.
 #
 # Approval markers are files named reply-cap-approval-<session> containing
-# "oneshot" or "session". They live under scratchpad_dir when the payload gives
-# one, else under ${XDG_CACHE_HOME:-$HOME/.cache}/claude-hooks. Writers use the
-# first directory; readers and clearers check both, so a payload that carries
-# scratchpad_dir on one event and not the other still finds the marker.
+# "oneshot" or "session", always under ${XDG_CACHE_HOME:-$HOME/.cache}/claude-hooks
+# (scratchpad_dir is deliberately not used: it may not be in every payload).
 
 REPLY_CAP_CHARS=1200
-# Whole phrases (case-insensitive) that approve one long reply. "expand" counts
-# only when it is the entire trimmed prompt.
+# Phrases that approve one long reply (case-insensitive, whole phrase). They
+# count only at the very start or very end of the prompt (trailing punctuation,
+# "please" and "thanks" ignored) or alone on a line; never inside a fenced code
+# block. "expand", "limit off" and "limit on" count only as the whole prompt
+# (trailing punctuation ignored).
 REPLY_CAP_ONESHOT_PHRASES="go long|no limit|full writeup|full write-up|more detail"
 REPLY_CAP_SESSION_ON_PHRASE="limit off"
 REPLY_CAP_SESSION_OFF_PHRASE="limit on"
 
-# reply_cap_has_phrase LOWERCASED_TEXT PHRASE: whole-phrase match.
-reply_cap_has_phrase() {
-  printf '%s\n' "$1" | grep -qE "(^|[^a-z0-9])$2([^a-z0-9]|\$)"
+# reply_cap_strip_tail: stdin to stdout, drops trailing punctuation/space and a
+# trailing "please"/"thanks" (then punctuation again).
+reply_cap_strip_tail() {
+  sed -E -e 's/[[:space:][:punct:]]+$//' -e 's/(^|[^a-z0-9])(please|thanks)$//' -e 's/[[:space:][:punct:]]+$//'
 }
 
 # reply_cap_classify PROMPT: prints session | clear | oneshot | none.
-# "limit on" wins over "limit off", which wins over the one-shot phrases.
 reply_cap_classify() {
-  local p t
-  p="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  if reply_cap_has_phrase "$p" "$REPLY_CAP_SESSION_OFF_PHRASE"; then echo clear; return; fi
-  if reply_cap_has_phrase "$p" "$REPLY_CAP_SESSION_ON_PHRASE"; then echo session; return; fi
-  if reply_cap_has_phrase "$p" "($REPLY_CAP_ONESHOT_PHRASES)"; then echo oneshot; return; fi
-  t="$(printf '%s' "$p" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  if [ "$t" = "expand" ]; then echo oneshot; return; fi
+  local t whole first last line
+  # Lowercase, drop fenced code blocks, trim.
+  t="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]' | awk '/^[[:space:]]*```/ { f = !f; next } !f')"
+  whole="$(printf '%s' "$t" | sed -E 's/^[[:space:]]+//' | sed -E 's/[[:space:][:punct:]]+$//')"
+  case "$whole" in
+    "$REPLY_CAP_SESSION_OFF_PHRASE") echo clear; return ;;
+    "$REPLY_CAP_SESSION_ON_PHRASE") echo session; return ;;
+    expand) echo oneshot; return ;;
+  esac
+  first="$(printf '%s\n' "$t" | sed -E '/^[[:space:]]*$/d' | head -n 1 | sed -E 's/^[[:space:]]+//')"
+  if printf '%s\n' "$first" | grep -qE "^($REPLY_CAP_ONESHOT_PHRASES)([^a-z0-9-]|\$)"; then echo oneshot; return; fi
+  last="$(printf '%s\n' "$t" | sed -E '/^[[:space:]]*$/d' | tail -n 1 | reply_cap_strip_tail)"
+  if printf '%s\n' "$last" | grep -qE "(^|[^a-z0-9])($REPLY_CAP_ONESHOT_PHRASES)\$"; then echo oneshot; return; fi
+  while IFS= read -r line; do
+    line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//' | reply_cap_strip_tail)"
+    case "$line" in
+      "go long"|"no limit"|"full writeup"|"full write-up"|"more detail") echo oneshot; return ;;
+    esac
+  done <<<"$t"
   echo none
 }
 
-# reply_cap_dirs SCRATCHPAD_DIR: prints candidate marker dirs, writer first.
+# reply_cap_dirs [ignored]: prints the one marker dir. The location does not
+# depend on payload fields, so every event finds the same marker.
 reply_cap_dirs() {
-  local s="$1" base
-  [ -n "$s" ] && [ -d "$s" ] && echo "$s"
-  base="${XDG_CACHE_HOME:-}"
+  local base="${XDG_CACHE_HOME:-}"
   if [ -z "$base" ]; then [ -n "${HOME:-}" ] || return 0; base="$HOME/.cache"; fi
   echo "$base/claude-hooks"
 }

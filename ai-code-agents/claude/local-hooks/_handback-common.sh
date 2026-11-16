@@ -20,7 +20,8 @@ handback_is_exempt() {
 }
 
 # Longest report (characters, code blocks included) that goes through unsent
-# back. Override with CLAUDE_HANDBACK_MAX_CHARS; non-numeric or zero = default.
+# back. Override with CLAUDE_HANDBACK_MAX_CHARS: digits only, read as decimal
+# (so 08 and 09 are 8 and 9, not octal); non-numeric or zero = default.
 HANDBACK_MAX_CHARS_DEFAULT=4000
 handback_max_chars() {
   local v="${CLAUDE_HANDBACK_MAX_CHARS:-}"

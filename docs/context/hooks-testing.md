@@ -1,6 +1,6 @@
 # Testing hooks
 
-Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-tests.sh` except `run-tests.sh`. Each pipes sample hook payloads into the repo copy of the scripts and checks the result. Each prints a summary line containing passed and failed counts; the punctuation differs between suites. The bar is 0 failed. Counts change with every change, so they are not recorded here.
+Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-tests.sh` except `run-tests.sh`. Each pipes sample hook payloads into the repo copy of the scripts and checks the result. Each prints a summary line containing passed and failed counts; the punctuation differs between suites. The bar is 0 failed. Counts change with every change, so they are not recorded here (the two git-gates suites are the exception, noted below as written).
 
 ## Suites
 - `run-tests.sh` : delegate-gate, delegate-reminder, require-agent-model, `../hooks/no-agent-mention.py`.
@@ -13,6 +13,8 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 - `run-reply-cap-tests.sh` : enforce-response-cap and reply-cap-prompt.
 - `run-public-text-gate-tests.sh` : public-repo-text-gate and `_public-text-check.py`.
 - `run-checks-gate-tests.sh` : checks-gate; builds repos with a local bare origin and makes stamps with the real run-checks.sh.
+- `run-commit-gate-tests.sh` : commit-gate (438 passed when written): every secret file name by staged, `commit -a`, same-line add and `add -A`; content and message patterns with the 6-character rule; look-alike strings; path-limited commits; globs; subject warnings; escape and fail-open cases. Local bare origin, temp HOME and config.
+- `run-pr-gate-tests.sh` : pr-gate (319 passed when written): rule A including an upstream that is the default branch, secrets, template locations and letter case, modes and date, SOP repos, placeholders, size, issues, skipped forms, body from file and stdin. Local bare origin whose URL is a fake one rewritten to the local path.
 - `run-checks-tests.sh` : run-checks.sh, `_run_checks.py`, `_checks_stamp.py`; needs no toolchain or network.
 
 - `run-git-facts-tests.sh` : git-facts.sh and `_git_facts.py`; throwaway repos with local bare remotes, no network.

@@ -19,6 +19,8 @@ Findings:
 - Adds checks-gate (reads the run-checks stamps before push and PR create; warn or deny by config) and conditional `--force-with-lease` in git-guard (valid stamp, then ask).
 - Off-file for public-repo-text-gate, shared-db-write-gate and the acceptance pair (require-acceptance-criteria, handback-gate, context-docs-start): a fresh `~/.claude/public-text-gate.off`, `shared-db-gate.off` or `acceptance-gate.off` switches the gate off for 12 hours; a stale or future-dated one is ignored with an "expired" note in the denial text; environment switches unchanged.
 - Branch feat/split-git-workflow-skills (not a numbered pull request): splits the git-workflow skill into git-commit, git-push, git-pr and git-issue beside git-verify, adds `git-facts.sh` and its suite, turns the agent into a router and the old skill into a stub; drops the PR template's AI usage section.
+- Adds commit-gate (secrets, conflict markers, secret files; subject format warn-only) and pr-gate (push state, secrets, template sections, placeholders, size by mode). A review round fixed: upstream-is-default-branch misread, `*.pub` and env-var `.npmrc` false denials, the provider example key, path-limited commits, glob adds, capped reads.
+- Last review round of commit-gate: directory and glob commits cover staged files, first commits compare with the empty tree, oversized files are skipped one by one with a warning, `.npmrc` comments and variable-only tokens, payment-key prefixes keep underscore as a boundary (a missed live key costs more than a reworded line).
 Lessons:
 - Test the whole `ai-code-agents/claude/` tree, not just `local-hooks/`.
 - Do not stack pull requests on a base that will be squash-merged.
@@ -29,3 +31,4 @@ Lessons:
 - Capture command output through a temporary file, not a pipe.
 - Verify tool names in command headers; wrong names pre-approve nothing.
 - A hook decision of "ask" is soft: keep judging the rest of the command line before answering.
+- A new branch's upstream may be the default branch; judge a push from the remote ref named after the branch, not from `@{u}`.

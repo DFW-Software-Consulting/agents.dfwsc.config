@@ -181,6 +181,65 @@ check "non-git command allowed" allow "$(bp 'ls -la')"
 check "git word only inside quotes allowed" allow "$(bp "echo 'git push origin main'")"
 check "heredoc body allowed" allow "$(bp $'cat <<EOF\ngit push --force origin main\nEOF')"
 
+# --- review fixes: abbreviated long options ---
+check "push --force-w denied" deny "$(bp 'git push --force-w origin feature')"
+check "push --forc denied" deny "$(bp 'git push --forc origin feature')"
+check "push --force-with-l=x denied" deny "$(bp 'git push --force-with-l=x origin feature')"
+check "push --force-i denied" deny "$(bp 'git push --force-i origin feature')"
+check "commit --no-ver denied" deny "$(bp 'git commit --no-ver -m x')"
+check "push --no-ver denied" deny "$(bp 'git push --no-ver origin feature')"
+check "push --mirr denied" deny "$(bp 'git push --mirr origin')"
+check "push --al denied" deny "$(bp 'git push --al origin')"
+check "commit --no-edit allowed" allow "$(bp 'git commit --amend --no-edit')"
+check "push --follow-tags (feature) allowed" allow "$(bp 'git push --follow-tags origin feature')"
+check "push --no-tags-style: --no-thin allowed" allow "$(bp 'git push --no-thin origin feature')"
+check "push --atomic origin feat/x allowed" allow "$(bp 'git push --atomic origin feat/x')"
+check "push --no-force-with-lease allowed" allow "$(bp 'git push --no-force-with-lease origin feature')"
+check "push --dry origin main allowed (abbreviated dry run)" allow "$(bp 'git push --dry origin main')"
+check "merge --no-edit allowed" allow "$(bp 'git merge --no-edit feature')"
+check "rebase --no-ff allowed" allow "$(bp 'git rebase --no-ff main')"
+
+# --- flag rules do not depend on the directory ---
+check "cd missing-dir && commit -n denied" deny "$(bp "cd $T/newdir && git commit -n -m x" "$elsewhere")"
+check "cd \$X && commit -n denied" deny "$(bp 'cd "$X" && git commit -n -m x' "$elsewhere")"
+check "cd \$X && push -f denied" deny "$(bp 'cd "$X" && git push -f' "$elsewhere")"
+check "-C \$X push --force denied" deny "$(bp 'git -C "$X" push --force origin x' "$elsewhere")"
+check "cd missing-dir && push --no-verify denied" deny "$(bp "cd $T/newdir && git push --no-verify" "$elsewhere")"
+check "cd \$X && plain commit allowed" allow "$(bp 'cd "$X" && git commit -m x' "$elsewhere")"
+check "non-literal cd then absolute cd into repo still judged" deny "$(bp "cd \"\$X\" && cd $T/r && git push origin main" "$elsewhere")"
+check "git push --mirror with unknown dir denied" deny "$(bp 'cd "$X" && git push --mirror' "$elsewhere")"
+
+# --- non-literal and wildcard refspecs ---
+check "push origin \$BR on main denied" deny "$(bp 'BR=main; git push origin $BR')"
+check "push origin command substitution on main denied" deny "$(bp 'git push origin "$(git branch --show-current)"')"
+check "push origin backtick on main denied" deny "$(bp 'git push origin `git branch --show-current`')"
+check "push wildcard refspec denied" deny "$(bp 'git push --prune origin "refs/heads/*:refs/heads/*"')"
+check "push refs/heads/* wildcard denied" deny "$(bp 'git push origin "refs/heads/*"')"
+check "push tags wildcard allowed" allow "$(bp 'git push origin "refs/tags/*"')"
+check "push feature/* wildcard destination allowed" allow "$(bp 'git push origin "refs/heads/feat/*:refs/heads/feat/*"')"
+on_feature "$T/r"
+check "push origin \$BR on feature branch allowed" allow "$(bp 'BR=feature; git push origin $BR')"
+check "push command substitution on feature branch allowed" allow "$(bp 'git push origin "$(git branch --show-current)"')"
+on_main "$T/r"
+
+# --- hook-disabling variables set earlier on the line ---
+check "export HUSKY=0; commit denied" deny "$(bp 'export HUSKY=0; git commit -m x')"
+check "export HUSKY=0 && commit denied" deny "$(bp 'export HUSKY=0 && git commit -m x')"
+check "HUSKY=0; commit denied" deny "$(bp 'HUSKY=0; git commit -m x')"
+check "newline-separated HUSKY=0 then commit denied" deny "$(bp $'HUSKY=0\ngit commit -m x')"
+check "export SKIP=lint && push denied" deny "$(bp 'export SKIP=lint && git push origin feature')"
+check "HUSKY=0 npm test && commit allowed" allow "$(bp 'HUSKY=0 npm test && git commit -m x')"
+check "HUSKY=0 in an ended subshell allowed" allow "$(bp '(export HUSKY=0; npm test); git commit -m x')"
+check "HUSKY=0 later overridden to 1 allowed" allow "$(bp 'export HUSKY=0; HUSKY=1 git commit -m x')"
+check "SKIP= empty allowed" allow "$(bp 'SKIP= git commit -m x')"
+check "SKIP=lint denied" deny "$(bp 'SKIP=lint git commit -m x')"
+
+# --- tags and deletes while on the default branch ---
+check "push --tags on main allowed (again)" allow "$(bp 'git push --tags')"
+check "push -d origin old-branch on main allowed" allow "$(bp 'git push -d origin old-branch')"
+check "push --del origin old-branch on main allowed" allow "$(bp 'git push --del origin old-branch')"
+check "push -d origin main denied" deny "$(bp 'git push -d origin main')"
+
 # --- escape ---
 export CLAUDE_GIT_GUARD=off
 check "CLAUDE_GIT_GUARD=off allows" allow "$(bp 'git push origin main')"

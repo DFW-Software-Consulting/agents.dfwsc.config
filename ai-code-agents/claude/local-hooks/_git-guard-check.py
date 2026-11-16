@@ -17,8 +17,10 @@ Env: CMD, CWD, GATE_HOME.
 """
 import importlib.util
 import os
+import fnmatch
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -43,9 +45,70 @@ COMMIT_VALUE_LETTERS = "mFCct"
 COMMIT_ATTACHED_LETTERS = "Su"  # optional attached value: cluster ends here too
 
 
+# Long options per subcommand, used only to resolve abbreviations the way git
+# does (any unambiguous prefix). Not every option: the guarded ones plus every
+# option that shares a prefix with one ("--no-*", "--force*", "--all*", ...).
+LONG_OPTS = {
+    "push": ("--all", "--atomic", "--branches", "--delete", "--dry-run", "--exec",
+             "--follow-tags", "--force", "--force-if-includes", "--force-with-lease",
+             "--no-atomic", "--no-follow-tags", "--no-force-with-lease",
+             "--no-recurse-submodules", "--no-signed", "--no-thin", "--no-verify",
+             "--mirror", "--porcelain", "--progress", "--prune", "--push-option",
+             "--quiet", "--receive-pack", "--recurse-submodules", "--repo",
+             "--set-upstream", "--signed", "--tags", "--thin", "--verbose", "--verify"),
+    "commit": ("--all", "--allow-empty", "--allow-empty-message", "--amend", "--author",
+               "--branch", "--cleanup", "--date", "--dry-run", "--edit", "--file",
+               "--fixup", "--gpg-sign", "--include", "--interactive", "--long",
+               "--message", "--no-edit", "--no-gpg-sign", "--no-post-rewrite",
+               "--no-signoff", "--no-status", "--no-verify", "--null", "--only",
+               "--patch", "--porcelain", "--quiet", "--reedit-message", "--reset-author",
+               "--reuse-message", "--short", "--signoff", "--squash", "--status",
+               "--template", "--trailer", "--untracked-files", "--verbose", "--verify"),
+    "merge": ("--abort", "--no-autostash", "--no-commit", "--no-edit", "--no-ff", "--no-gpg-sign",
+              "--no-log", "--no-progress", "--no-signoff", "--no-squash", "--no-stat",
+              "--no-summary", "--no-verify", "--no-verify-signatures", "--verbose",
+              "--verify-signatures"),
+    "rebase": ("--no-autosquash", "--no-autostash", "--no-ff", "--no-fork-point",
+               "--no-gpg-sign", "--no-keep-empty", "--no-reapply-cherry-picks",
+               "--no-rebase-merges", "--no-rerere-autoupdate", "--no-stat",
+               "--no-update-refs", "--no-verify", "--verbose", "--verify"),
+    "am": ("--no-3way", "--no-keep-cr", "--no-message-id", "--no-scissors", "--no-utf8",
+           "--no-verify", "--verbose"),
+}
+
+
+def has_long(sub, longs, *guarded):
+    """True when one of `longs` names one of the `guarded` options of `sub`:
+    exactly, or as an abbreviation (`=value` ignored) all of whose completions
+    in LONG_OPTS are guarded. So "--forc" and "--force-w" match the force
+    flags, while "--no-edit" never matches --no-verify, "--follow-tags" never
+    matches --force, and "--atomic" never matches --all or --mirror."""
+    universe = LONG_OPTS.get(sub, ())
+    for a in longs:
+        name = a.split("=", 1)[0]
+        if len(name) <= 2:
+            continue
+        if name in guarded:
+            return True
+        cands = [o for o in universe if o.startswith(name)]
+        if cands and all(o in guarded for o in cands):
+            return True
+    return False
+
+
+_START = time.monotonic()
+BUDGET = 6.0   # total seconds for all git queries
+PER_CALL = 3.0
+
+
 def git(d, *a):
+    """Read-only git query; None on failure, timeout or exhausted budget."""
+    left = BUDGET - (time.monotonic() - _START)
+    if left <= 0:
+        return None
     try:
-        r = subprocess.run(["git", "-C", d, *a], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(["git", "-C", d, *a], capture_output=True, text=True,
+                           timeout=min(PER_CALL, left))
     except Exception:
         return None
     return r.stdout.strip() if r.returncode == 0 else None
@@ -90,13 +153,13 @@ def hook_bypass(c):
         longs, shorts, _ = parse(args, PUSH_LONG_VALUE, PUSH_VALUE_LETTERS)
     else:
         longs, shorts, _ = parse(args, set(), "")
-    if "--no-verify" in longs:
+    if has_long(sub, longs, "--no-verify"):
         return f"git {sub} --no-verify skips the repository hooks"
     if sub == "commit" and "n" in shorts:
         return "git commit -n is --no-verify and skips the repository hooks"
     if sub in HOOK_SUBS:
         for k, v in c["env"]:
-            if (k == "HUSKY" and v == "0") or (k == "HUSKY_SKIP_HOOKS" and v not in ("", "0")) or k == "SKIP":
+            if (k == "HUSKY" and v == "0") or (k == "HUSKY_SKIP_HOOKS" and v not in ("", "0")) or (k == "SKIP" and v != ""):
                 return f"{k}={v} on git {sub} disables the repository hooks"
         for k, v in c["config"]:
             if k.lower() == "core.hookspath":
@@ -114,10 +177,9 @@ def default_branch(d, remote):
     return None
 
 
-def push_rules(c):
-    d = c["dir"]
+def push_parts(c):
+    """-> (longs, shorts, remote, refspecs) of a push command."""
     longs, shorts, pos = parse(c["args"], PUSH_LONG_VALUE, PUSH_VALUE_LETTERS)
-    dry = "--dry-run" in longs or "n" in shorts
     # Refspecs: positionals after the remote; a `tag <name>` pair is a tag.
     remote = pos[0] if pos else None
     refspecs, k = [], 1
@@ -127,36 +189,70 @@ def push_rules(c):
             continue
         refspecs.append(pos[k])
         k += 1
-    if dry:
+    return longs, shorts, remote, refspecs
+
+
+def is_dry(longs, shorts):
+    return has_long("push", longs, "--dry-run") or "n" in shorts
+
+
+def force_rule(c):
+    """Flag-only: needs no repository state, so it works without a directory."""
+    longs, shorts, _remote, refspecs = push_parts(c)
+    if is_dry(longs, shorts):
         return None
-    for f in FORCE_FLAGS:
-        if any(x == f or x.startswith(f + "=") for x in longs):
-            return ("force-push", f"git push {f} can overwrite remote history")
+    if has_long("push", longs, *FORCE_FLAGS):
+        return ("force-push", "a force flag on git push can overwrite remote history")
     if "f" in shorts:
         return ("force-push", "git push -f can overwrite remote history")
     for r in refspecs:
         if r.startswith("+"):
             return ("force-push", f"the refspec {r} forces the update")
-    if "--mirror" in longs:
+    return None
+
+
+def default_rule(c):
+    d = c["dir"]
+    longs, shorts, remote, refspecs = push_parts(c)
+    if is_dry(longs, shorts):
+        return None
+    if has_long("push", longs, "--mirror"):
         return ("default-branch-push", "git push --mirror overwrites every remote ref, including the default branch")
-    if "--all" in longs:
+    if has_long("push", longs, "--all"):
         return ("default-branch-push", "git push --all includes the default branch")
+    if not d or not os.path.isdir(d):
+        return None
+    cur_cache = []
+
+    def current():
+        if not cur_cache:
+            cur_cache.append(git(d, "symbolic-ref", "--short", "-q", "HEAD"))
+        return cur_cache[0]
+
     if remote is None:
-        cur = git(d, "symbolic-ref", "--short", "-q", "HEAD")
+        cur = current()
         remote = (git(d, "config", f"branch.{cur}.remote") if cur else None) or "origin"
     default = default_branch(d, remote)
     if not default:
         return None
-    cur = git(d, "symbolic-ref", "--short", "-q", "HEAD")
+    cur = current()
+    full = "refs/heads/" + default
     for r in refspecs:
         dst = r.split(":", 1)[1] if ":" in r else r
+        if "$" in r or "`" in r:
+            if cur == default:
+                return ("default-branch-push", f"the refspec {r} cannot be resolved here and the current branch is the default branch ({default})")
+            continue
+        if "*" in dst and (fnmatch.fnmatchcase(full, dst) or fnmatch.fnmatchcase(default, dst)):
+            return ("default-branch-push", f"the refspec {r} covers the default branch ({default})")
         if dst.startswith("refs/heads/"):
             dst = dst[len("refs/heads/"):]
         if dst == "HEAD" and ":" not in r:
             dst = cur or ""
         if dst == default:
             return ("default-branch-push", f"the refspec {r} targets the default branch ({default})")
-    if not refspecs and "--tags" not in longs and "--delete" not in longs and "d" not in shorts:
+    if (not refspecs and not has_long("push", longs, "--tags")
+            and not has_long("push", longs, "--delete") and "d" not in shorts):
         if cur == default:
             return ("default-branch-push", f"git push with no refspec from the default branch ({default})")
     return None
@@ -171,13 +267,12 @@ ADVICE = {
 
 def judge(cmd, cwd):
     for c in scan.commands(cmd, cwd):
-        if not os.path.isdir(c["dir"]):
-            continue
+        # Flag rules need no repository; only the default-branch rule does.
         why = hook_bypass(c)
         if why:
             return "hook-bypass", why
         if c["sub"] == "push":
-            hit = push_rules(c)
+            hit = force_rule(c) or default_rule(c)
             if hit:
                 return hit
     return None

@@ -855,7 +855,7 @@ else:
 
 # legacy mode (checks-gate) is frozen: the substitution prefix is not rewritten there
 case("legacy: substitution prefix unchanged", "GIT_DIR=$(pwd)/.git git commit -m x", [], legacy=True)
-# checks-gate's legacy results are pinned (see the fixture and its generator note)
+# checks-gate's analyze() results (normal mode) are pinned; regenerate the fixture only from a deliberate change
 import importlib.util, json
 spec = importlib.util.spec_from_file_location("cgc", os.path.join(os.environ["HOOKS"], "_checks-gate-check.py"))
 cgc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cgc)
@@ -871,9 +871,30 @@ with open(pins, encoding="utf-8") as fh:
             bad += 1
             print(f"FAIL - checks-gate analyze changed for {cmd!r}: {got} != {want}")
 if n > 400 and not bad:
-    passed += 1; print(f"ok   - checks-gate analyze() unchanged over {n} pinned command lines")
+    passed += 1; print(f"ok   - checks-gate analyze() (normal mode) unchanged over {n} pinned command lines")
 else:
     failed += 1; print(f"FAIL - checks-gate pins: {n} lines, {bad} changed")
+
+
+# a walker error (budget or any other) must not turn into a silent allow in checks-gate
+def _boom(exc):
+    def w(*a, **k):
+        raise exc
+    return w
+_real = cgc.cd.walk
+for label, exc, why in (("budget", cd.Budget(), "too many commands"), ("other error", RuntimeError("x"), "could not be analysed")):
+    cgc.cd.walk = _boom(exc)
+    try:
+        push = cgc.analyze("git -C /p push origin feat", "/w")
+        pr = cgc.analyze("gh pr create --title x", "/w")
+        quiet = cgc.analyze("ls -l", "/w")
+    finally:
+        cgc.cd.walk = _real
+    if (len(push) == 1 and push[0][:2] == ("push", None) and why in push[0][3]
+            and len(pr) == 1 and pr[0][:2] == ("pr", None) and quiet == []):
+        passed += 1; print(f"ok   - checks-gate analyze(): walker {label} on a push or gh pr create is an unknown directory")
+    else:
+        failed += 1; print(f"FAIL - checks-gate analyze(): walker {label}: {push} {pr} {quiet}")
 
 print()
 print(f"passed: {passed}  failed: {failed}")

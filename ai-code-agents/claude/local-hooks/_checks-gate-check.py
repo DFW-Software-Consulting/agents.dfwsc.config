@@ -19,11 +19,14 @@ in. Text-only exemptions (dry run, delete including `:ref`, tags-only) still
 apply. A variable is resolved only from a standalone, plain-literal assignment
 that is certain to have run (see certain_env); anything doubtful is unknown.
 The walker (variables, `bash -c`/`eval` bodies, explicit git directories) is
-the shared library _cmd_dirs.py, used here in its legacy mode (this gate's
-behaviour is unchanged); a `mktemp -d` directory counts as unknown here.
+the shared library _cmd_dirs.py, used in its normal mode (wrapper prefixes such as
+`timeout`, `sudo`, `nice`, `env` are followed, and a substitution glued to a word
+keeps the word whole and unknown); a `mktemp -d` directory counts as unknown here.
+A walker error (including its cost budget) on a line holding a push or `gh pr create`
+counts as an unknown directory, never a silent allow.
 A line with more than about 300 git/gh/cd/shell words is not walked: a push or
 `gh pr create` anywhere on it counts as an unknown directory, otherwise it is
-silent. Known limits: an unparseable top-level command line is not judged; a `cd` to a
+silent. Known limits: a line the walker cannot parse is judged as text (a push in it is an unknown directory); a `cd` to a
 missing directory or after `false &&` is followed as if it ran (as on main);
 `bash -c`/`eval` nesting deeper than 3, git aliases and command lines over
 about 128 KB are not followed; word splitting under a changed IFS is not modelled.
@@ -188,7 +191,7 @@ def targets(cmd, cwd):
 
 # --- directory resolution for the cases targets() cannot follow -------------
 # The walker lives in _cmd_dirs.py (shared with git-guard and worktree-gate);
-# legacy=True keeps this gate's own command-prefix handling unchanged.
+# normal mode: wrapper prefixes and substitutions glued to a word are followed.
 
 WORDS_RE = re.compile(r"\b(?:git|gh|cd|pushd|popd|eval|bash|sh|zsh|dash|ksh)\b")
 BODY_RE = re.compile(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+pr\s+create\b")
@@ -202,7 +205,17 @@ def analyze(cmd, cwd):
     (a temporary directory counts as unknown here). A text-only exemption (dry
     run, delete, tags-only) is already applied."""
     out = []
-    for c in cd.walk(cmd, cwd, home=scan.HOME, legacy=True):
+    try:
+        entries = cd.walk(cmd, cwd, home=scan.HOME)
+    except Exception as e:
+        # Over the walker's budget (cd.Budget) or any other walker error: a
+        # push or pull-request creation on the line counts as an unknown
+        # directory, never a silent allow.
+        m = BODY_RE.search(cmd)
+        why = ("a line with too many commands to analyse" if isinstance(e, cd.Budget)
+               else "a command line that could not be analysed")
+        return [("pr" if m.group(0).startswith("gh") else "push", None, None, why)] if m else []
+    for c in entries:
         if c["kind"] == "body":
             m = BODY_RE.search(c["text"])
             if m:

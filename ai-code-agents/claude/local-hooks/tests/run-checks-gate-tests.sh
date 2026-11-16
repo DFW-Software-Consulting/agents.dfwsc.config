@@ -182,6 +182,19 @@ unk 'cd $(pwd)/x && git push' 'cd $(pwd)/x && git push origin feat'
 unk 'cd - && git push' 'cd - && git push origin feat'
 unk 'git -C "$W" push' 'git -C "$W" push origin feat'
 unk 'git -C "$(pwd)/x" push' 'git -C "$(pwd)/x" push origin feat'
+unk 'git -C $(pwd)/x push (glued)' 'git -C $(pwd)/x push origin main'
+unk 'git -C `pwd`/x push (glued)' 'git -C `pwd`/x push origin main'
+unk 'git -C "$(pwd)"/x push (glued)' 'git -C "$(pwd)"/x push origin main'
+unk 'git -C pre$(pwd)post push (glued)' 'git -C pre$(pwd)post push origin main'
+unk 'git --git-dir=$(pwd)/.git push (glued)' 'git --git-dir=$(pwd)/.git push origin main'
+unk 'git --work-tree=$(pwd)/x push (glued)' 'git --work-tree=$(pwd)/x push origin main'
+unk 'git -C $(pwd) push (bare substitution)' 'git -C $(pwd) push origin main'
+unk 'git -C $(git rev-parse --show-toplevel) push' 'git -C $(git rev-parse --show-toplevel) push origin main'
+unk 'bash -c with a glued -C substitution' "bash -c 'git -C \$(pwd)/x push origin main'"
+unk 'eval with a glued -C substitution' 'eval git -C $(pwd)/x push origin main'
+unk 'prefix assignment holding a glued substitution' 'GIT_DIR=$(pwd)/x/.git git push origin main'
+unk 'wrapper, glued substitution in the directory' 'timeout 5 git -C $(pwd)/a push origin main'
+unk 'env -C with a substitution directory' 'env -C $(pwd)/a git push origin main'
 unk 'GIT_DIR=$X git push' 'GIT_DIR=$X git push origin feat'
 unk 'git --git-dir="$X" push' 'git --git-dir="$X" push origin feat'
 unk 'git --work-tree $X push' 'git --work-tree $X push origin feat'
@@ -210,6 +223,23 @@ for ex in 'git push --dry-run origin feat' 'git push -n origin feat' 'git push o
   check "unknown dir, text-only exemption silent: $ex" silent "$(bp "cd \"\$W\" && $ex")"
   check "unknown -C, text-only exemption silent: $ex" silent "$(bp "git -C \"\$W\" ${ex#git }")"
 done
+# a push behind a wrapper is judged like a bare push
+for w in 'timeout 5' 'timeout --signal=KILL 5' 'sudo' 'sudo -u root' 'nice' 'nice -n 5' 'env' 'env -u FOO' 'env FOO=1' 'ionice -c 3' 'stdbuf -oL' 'setsid' 'doas'; do
+  check "wrapped push, unstamped repo denied: $w" deny "$(bp "$w git -C $p push origin feat")"
+  check "wrapped push, passing record silent: $w" silent "$(bp "$w git -C $r push origin feat")"
+done
+check "timeout with a substitution duration, unstamped repo denied" deny "$(bp 'timeout $(echo 5)s git push origin feat' "$p")"
+check "sudo -u with a glued user, unstamped repo denied" deny "$(bp 'sudo -u $(id -un)x git push origin feat' "$p")"
+check "env -C <unstamped repo> push denied" deny "$(bp "env -C $p git push origin feat")"
+check "env -C <stamped repo> push silent" silent "$(bp "env -C $r git push origin feat")"
+check "wrapped push in a cd chain denied" deny "$(bp "cd $p && timeout 5 git push origin feat")"
+check "cd <stamped> && timeout push silent" silent "$(bp "cd $r && timeout 5 git push origin feat")"
+check "nested bash -c push denied" deny "$(bp "bash -c \"bash -c 'git -C $p push origin feat'\"")"
+check "wrapped gh pr create, unstamped repo denied" deny "$(bp "timeout 5 gh pr create --title x" "$p")"
+check "wrapped gh pr create, passing record silent" silent "$(bp "timeout 5 gh pr create --title x" "$r")"
+check "builtin cd <unstamped repo> && push denied" deny "$(bp "builtin cd $p && git push origin feat")"
+check "builtin cd <stamped repo> && push silent" silent "$(bp "builtin cd $r && git push origin feat")"
+check "wrapped push with a text-only exemption silent" silent "$(bp "timeout 5 git -C $p push --dry-run origin feat")"
 # a passing record plus a literal path stays silent; so does the resolved simple assignment
 check "literal cd with passing record silent" silent "$(bp "cd $r && git push origin feat")"
 check "literal git -C with passing record silent" silent "$(bp "git -C $r push origin feat")"
@@ -329,7 +359,9 @@ silentp "malformed JSON silent" '{not json'
 silentp "non-object JSON silent" '[1,2]'
 silentp "empty object silent" '{}'
 silentp "non-string command silent" '{"tool_input":{"command":5}}'
-silentp "unterminated quote silent" "$(push "git push origin feat 'oops")"
+mode_deny
+check "unterminated quote holding a push is an unknown directory (denied)" deny "$(push "git push origin feat 'oops")"
+silentp "unterminated quote without a push silent" "$(push "echo 'oops")"
 nasty=$'git push origin feat; echo "q\\"x" \'s\'\n# nl'
 check "deny with quotes and newlines in the command is valid JSON" deny "$(push "$nasty")"
 mode_warn

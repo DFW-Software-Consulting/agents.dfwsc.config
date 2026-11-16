@@ -19,11 +19,14 @@ in. Text-only exemptions (dry run, delete including `:ref`, tags-only) still
 apply. A variable is resolved only from a standalone, plain-literal assignment
 that is certain to have run (see certain_env); anything doubtful is unknown.
 The walker (variables, `bash -c`/`eval` bodies, explicit git directories) is
-the shared library _cmd_dirs.py, used here in its legacy mode (this gate's
-behaviour is unchanged); a `mktemp -d` directory counts as unknown here.
+the shared library _cmd_dirs.py, used in its normal mode (wrapper prefixes such as
+`timeout`, `sudo`, `nice`, `env` are followed, and a substitution glued to a word
+keeps the word whole and unknown); a `mktemp -d` directory counts as unknown here.
+A walker error (including its cost budget) on a line holding a push or `gh pr create`
+counts as an unknown directory, never a silent allow.
 A line with more than about 300 git/gh/cd/shell words is not walked: a push or
 `gh pr create` anywhere on it counts as an unknown directory, otherwise it is
-silent. Known limits: an unparseable top-level command line is not judged; a `cd` to a
+silent. Known limits: a line the walker cannot parse is judged as text (a push in it is an unknown directory); a `cd` to a
 missing directory or after `false &&` is followed as if it ran (as on main);
 `bash -c`/`eval` nesting deeper than 3, git aliases and command lines over
 about 128 KB are not followed; word splitting under a changed IFS is not modelled.
@@ -188,10 +191,22 @@ def targets(cmd, cwd):
 
 # --- directory resolution for the cases targets() cannot follow -------------
 # The walker lives in _cmd_dirs.py (shared with git-guard and worktree-gate);
-# legacy=True keeps this gate's own command-prefix handling unchanged.
+# normal mode: wrapper prefixes and substitutions glued to a word are followed.
 
 WORDS_RE = re.compile(r"\b(?:git|gh|cd|pushd|popd|eval|bash|sh|zsh|dash|ksh)\b")
 BODY_RE = re.compile(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+pr\s+create\b")
+
+
+class CannotAnalyse(str):
+    """A `why` marking that the command could not be analysed (a walker or analysis error, or
+    a line over the walker's budget), as opposed to a directory that is not written literally."""
+
+
+def _error_result(cmd, why):
+    """The unknown-directory result for a push or `gh pr create` on a line that could not be
+    analysed; [] (nothing to judge) when the line holds neither."""
+    m = BODY_RE.search(cmd)
+    return [("pr" if m.group(0).startswith("gh") else "push", None, None, CannotAnalyse(why))] if m else []
 
 
 def analyze(cmd, cwd):
@@ -201,8 +216,18 @@ def analyze(cmd, cwd):
     gh pr create ("pr"); dir is None, with why, when it cannot be established
     (a temporary directory counts as unknown here). A text-only exemption (dry
     run, delete, tags-only) is already applied."""
+    try:
+        return _analyze(cmd, cwd)
+    except cd.Budget:
+        return _error_result(cmd, "a line with too many commands to analyse")
+    except Exception:
+        # Any other walker or analysis error: never a silent allow.
+        return _error_result(cmd, "an error while analysing the command")
+
+
+def _analyze(cmd, cwd):
     out = []
-    for c in cd.walk(cmd, cwd, home=scan.HOME, legacy=True):
+    for c in cd.walk(cmd, cwd, home=scan.HOME):
         if c["kind"] == "body":
             m = BODY_RE.search(c["text"])
             if m:
@@ -222,6 +247,11 @@ def analyze(cmd, cwd):
 
 def unknown_message(kind, why):
     what = "git push" if kind == "push" else "gh pr create"
+    if isinstance(why, CannotAnalyse):
+        return (f"checks-gate: could not analyse this command, so the repository for this {what} "
+                f"and its check record cannot be found ({why}). Simplify the command or split it "
+                f"into separate calls, with the directory written literally, for example "
+                f"`git -C /absolute/path push ...`.")
     return (f"checks-gate: could not tell which repository this {what} runs in ({why}), so the "
             f"check record for the commit cannot be found. Write the directory literally, for "
             f"example `git -C /absolute/path push ...` or `cd /absolute/path && git push ...`. "
@@ -258,12 +288,18 @@ def main():
         if not m:
             return
         jobs = []
-        unknown = [("pr" if m.group(0).startswith("gh") else "push", "a line with too many commands to analyse")]
+        unknown = [("pr" if m.group(0).startswith("gh") else "push",
+                    CannotAnalyse("a line with too many commands to analyse"))]
     else:
-        jobs = targets(cmd, cwd)
-        if cwd:
-            known, unknown = resolved_targets(cmd, cwd)
-            jobs += known
+        try:
+            jobs = targets(cmd, cwd)
+            if cwd:
+                known, unknown = resolved_targets(cmd, cwd)
+                jobs += known
+        except Exception:
+            # An error while finding the pushes: a push on the line is an unknown directory.
+            jobs = []
+            unknown = [(k, w) for k, _d, _c, w in _error_result(cmd, "an error while analysing the command")]
     for d, remote in jobs:
         if (d, remote) in seen:
             continue

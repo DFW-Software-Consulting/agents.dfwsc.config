@@ -4,8 +4,9 @@ command line and say which directory each one runs in. Used by
 _checks-gate-check.py, _git-guard-check.py and _worktree-gate-check.py.
 
 walk(cmd, cwd) returns one dict per command, in the order they appear,
-including commands inside `bash -c`/`sh -c`/`eval` bodies (followed 3 levels
-deep, at the position of the wrapper):
+including commands inside `bash -c`/`sh -c`/`eval`/`env -S` bodies (followed 3
+levels deep, at the position of the wrapper, in the directory in effect there,
+`env -C` included):
   kind      "git", "gh", or "body" (a wrapper body that cannot be parsed; then
             only "text", "state" "unknown" and "why" are meaningful)
   sub       git: the subcommand (None when there is none); gh: None
@@ -14,25 +15,34 @@ deep, at the position of the wrapper):
   dir       the directory when state is "known", else None
   state     "known"    a path (from cwd, literal cd/pushd/-C/env -C, or a plain
                        variable assignment certain to have run);
-            "temp"     the result of `mktemp -d` on the same line
+            "temp"     the result of a bare `mktemp -d` on the same line
                        (`T=$(mktemp -d); cd "$T"` or `cd "$(mktemp -d)"`), or a
-                       relative path below one;
+                       relative path below one; see mktemp_word for the strict
+                       rule (no -p, template, --tmpdir, -u, ...; TMPDIR never
+                       touched on the line; the process's own temp root is not
+                       inside a git work tree);
             "unknown"  anything else (a variable or substitution that is not
                        certain, `cd -`, popd, no working directory); "why" says
                        which
   why       short reason when state is not "known"
   redirect  None, "literal" or "unknown": --git-dir / --work-tree / GIT_DIR= /
             GIT_WORK_TREE= on the command (the repository is then not the one
-            in "dir"); "unknown" when the value is a variable or substitution
+            in "dir"); "unknown" when a value is a variable or substitution
+  gitdir, worktree
+            the literal values (as paths) when redirect is "literal", else None
   env       [(NAME, value)] set for the command (earlier standalone assignments,
             then its prefix assignments; a wrapper's are inherited by its body)
   config    [(key, value)] from `git -c key=value`
   depth     0 on the line itself, 1 to 3 inside wrapper bodies
+Raises Budget when the line has more than MAX_CMDS commands to follow or the
+analysis takes longer than BUDGET_SECS: the caller then applies only rules that
+need no directory (see cheap_commands). legacy=True is not bounded.
 
 A variable resolves only from a standalone, plain-literal assignment certain to
-have run (certain_env); anything doubtful is unknown. legacy=True reproduces
-the older checks-gate walker exactly: no `env -C`/`sudo -u` option values in a
-command prefix. Never runs anything and never touches a repository.
+have run (certain_env); anything doubtful is unknown. Command prefixes
+(`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
+effective(entry) is the one place that turns an entry into the directory to
+judge. Never runs anything and never touches a repository.
 Known limits: an unparseable top-level line yields nothing; `bash -c`/`eval`
 nesting deeper than 3, aliases, xargs/find -exec/ssh wrappers, lines over about
 128 KB and word splitting under a changed IFS are not followed; a `cd` to a
@@ -42,6 +52,7 @@ import importlib.util
 import os
 import re
 import sys
+import time
 
 sys.dont_write_bytecode = True
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -50,20 +61,45 @@ scan = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scan)
 
 NO_CWD = "the payload gave no working directory"
+REDIRECT_WHY = ("a --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE "
+                "(the repository is not judged from the directory)")
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 VAR_RE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 MAX_DEPTH = 3
+MAX_CMDS = 300
+BUDGET_SECS = 0.4
 COMPOUND = {"if", "then", "elif", "else", "fi", "while", "until", "do", "done", "for",
             "case", "esac", "select", "function", "{", "}", "[[", "coproc"}
 MODIFIERS = {"unset", "read", "local", "declare", "typeset", "readonly", "export", "let",
              "mapfile", "readarray", "getopts", "printf"}
 SOURCERS = {"eval", ".", "source", "exec", "trap", "let"}
 ANY_ASSIGN = re.compile(r"^([A-Za-z_]\w*)(\+=|\[|=)")
-# Options of prefix commands (env, sudo, nice, xargs) that take a separate value.
-OPT_ARG = {"-C", "--chdir", "-u", "--unset", "-n", "-g", "-S", "-p", "-U", "-D"}
+# Commands that run another command (all of scan.PREFIX plus more) and the
+# options of each that take a separate value word.
+PFX = set(scan.PREFIX) | {"builtin", "timeout", "stdbuf", "setsid", "ionice", "doas"}
+VAL_OPTS = {
+    "env": {"-C", "--chdir", "-u", "--unset", "-S", "--split-string"},
+    "sudo": {"-u", "-g", "-C", "-D", "-U", "-p", "-h", "-r", "-t"},
+    "doas": {"-u", "-C"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u"},
+    "timeout": {"-k", "-s", "--kill-after", "--signal"},
+    "xargs": {"-n", "-I", "-L", "-P", "-s", "-d", "-E"},
+}
+DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 TEMP_VAR = re.compile(r"^\$\{?(\w+)\}?(/[^$`*?]*)?$")
-TEMP_SUB = re.compile(r"^(?:\$\(\s*mktemp(?P<a>(?:\s+[^\s;&|()`]+)*)\s*\)"
-                      r"|`\s*mktemp(?P<b>(?:\s+[^\s;&|()$`]+)*)\s*`)(?P<tail>/[^$`*?]*)?$")
+TEMP_SUB = re.compile(r"^(?:\$\(\s*mktemp(?P<a>(?:\s+-[dq]+)*)\s*\)"
+                      r"|`\s*mktemp(?P<b>(?:\s+-[dq]+)*)\s*`)(?P<tail>/[^$`*?]*)?$")
+UNESC = re.compile(r'\\(["\\$`])')
+# Text of an unparseable wrapper body that makes it a guarded command.
+BODY_GUARDS = {
+    "worktree": re.compile(r"\bgit\b[^;&|]*\b(?:%s)\b" % "|".join(sorted(scan.MUTATING))),
+    "guard": re.compile(r"\bgit\b[^;&|]*(?:\bpush\b|--no-verify|hooksPath)|\b(?:HUSKY|SKIP)=[^;&|]*\bgit\b"),
+}
+
+
+class Budget(Exception):
+    """The line is too big to analyse; apply only the rules that need no directory."""
 
 
 def subst(word, env):
@@ -74,22 +110,40 @@ def subst(word, env):
     return VAR_RE.sub(one, word)
 
 
+def temp_root_ok():
+    """True when the temp root a bare `mktemp -d` would use (this process's own
+    TMPDIR, else /tmp) is not inside a git work tree."""
+    p = os.path.abspath(os.environ.get("TMPDIR") or "/tmp")
+    while True:
+        if os.path.exists(os.path.join(p, ".git")):
+            return False
+        q = os.path.dirname(p)
+        if q == p:
+            return True
+        p = q
+
+
 def mktemp_word(word):
-    """True when the whole word is `$(mktemp -d ...)` (or backticks), optionally
-    followed by a literal /sub/path: a fresh temporary directory."""
+    """True when the whole word is exactly `$(mktemp -d)` (or backticks; `-q` may
+    be added), optionally followed by a literal /sub/path: a fresh directory
+    under the temp root. Any -p, --tmpdir, -t, -u, --suffix, template or other
+    argument is not accepted (the directory could be anywhere, a primary
+    checkout included)."""
     m = TEMP_SUB.match(word)
     if not m:
         return False
-    opts = (m.group("a") or m.group("b") or "").split()
-    if not any(o == "--directory" or (o.startswith("-") and not o.startswith("--") and "d" in o[1:])
-               for o in opts):
+    opts = "".join((m.group("a") or m.group("b") or "").split())
+    if "d" not in opts:
         return False
     return ".." not in (m.group("tail") or "").split("/")
 
 
-def temp_path(word, temps):
+def temp_path(word, temps, ok=True):
     """True when word is a temporary directory: a variable set from mktemp -d
-    (optionally /literal below it) or a direct mktemp -d substitution."""
+    (optionally /literal below it) or a direct mktemp -d substitution; ok is
+    False when TMPDIR was touched on the line or the temp root is unsafe."""
+    if not ok:
+        return False
     if mktemp_word(word):
         return True
     m = TEMP_VAR.match(word)
@@ -97,21 +151,64 @@ def temp_path(word, temps):
 
 
 def prefix_span(toks, i, legacy):
-    """(j, idx): idx are the token indexes of the prefix words (NAME=value,
-    sudo/env/..., options and, unless legacy, their separate values) before the
-    command word at i; j is the index of the token before them (-1 at start)."""
-    j, idx = i - 1, []
-    while j >= 0 and toks[j][0] == "w":
-        w = toks[j][1]
-        if scan.bwc.ASSIGN.match(w) or w in scan.PREFIX or w.startswith("-"):
+    """(ok, idx, chdirs) for the command word at i. ok: it is in command
+    position; idx: the token indexes of its prefix words (NAME=value,
+    sudo/env/timeout/..., their options and values); chdirs: the values of
+    `env -C DIR` / `--chdir=DIR`. legacy keeps the original rule (words of the
+    form NAME=value, a few prefix commands and dash words only): FROZEN, see
+    walk()."""
+    if legacy:
+        j, idx = i - 1, []
+        while j >= 0 and toks[j][0] == "w" and (
+                scan.bwc.ASSIGN.match(toks[j][1]) or toks[j][1] in scan.PREFIX or toks[j][1].startswith("-")):
             idx.append(j)
             j -= 1
-        elif not legacy and j >= 1 and toks[j - 1][0] == "w" and toks[j - 1][1] in OPT_ARG:
-            idx.extend((j, j - 1))
-            j -= 2
-        else:
+        if j < 0:
+            return True, idx, []
+        k, v = toks[j]
+        return (True if k == "o" else v in scan.KEYWORDS), idx, []
+    s = i
+    while s > 0 and toks[s - 1][0] == "w" and toks[s - 1][1] not in scan.KEYWORDS:
+        s -= 1
+    p, idx, chdirs = s, [], []
+    while p < i and toks[p][0] == "w":
+        w = toks[p][1]
+        if scan.bwc.ASSIGN.match(w):
+            idx.append(p)
+            p += 1
+            continue
+        mode = os.path.basename(w)
+        if mode not in PFX:
             break
-    return j, idx
+        idx.append(p)
+        p += 1
+        seen_duration = False
+        while p < i and toks[p][0] == "w":
+            o = toks[p][1]
+            if o.startswith("-") and len(o) > 1:
+                idx.append(p)
+                p += 1
+                name, eq, val = o.partition("=")
+                if mode == "env" and name in ("-C", "--chdir"):
+                    if eq:
+                        chdirs.append(val)
+                    elif p < i:
+                        chdirs.append(toks[p][1])
+                        idx.append(p)
+                        p += 1
+                elif not eq and name in VAL_OPTS.get(mode, ()) and p < i:
+                    idx.append(p)
+                    p += 1
+            elif mode == "timeout" and not seen_duration and DURATION.match(o):
+                seen_duration = True
+                idx.append(p)
+                p += 1
+            elif mode == "env" and scan.bwc.ASSIGN.match(o):
+                idx.append(p)
+                p += 1
+            else:
+                break
+    return p == i, idx, chdirs
 
 
 def words_after(toks, k):
@@ -143,14 +240,6 @@ def words_after(toks, k):
     return out
 
 
-def at_command(toks, i, legacy):
-    j, _ = prefix_span(toks, i, legacy)
-    if j < 0:
-        return True
-    k, v = toks[j]
-    return True if k == "o" else v in scan.KEYWORDS
-
-
 def prefix_redirect(toks, idx, env):
     """None, "literal" or "unknown" for GIT_DIR= / GIT_WORK_TREE= prefixed to the command."""
     out = None
@@ -168,7 +257,7 @@ def prefix_env(toks, idx):
     return [tuple(toks[p][1].partition("=")[::2]) for p in sorted(idx) if scan.bwc.ASSIGN.match(toks[p][1])]
 
 
-def certain_env(toks, i, temps=None):
+def certain_env(toks, i, temps=None, taint=False):
     """{NAME: literal value} for names certain to hold that value when the
     command at toks[i] expands its words. A name qualifies only through a
     standalone assignment (a statement of NAME=literal words, optionally after
@@ -180,7 +269,8 @@ def certain_env(toks, i, temps=None):
     declare/local/typeset/readonly, eval/source, ...) makes it unknown for the
     rest of the line; a compound command or arithmetic command (`(( ))`, `let`)
     makes every name unknown. When `temps` (a set) is given, the names assigned
-    from `mktemp -d` under the same rules are added to it."""
+    from a bare `mktemp -d` under the same rules are added to it, unless
+    `taint` is set or any word mentioning TMPDIR comes first."""
     env, poison, depth, clean, prev, words = {}, set(), 0, True, None, []
     frozen = False
     temps = temps if temps is not None else set()
@@ -208,7 +298,7 @@ def certain_env(toks, i, temps=None):
                 fresh = k not in poison
                 if unsafe or not scan.literal(v) or k in poison:
                     bad(k)
-                    if fresh and not unsafe and (mk == k or mktemp_word(v)):
+                    if fresh and not unsafe and not taint and (mk == k or mktemp_word(v)):
                         temps.add(k)
                 else:
                     env[k] = v
@@ -233,6 +323,8 @@ def certain_env(toks, i, temps=None):
         k, t = toks[n]
         if k == "w":
             words.append(t)
+            if "TMPDIR" in t:
+                taint = True
             continue
         if words:
             mk = None
@@ -268,7 +360,7 @@ def certain_env(toks, i, temps=None):
     return env
 
 
-def move(cwd, why, temp, word, env, temps, unknown):
+def move(cwd, why, temp, word, env, temps, unknown, tmp_ok=True):
     """Apply a cd/pushd/-C path word to the directory state ->
     (dir or None, why or None, temp). `unknown` is the reason when it cannot be."""
     a = subst(word, env)
@@ -278,38 +370,52 @@ def move(cwd, why, temp, word, env, temps, unknown):
         return scan.join(cwd, a), None, False
     except scan.Stop:
         pass
-    if temp_path(a, temps):
+    if temp_path(a, temps, tmp_ok):
         return None, unknown, True
     if temp and scan.literal(a) and not a.startswith(("/", "~")) and ".." not in a.split("/"):
         return None, unknown, True
     return None, unknown, False
 
 
-def git_target(args, cwd, why, temp, env, temps):
-    """-> (dir, why, temp, subcommand, words after it, redirect, config, pre)
-    for the words after `git`; dir None when it cannot be established."""
-    d, j, redirect, config = cwd, 0, None, []
+def git_target(args, cwd, why, temp, env, temps, tmp_ok=True):
+    """Parse the words after `git` -> dict: dir (None when it cannot be
+    established), why, temp, sub, rest (words after it), redirect ("literal",
+    "unknown" or None for --git-dir / --work-tree), gitdir, worktree (literal
+    option values as paths), config, pre."""
+    r = {"dir": cwd, "why": why, "temp": temp, "sub": None, "rest": [], "redirect": None,
+         "gitdir": None, "worktree": None, "config": [], "pre": args}
+    j = 0
     while j < len(args):
         a = args[j]
         if a == "-C":
             if j + 1 >= len(args):
-                return None, why, False, None, [], redirect, config, args[:j]
-            d, w, temp = move(d, why, temp, args[j + 1], env, temps, "git -C with a path that is not written literally")
-            why = w if d is None else why
+                r.update(dir=None, temp=False, pre=args[:j])
+                return r
+            d, w, t = move(r["dir"], r["why"], r["temp"], args[j + 1], env, temps,
+                           "git -C with a path that is not written literally", tmp_ok)
+            r.update(dir=d, why=w if d is None else r["why"], temp=t)
             j += 2
         elif a.startswith(scan.UNJUDGEABLE):
             if "=" in a:
                 v, j = a.partition("=")[2], j + 1
             else:
                 v, j = (args[j + 1] if j + 1 < len(args) else ""), j + 2
+            key = "gitdir" if a.startswith("--git-dir") else "worktree"
+            p = None
             if scan.literal(subst(v, env)):
-                redirect = redirect or "literal"
+                try:
+                    p = scan.join(r["dir"], subst(v, env))
+                except scan.Stop:
+                    p = None
+            if p is not None:
+                r[key] = p
+                r["redirect"] = r["redirect"] or "literal"
             else:
-                redirect, why = "unknown", "a --git-dir or --work-tree that is not written literally"
+                r["redirect"], r["why"] = "unknown", "a --git-dir or --work-tree that is not written literally"
         elif a == "-c":
             if j + 1 < len(args):
                 k, _, v = args[j + 1].partition("=")
-                config.append((k, v))
+                r["config"].append((k, v))
             j += 2
         elif a in scan.OPT_WITH_VALUE:
             j += 2
@@ -317,15 +423,49 @@ def git_target(args, cwd, why, temp, env, temps):
             j += 1
         else:
             break
-    if j >= len(args):
-        return d, why, temp, None, [], redirect, config, args
-    return d, why, temp, args[j], args[j + 1:], redirect, config, args[:j]
+    r["pre"] = args[:j]
+    if j < len(args):
+        r["sub"], r["rest"] = args[j], args[j + 1:]
+    return r
+
+
+def explicit_dirs(env_pairs, env, cwd, r):
+    """Fold GIT_DIR / GIT_WORK_TREE from the environment into git_target's
+    result r (options win over the environment): sets r's redirect, gitdir and
+    worktree. The one place that decides what an explicit git directory is."""
+    vals = dict(env_pairs)
+    for var, key in (("GIT_DIR", "gitdir"), ("GIT_WORK_TREE", "worktree")):
+        v = vals.get(var)
+        if not v:
+            continue
+        sv = subst(v, env)
+        p = None
+        if scan.literal(sv):
+            try:
+                p = scan.join(cwd, sv)
+            except scan.Stop:
+                p = None
+        if p is None:
+            r["redirect"] = "unknown"
+        else:
+            if r[key] is None:
+                r[key] = p
+            r["redirect"] = r["redirect"] or "literal"
 
 
 def shell_body(name, args):
-    """The script text of `bash -c BODY` / `eval ...`, else None."""
+    """The script text of `bash -c BODY` / `eval ...` / `env -S STRING`, else None."""
     if name == "eval":
         return " ".join(args) if args else None
+    if name == "env":
+        for k, a in enumerate(args):
+            if a in ("-S", "--split-string"):
+                return args[k + 1] if k + 1 < len(args) else None
+            if a.startswith("--split-string="):
+                return a.partition("=")[2]
+            if a.startswith("-S") and len(a) > 2:
+                return a[2:]
+        return None
     if name in SHELLS:
         for k, a in enumerate(args):
             if a.startswith("-") and not a.startswith("--") and "c" in a[1:]:
@@ -337,16 +477,45 @@ def _entry(kind, d, why, temp, **kw):
     state = "known" if d is not None else ("temp" if temp else "unknown")
     e = {"kind": kind, "sub": None, "args": [], "pre": [], "dir": d, "state": state,
          "why": None if state == "known" else (why or "a directory that is not written literally"),
-         "redirect": None, "env": [], "config": [], "depth": 0}
+         "redirect": None, "gitdir": None, "worktree": None, "env": [], "config": [], "depth": 0}
     e.update(kw)
     return e
 
 
-def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _inherit=None):
+def effective(e, judge_literal=False):
+    """-> (state, dir, why): the directory a consumer judges for entry e. An
+    explicit git directory means the repository is not the one in the
+    directory: unknown (reason REDIRECT_WHY), except that with judge_literal a
+    literal one stays "known" for the caller to work out (see gitdir/worktree)."""
+    if e["redirect"] and not (judge_literal and e["redirect"] == "literal"):
+        return "unknown", None, REDIRECT_WHY
+    return e["state"], e["dir"], e["why"]
+
+
+def existing_dir(p):
+    """The nearest existing ancestor of path p (p itself when it exists)."""
+    while p and not os.path.isdir(p):
+        q = os.path.dirname(p)
+        if q == p:
+            return None
+        p = q
+    return p or None
+
+
+def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _inherit=None,
+         _taint=False, _state=None):
     """See the module docstring. home sets the meaning of `~` (default: the
-    scanner's, from GATE_HOME)."""
+    scanner's, from GATE_HOME).
+
+    legacy=True is FROZEN: it reproduces the walker checks-gate carried before
+    this module existed (no budget, no env -C/timeout/builtin prefixes, no
+    GIT_DIR from the environment). _checks-gate-check.py relies on it, and
+    tests/run-cmd-dirs-tests.sh pins its results over a fixed set of command
+    lines, so a change here cannot alter checks-gate silently. New behaviour
+    goes in the non-legacy paths only."""
     if home is not None:
         scan.HOME = home
+    state = _state or {"start": time.monotonic(), "count": 0}
     out = []
     try:
         toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
@@ -359,6 +528,8 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
         cwd, _why = None, NO_CWD
     cwd = cwd or None
     why, temp, inherit = _why, _temp, _inherit or []
+    first_tmp = next((n for n, (k, t) in enumerate(toks) if k == "w" and "TMPDIR" in t), None)
+    root_ok = legacy or temp_root_ok()
     stack = []
     for i, (kind, t) in enumerate(toks):
         if kind == "o":
@@ -367,51 +538,59 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             elif t == ")" and stack:
                 cwd, why, temp = stack.pop()
             continue
-        if not at_command(toks, i, legacy):
-            continue
         name = os.path.basename(t)
-        if name not in ("cd", "pushd", "popd", "git", "gh", "eval") and name not in SHELLS:
+        tracked = ("cd", "pushd", "popd", "git", "gh", "eval") if legacy else ("cd", "pushd", "popd", "git", "gh", "eval", "env")
+        if name not in tracked and name not in SHELLS:
             continue
+        ok, idx, chdirs = prefix_span(toks, i, legacy)
+        if not ok:
+            continue
+        if not legacy:
+            state["count"] += 1
+            if state["count"] > MAX_CMDS or time.monotonic() - state["start"] > BUDGET_SECS:
+                raise Budget()
         args = scan.bwc.args_until_op(toks, i + 1) if legacy else words_after(toks, i + 1)
+        taint = _taint or not root_ok or (first_tmp is not None and first_tmp < i)
+        tmp_ok = not taint
         # Arithmetic (`(( ))`, `$(( ))`) may assign; the tokenizer hides its text,
         # so any `((` in the line makes every name unknown.
         temps = set()
-        env = {} if "((" in cmd else certain_env(toks, i, temps)
+        env = {} if "((" in cmd else certain_env(toks, i, temps, taint)
         if name in ("cd", "pushd"):
             args = [a for a in args if not (a.startswith("-") and a != "-")]
             if not args:
                 cwd, why, temp = (scan.HOME, None, False) if scan.HOME else (None, "a cd with no home directory", False)
                 continue
-            cwd, why, temp = move(cwd, why, temp, args[0], env, temps, f"a {name} to a path that is not written literally")
-        elif name == "popd":
+            cwd, why, temp = move(cwd, why, temp, args[0], env, temps,
+                                  f"a {name} to a path that is not written literally", tmp_ok)
+            continue
+        if name == "popd":
             cwd, why, temp = None, "a popd", False
-        elif name in ("git", "gh"):
-            j, idx = prefix_span(toks, i, legacy)
-            # `env -C DIR git ...` runs git in DIR.
-            d, w, tmp = cwd, why, temp
-            if not legacy and any(os.path.basename(toks[p][1]) == "env" for p in idx):
-                for p in sorted(idx):
-                    v = toks[p][1]
-                    if v in ("-C", "--chdir") and p + 1 in idx:
-                        d, w, tmp = move(d, w, tmp, toks[p + 1][1], env, temps, "an env -C to a path that is not written literally")
-                    elif v.startswith("--chdir="):
-                        d, w, tmp = move(d, w, tmp, v.partition("=")[2], env, temps, "an env -C to a path that is not written literally")
-            own = prefix_env(toks, idx)
-            e_env = list(dict(list(inherit) + _session(toks, i) + own).items())
-            if name == "gh":
-                out.append(_entry("gh", d, w, tmp, args=args, env=e_env, depth=_depth))
-                continue
-            d, w, tmp, sub, rest, redirect, config, pre = git_target(args, d, w, tmp, env, temps)
-            pr = prefix_redirect(toks, idx, env)
-            redirect = "unknown" if "unknown" in (pr, redirect) else (redirect or pr)
-            out.append(_entry("git", d, w, tmp, sub=sub, args=rest, pre=pre, redirect=redirect,
-                              env=e_env, config=config, depth=_depth))
+            continue
+        # `env -C DIR cmd ...` runs cmd in DIR.
+        d, w, tmp = cwd, why, temp
+        for v in chdirs:
+            d, w, tmp = move(d, w, tmp, v, env, temps, "an env -C to a path that is not written literally", tmp_ok)
+        e_env = list(dict(list(inherit) + _session(toks, i) + prefix_env(toks, idx)).items())
+        if name == "gh":
+            out.append(_entry("gh", d, w, tmp, args=args, env=e_env, depth=_depth))
+        elif name == "git":
+            r = git_target(args, d, w, tmp, env, temps, tmp_ok)
+            if legacy:
+                pr = prefix_redirect(toks, idx, env)
+                r["redirect"] = "unknown" if "unknown" in (pr, r["redirect"]) else (r["redirect"] or pr)
+            else:
+                explicit_dirs(e_env, env, r["dir"], r)
+            out.append(_entry("git", r["dir"], r["why"], r["temp"], sub=r["sub"], args=r["rest"],
+                              pre=r["pre"], redirect=r["redirect"], gitdir=r["gitdir"],
+                              worktree=r["worktree"], env=e_env, config=r["config"], depth=_depth))
         elif _depth < MAX_DEPTH:
             body = shell_body(name, args)
             if body:
-                _, idx = prefix_span(toks, i, legacy)
                 inh = list(inherit) + _session(toks, i) + prefix_env(toks, idx)
-                out.extend(_body(body, cwd, why, temp, env, temps, name == "eval", inh, _depth + 1, legacy))
+                tainted = _taint or not root_ok or (first_tmp is not None and first_tmp < i + 1 + len(args))
+                out.extend(_body(body, cmd, d, w, tmp, env, temps, name == "eval", inh, _depth + 1, legacy,
+                                 tainted, state))
     return out
 
 
@@ -420,14 +599,113 @@ def _session(toks, i):
     return list(d.items())
 
 
-def _body(body, cwd, why, temp, env, temps, is_eval, inherit, depth, legacy):
+def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, legacy, taint, state):
     """walk() of a script body; its own cd stays inside it. For eval the outer
     simple assignments in effect (and mktemp ones) are prepended so they resolve
     inside; a bash -c child sees only exported variables, which cannot be told:
-    none."""
+    none. A body taken from a double-quoted word may hold `\\"`, `\\\\`, `\\$`
+    or a backslash-backtick that the shell removed; the tokenizer keeps them, so
+    such a body is walked unescaped (both ways when the quoting cannot be told).
+    When no candidate parses, one "body" entry reports the text."""
     pre = ""
     if is_eval:
         pre = "".join(f"{k}={v}; " for k, v in env.items() if scan.literal(v) and re.fullmatch(r"\w+", k)
                       and re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
         pre += "".join(f"{k}=$(mktemp -d); " for k in temps if re.fullmatch(r"\w+", k))
-    return walk(pre + body, cwd, None, legacy, depth, why, temp, inherit)
+    if legacy:
+        return walk(pre + body, cwd, None, legacy, depth, why, temp, inherit, taint, state)
+    cands = [body]
+    if "\\" in body:
+        u = UNESC.sub(r"\1", body)
+        # The tokenizer returns the text of a double-quoted word as written, so
+        # it shows in the parent between double quotes (backslashes removed by
+        # the shell) or between single quotes (kept). Ambiguous: walk both.
+        dq, sq = ('"' + body + '"') in parent, ("'" + body + "'") in parent
+        if u != body:
+            cands = [u] if dq and not sq else ([body, u] if dq and sq else [body])
+    results, failed = [], 0
+    for n, c in enumerate(cands):
+        r = walk(pre + c, cwd, None, legacy, depth, why, temp, inherit, taint, state)
+        if len(r) == 1 and r[0]["kind"] == "body" and r[0]["text"] == pre + c:
+            failed += 1
+            continue
+        if n == 0 and len(cands) > 1:
+            # A path with a quote or backslash in it is the text read wrongly
+            # (the quotes belonged to the outer word): the unescaped text has the real one.
+            r = [e for e in r if not (e["state"] == "known" and e["dir"] and re.search(r'["\\]', e["dir"]))]
+        results.append(r)
+    if failed == len(cands):
+        return [_entry("body", None, "a shell script body that cannot be parsed", False, text=body, depth=depth)]
+    out = []
+    for r in results:
+        for e in r:
+            if e not in out:
+                out.append(e)
+    return out
+
+
+def body_guarded(e, which):
+    """True when an unparseable-body entry's text holds a command the gate
+    `which` ("worktree" or "guard") judges."""
+    return bool(BODY_GUARDS[which].search(e.get("text", "")))
+
+
+def cheap_commands(cmd):
+    """git commands on a line that is too big for walk(): one pass, no
+    directories (every entry's directory is unknown with reason NO_CWD), no
+    wrapper bodies. For the rules that need no directory."""
+    try:
+        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
+    except ValueError:
+        return []
+    out = []
+    for i, (kind, t) in enumerate(toks):
+        if kind != "w" or os.path.basename(t) != "git":
+            continue
+        ok, idx, _ = prefix_span(toks, i, False)
+        if not ok:
+            continue
+        r = git_target(words_after(toks, i + 1), None, NO_CWD, False, {}, set())
+        out.append(_entry("git", None, NO_CWD, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
+                          redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
+    return out
+
+
+def fed_texts(cmd):
+    """Texts the line feeds to a shell's standard input (`x | bash`, `bash <<<
+    'text'`, a here-document into bash/sh) that could hold a command: quoted
+    words with a space, the arguments of echo/printf, here-document bodies. []
+    when no shell reads from a pipe, here-string or here-document."""
+    try:
+        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
+    except ValueError:
+        return []
+    fed = False
+    for i, (kind, t) in enumerate(toks):
+        if kind != "w" or os.path.basename(t) not in SHELLS:
+            continue
+        ok, idx, _ = prefix_span(toks, i, False)
+        if not ok:
+            continue
+        args = words_after(toks, i + 1)
+        if any(not a.startswith("-") or re.match(r"-\w*c", a) for a in args):
+            continue  # a script file, or a -c body (walk() follows those)
+        s = i - len(idx)
+        after = toks[i + 1 + len(args)] if i + 1 + len(args) < len(toks) else None
+        if (s > 0 and toks[s - 1] in (("o", "|"), ("o", "|&"))) or (after and after[0] == "o" and after[1].startswith("<<")):
+            fed = True
+            break
+    if not fed:
+        return []
+    texts = [t for k, t in toks if k == "w" and " " in t]
+    seg = []
+    for k, t in toks + [("o", ";")]:
+        if k == "w":
+            seg.append(t)
+            continue
+        if seg and os.path.basename(seg[0]) in ("echo", "printf"):
+            texts.append(" ".join(seg[1:]))
+        seg = []
+    for m in re.finditer(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\s*\2\s*(?:\n|$)", cmd, re.S):
+        texts.append(m.group(3))
+    return texts

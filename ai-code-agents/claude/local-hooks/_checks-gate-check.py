@@ -189,8 +189,6 @@ def targets(cmd, cwd):
 # legacy=True keeps this gate's own command-prefix handling unchanged.
 
 BODY_RE = re.compile(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+pr\s+create\b")
-REDIRECT_WHY = ("a --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE "
-                "(the repository is not judged from the directory)")
 
 
 def analyze(cmd, cwd):
@@ -210,9 +208,7 @@ def analyze(cmd, cwd):
             if c["args"][:2] == ["pr", "create"] and not pr_repo_flag(c["args"]):
                 out.append(("pr", c["dir"], None, c["why"]))
         elif c["sub"] == "push":
-            d, w = c["dir"], c["why"]
-            if c["redirect"]:
-                d, w = None, REDIRECT_WHY
+            _state, d, w = cd.effective(c)
             p = {"args": c["args"]}
             longs, shorts, _remote, refspecs = gg.push_parts(p)
             if text_exempt(longs, shorts, refspecs):

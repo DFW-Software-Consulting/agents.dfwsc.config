@@ -1,0 +1,16 @@
+# Example config for public-repo-text-gate.sh. Copy to
+# ~/.claude/public-text-gate.conf (or point CLAUDE_PUBLIC_TEXT_GATE_CONF at it)
+# and replace the fake values. Parsed as data, never executed.
+
+# Repos treated as public / private without asking GitHub (globs on owner/repo).
+PUBLIC_REPOS="owner-x/repo-y owner-x/public-*"
+PRIVATE_REPOS="owner-x/private-*"
+
+# Literal terms to block (case-insensitive, whole words). Quote to include spaces.
+TERMS="fakehost-01 example-tail.ts.net 'Fake Project'"
+
+# Literals removed from the text before scanning, to allow a deliberate mention.
+ALLOW_TERMS="fakehost-docs"
+
+# Extra regexes, one per line. A bad regex is skipped.
+PATTERN=fake-acct-[0-9]{6}

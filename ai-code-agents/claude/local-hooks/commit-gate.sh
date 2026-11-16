@@ -9,10 +9,14 @@
 #
 # Register on PreToolUse with matcher `Bash`.
 #
-# Reads the command with the quote-aware scanner (_git-cmd-scan.py), in the
-# directory it runs in (payload cwd, literal `cd`, `git -C`). Only read-only
-# git queries, inside a small time budget. Fails open: bad input, missing
-# jq/python3/git, an unparseable command, an undeterminable directory, any error.
+# Reads the command with the shared walker (_cmd_dirs.py), in the directory it
+# runs in (payload cwd, `cd`, `pushd`, `git -C`, `env -C`, plain variable
+# assignments, GIT_DIR=, `bash -c`/`eval` bodies). A commit whose directory cannot
+# be established is denied (write the directory literally); a bare `mktemp -d`
+# directory is allowed; the message secret scan runs whatever the directory.
+# Without _cmd_dirs.py the previous literal-directory scan runs.
+# Only read-only git queries, inside a small time budget. Fails open: bad input,
+# missing jq/python3/git, an unparseable command, an internal error.
 #
 # Config (data only, never sourced): ${CLAUDE_GIT_GATES_CONF:-~/.claude/git-gates.conf};
 # ALLOW_PATHS exempts files from the file and content rules. See git-gates.conf.example.

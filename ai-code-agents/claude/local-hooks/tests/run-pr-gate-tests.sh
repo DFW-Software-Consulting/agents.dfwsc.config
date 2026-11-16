@@ -343,7 +343,8 @@ noconf
 
 # --- skipped forms ---
 newrepo; mktemplate .github/pull_request_template.md; git -C "$R" checkout -q -b local-only
-check "--web skipped (even unpushed, bad body)" allow "$(bp "gh pr create --web --title x --body 'y $AWS'")"
+check "--web skipped (even unpushed, clean body)" allow "$(bp "gh pr create --web --title x --body 'y'")"
+check "--web with a secret in the body denied (the secret rule runs in every form)" deny "$(bp "gh pr create --web --title x --body 'y $AWS'")"
 check "--fill skipped" allow "$(bp 'gh pr create --fill')"
 check "--fill-first skipped" allow "$(bp 'gh pr create --fill-first')"
 check "-f skipped" allow "$(bp 'gh pr create -f')"
@@ -373,8 +374,163 @@ check "repository without an origin and -R skipped" allow "$(bp "gh pr create -R
 # --- directory forms ---
 check "cd into the repo then gh is judged" deny "$(bp "cd $R && gh issue create --title x --body 'y $AWS'" "$elsewhere")"
 check "(cd repo; gh) is judged" deny "$(bp "(cd $R && gh issue create --title x --body 'y $AWS')" "$elsewhere")"
-check "undeterminable cd target allowed" allow "$(bp 'cd "$SOMEWHERE" && gh issue create --title x --body "y"' "$elsewhere")"
-check "missing payload cwd allowed" allow "$(jq -n --arg c "gh issue create --title x --body 'y $AWS'" '{tool_input:{command:$c}}')"
+check "undeterminable cd target allowed (nothing to judge but the text, which is clean)" allow "$(bp 'cd "$SOMEWHERE" && gh issue create --title x --body "y"' "$elsewhere")"
+check "missing payload cwd: a secret in the text is still denied" deny "$(jq -n --arg c "gh issue create --title x --body 'y $AWS'" '{tool_input:{command:$c}}')"
+check "missing payload cwd: clean text allowed" allow "$(jq -n --arg c "gh issue create --title x --body 'y'" '{tool_input:{command:$c}}')"
+
+# --- directory not written literally (shared walker: _cmd_dirs.py) ---
+UNK='could not tell which repository gh pr create runs in'
+newrepo pushedrepo
+PUSHED="$R"
+newrepo localrepo; git -C "$R" checkout -q -b local-only; LOCAL="$R"   # branch not on its remote
+newrepo tmplrepo; mktemplate .github/pull_request_template.md; TMPLR="$R"
+# resolvable plain assignments are judged exactly like the literal path
+check "W=<repo>; cd \"\$W\" && gh pr create from an unpushed branch denied like the literal form" deny "$(bp "W=$LOCAL; cd \"\$W\" && $(prc 'body text')" "$elsewhere")"
+check "W=<repo>; cd \"\$W\" && gh pr create from a pushed branch allowed like the literal form" allow "$(bp "W=$PUSHED; cd \"\$W\" && $(prc 'body text')" "$elsewhere")"
+check "W=<repo>; (cd \"\$W\" && gh pr create) unpushed denied" deny "$(bp "W=$LOCAL; (cd \"\$W\" && $(prc 'body text'))" "$elsewhere")"
+check "W=<repo>; pushd \"\$W\" && gh pr create unpushed denied" deny "$(bp "W=$LOCAL; pushd \"\$W\" >/dev/null && $(prc 'body text')" "$elsewhere")"
+check "literal pushd && gh pr create unpushed denied" deny "$(bp "pushd $LOCAL >/dev/null && $(prc 'body text')" "$elsewhere")"
+check "W=<repo>; cd \"\$W\" && gh issue create with a secret denied" deny "$(bp "W=$PUSHED; cd \"\$W\" && gh issue create --title x --body 'y $AWS'" "$elsewhere")"
+check "W=<repo>: template sections still warn like the literal form" warn "$(bp "W=$TMPLR; cd \"\$W\" && $(prc "$SHORT")" "$elsewhere")"
+# a directory that cannot be established: gh pr create denied
+for form in 'cd "$W" && PRC' \
+            'W=$(pwd) && cd "$W" && PRC' \
+            '(cd "$W" && PRC)' \
+            'pushd "$W" >/dev/null && PRC' \
+            'cd "$(pwd)" && PRC' \
+            'cd - && PRC' \
+            'pushd /tmp >/dev/null; popd >/dev/null; PRC' \
+            'env -C "$W" PRC' \
+            "bash -c 'cd \"\$W\" && PRC'" \
+            "sh -c 'cd \$W && PRC'" \
+            "eval 'cd \$W && PRC'"; do
+  f="${form//PRC/$(prc 'body text')}"
+  check "unknown directory: gh pr create denied: $form" deny "$(bp "$f" "$PUSHED")"
+done
+reason_has "unknown-directory denial says it could not tell which repository and to write it literally" "$(bp "cd \"\$W\" && $(prc 'body text')" "$PUSHED")" "unknown-directory.*$UNK.*literally"
+reason_has "unknown-directory denial names the reason" "$(bp "cd \"\$W\" && $(prc 'body text')" "$PUSHED")" 'not written literally'
+check "unknown directory: unparseable body holding gh pr create denied" deny "$(bp "bash -c 'gh pr create --title x --body \"unterminated'" "$PUSHED")"
+check "unknown directory: unparseable body without gh pr create allowed" allow "$(bp "bash -c 'echo \"gh unterminated'" "$PUSHED")"
+check "bash -c literal cd, unpushed, denied like the literal form" deny "$(bp "bash -c 'cd $LOCAL && $(prc 'body text')'" "$elsewhere")"
+check "bash -c literal cd, pushed, allowed" allow "$(bp "bash -c 'cd $PUSHED && $(prc 'body text')'" "$elsewhere")"
+# the forms the gate already skips stay as they are with an unknown directory
+check "unknown directory: --head owner:branch not denied" allow "$(bp "cd \"\$W\" && $(prc 'body text' '--head owner:feature')" "$PUSHED")"
+check "unknown directory: --web not denied" allow "$(bp 'cd "$W" && gh pr create --web --title x --body y' "$PUSHED")"
+check "unknown directory: --fill not denied" allow "$(bp 'cd "$W" && gh pr create --fill' "$PUSHED")"
+check "unknown directory: --fill-first not denied" allow "$(bp 'cd "$W" && gh pr create --fill-first' "$PUSHED")"
+check "unknown directory: --template not denied" allow "$(bp 'cd "$W" && gh pr create --title x --body y --template bug.md' "$PUSHED")"
+check "unknown directory: -R naming a repository not denied" allow "$(bp "cd \"\$W\" && gh pr create -R owner/elsewhere --title x --body y" "$PUSHED")"
+check "unknown directory: --repo= naming a repository not denied" allow "$(bp "cd \"\$W\" && gh pr create --repo=owner/elsewhere --title x --body y" "$PUSHED")"
+check "unknown directory: no body at all not denied" allow "$(bp 'cd "$W" && gh pr create --title x' "$PUSHED")"
+check "unknown directory: body from a variable not denied" allow "$(bp 'cd "$W" && gh pr create --title x --body "$BODY"' "$PUSHED")"
+check "unknown directory: relative --body-file cannot be read, not denied" allow "$(bp 'cd "$W" && gh pr create --title x --body-file b.md' "$PUSHED")"
+# rule B (secrets) runs from the text whatever the directory
+check "unknown directory: secret in the title denied" deny "$(bp "cd \"\$W\" && gh pr create --title 'fix $AWS' --body y" "$PUSHED")"
+reason_has "unknown directory: title secret reported as kind plus six characters" "$(bp "cd \"\$W\" && gh pr create --title 'fix $AWS' --body y" "$PUSHED")" "secret-in-text.*title.*${AWS:0:6}\.\.\."
+reason_lacks "unknown directory: title secret never shown in full" "$(bp "cd \"\$W\" && gh pr create --title 'fix $AWS' --body y" "$PUSHED")" "$AWS"
+reason_lacks "unknown directory: no more than six characters of the title secret" "$(bp "cd \"\$W\" && gh pr create --title 'fix $AWS' --body y" "$PUSHED")" "${AWS:0:7}"
+reason_has "unknown directory: the denial also carries the unknown-directory reason" "$(bp "cd \"\$W\" && gh pr create --title 'fix $AWS' --body y" "$PUSHED")" "unknown-directory"
+check "unknown directory: secret in the body denied" deny "$(bp "cd \"\$W\" && gh pr create --title x --body 'y $AWS'" "$PUSHED")"
+check "unknown directory: secret with --head owner:branch still denied" deny "$(bp "cd \"\$W\" && gh pr create --title x --body 'y $AWS' --head owner:feature" "$PUSHED")"
+check "unknown directory: secret with -R still denied" deny "$(bp "cd \"\$W\" && gh pr create -R owner/elsewhere --title x --body 'y $AWS'" "$PUSHED")"
+check "unknown directory: secret in a heredoc body denied" deny "$(bp "cd \"\$W\" && gh pr create --title x -F - <<'EOF'
+## Summary
+$AWS
+EOF" "$PUSHED")"
+printf 'key %s\n' "$AWS" > "$T/secret-abs.md"
+check "unknown directory: secret in an absolute --body-file denied" deny "$(bp "cd \"\$W\" && gh pr create --title x --body-file $T/secret-abs.md" "$PUSHED")"
+check "unknown directory: secret in a bash -c body denied" deny "$(bp "bash -c 'cd \"\$W\" && gh pr create --title x --body \"y $AWS\"'" "$PUSHED")"
+check "unknown directory: secret in an unparseable body denied" deny "$(bp "bash -c 'gh issue create --title x --body \"$AWS'" "$PUSHED")"
+check "unknown directory: secret with a payload that has no cwd denied" deny "$(jq -n --arg c "gh pr create --title 'x $AWS' --body y" '{tool_input:{command:$c}}')"
+# issue create and pr edit: only the secret rule applies
+check "unknown directory: gh issue create with a secret denied" deny "$(bp "cd \"\$W\" && gh issue create --title x --body 'y $AWS'" "$PUSHED")"
+check "unknown directory: gh issue create clean allowed" allow "$(bp 'cd "$W" && gh issue create --title x --body "y"' "$PUSHED")"
+check "unknown directory: gh pr edit --body with a secret denied" deny "$(bp "cd \"\$W\" && gh pr edit 3 --body 'y $AWS'" "$PUSHED")"
+check "unknown directory: gh pr edit --title with a secret denied" deny "$(bp "cd \"\$W\" && gh pr edit 3 --title 'y $AWS'" "$PUSHED")"
+check "unknown directory: gh pr edit clean allowed" allow "$(bp 'cd "$W" && gh pr edit 3 --body "y"' "$PUSHED")"
+check "unknown directory: gh issue create from an unpushed repository, clean, allowed" allow "$(bp 'cd "$W" && gh issue create --title x --body "y"' "$LOCAL")"
+reason_lacks "unknown directory: gh issue create denial does not carry the pr-create reason" "$(bp "cd \"\$W\" && gh issue create --title x --body 'y $AWS'" "$PUSHED")" "unknown-directory"
+# template, placeholder and size rules need the repository: skipped, in warn and in deny mode
+conf 'PR_GATE_MODE=warn'
+check "unknown directory, warn mode: sections not judged (issue create)" allow "$(bp "cd \"\$W\" && gh issue create --title x --body '$SHORT'" "$TMPLR")"
+check "unknown directory, warn mode: gh pr edit with missing sections not judged" allow "$(bp "cd \"\$W\" && gh pr edit 3 --body '$SHORT'" "$TMPLR")"
+check "unknown directory, warn mode: pr create is denied by the directory rule alone" deny "$(bp "cd \"\$W\" && $(prc "$SHORT")" "$TMPLR")"
+reason_lacks "unknown directory, warn mode: no template section text in the pr create denial" "$(bp "cd \"\$W\" && $(prc "$SHORT")" "$TMPLR")" "sections"
+check "the same body from the literal directory still warns" warn "$(bp "cd $TMPLR && $(prc "$SHORT")" "$elsewhere")"
+conf 'PR_GATE_MODE=deny' 'LOC_CAP=1'
+check "unknown directory, deny mode: sections not judged (issue create)" allow "$(bp "cd \"\$W\" && gh issue create --title x --body '$SHORT'" "$TMPLR")"
+check "unknown directory, deny mode: gh pr edit with missing sections not judged" allow "$(bp "cd \"\$W\" && gh pr edit 3 --body '$SHORT'" "$TMPLR")"
+check "unknown directory, deny mode: --head owner:branch with a short body and a size cap not judged" allow "$(bp "cd \"\$W\" && $(prc "$SHORT" '--head owner:feature')" "$TMPLR")"
+check "unknown directory, deny mode: pr create denied" deny "$(bp "cd \"\$W\" && $(prc "$GOOD")" "$PUSHED")"
+check "temporary directory, deny mode: sections not judged" allow "$(bp "cd \"\$(mktemp -d)\" && $(prc "$SHORT")" "$TMPLR")"
+check "the same body from the literal directory is denied in deny mode" deny "$(bp "cd $TMPLR && $(prc "$SHORT")" "$elsewhere")"
+noconf
+# a directory made by a bare mktemp -d: only the secret rule
+check "cd \"\$(mktemp -d)\" && gh pr create allowed" allow "$(bp "cd \"\$(mktemp -d)\" && $(prc 'body text')" "$LOCAL")"
+check "T=\$(mktemp -d); cd \"\$T\" && gh pr create allowed" allow "$(bp "T=\$(mktemp -d); cd \"\$T\" && $(prc 'body text')" "$LOCAL")"
+check "temporary directory: secret in the body denied" deny "$(bp "cd \"\$(mktemp -d)\" && $(prc "x $AWS")" "$PUSHED")"
+check "temporary directory: secret in the title denied" deny "$(bp "cd \"\$(mktemp -d)\" && gh pr create --title 'x $AWS' --body y" "$PUSHED")"
+check "temporary directory: gh issue create clean allowed" allow "$(bp 'cd "$(mktemp -d)" && gh issue create --title x --body y' "$PUSHED")"
+# text as data and read-only commands
+check "echo of gh pr create with an unknown directory is not a command" allow "$(bp 'cd "$W" && echo "gh pr create --title x --body y"' "$PUSHED")"
+check "grep for gh pr create is not a command" allow "$(bp 'cd "$W" && grep -n "gh pr create" notes.md' "$PUSHED")"
+check "a commit message that mentions gh pr create is not a command" allow "$(bp 'cd "$W" && git commit -m "document gh pr create"' "$PUSHED")"
+check "gh pr view after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr view 3' "$PUSHED")"
+check "gh pr list after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr list' "$PUSHED")"
+check "gh pr comment after an unknown cd allowed" allow "$(bp "cd \"\$W\" && gh pr comment 3 --body 'x'" "$PUSHED")"
+check "gh issue list after an unknown cd allowed" allow "$(bp 'cd "$W" && gh issue list' "$PUSHED")"
+check "gh pr checks after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr checks 3' "$PUSHED")"
+# a line with too many commands to analyse
+many="$(for i in $(seq 1 320); do printf 'cd %s; ' "$PUSHED"; done)"
+check "line over the analysis budget with gh pr create denied" deny "$(bp "${many}$(prc 'body text')" "$PUSHED")"
+check "line over the analysis budget with a secret denied" deny "$(bp "${many}gh issue create --title x --body 'y $AWS'" "$PUSHED")"
+check "line over the analysis budget without gh create allowed" allow "$(bp "${many}gh pr view 3" "$PUSHED")"
+# --- review round: bodies on an over-budget line, secrets in skipped forms, -R=, missing shared module ---
+for body in "bash -c 'gh pr create --title x --body y'" "sh -c 'gh pr create --title x --body y'" "eval 'gh pr create --title x --body y'" "env -S 'gh pr create --title x --body y'" "bash -c 'bash -c \"gh pr create --title x --body y\"'"; do
+  check "over-budget line: gh pr create inside a body denied: $body" deny "$(bp "${many}$body" "$PUSHED")"
+done
+reason_has "over-budget line: a body with gh pr create is denied as unknown-directory" "$(bp "${many}bash -c 'gh pr create --title x --body y'" "$PUSHED")" "unknown-directory.*too many commands"
+check "over-budget line: a secret in a body is denied" deny "$(bp "${many}bash -c 'gh issue create --title x --body \"$AWS\"'" "$PUSHED")"
+check "over-budget line: a body with gh pr view allowed" allow "$(bp "${many}bash -c 'gh pr view 3'" "$PUSHED")"
+check "over-budget line: a body with gh pr create --web allowed" allow "$(bp "${many}bash -c 'gh pr create --web'" "$PUSHED")"
+# the secret rule runs in every form, also those the gate skips otherwise
+for f in --fill --fill-first --web -f "--template bug.md" "-T bug.md"; do
+  check "secret in the body denied with $f" deny "$(bp "gh pr create $f --title x --body 'y $AWS'" "$PUSHED")"
+  check "secret in the title denied with $f" deny "$(bp "gh pr create $f --title 'y $AWS'" "$PUSHED")"
+  check "clean text with $f stays allowed" allow "$(bp "gh pr create $f --title x --body y" "$PUSHED")"
+  check "unknown directory: secret in the body denied with $f" deny "$(bp "cd \"\$W\" && gh pr create $f --title x --body 'y $AWS'" "$PUSHED")"
+  check "unknown directory: clean text with $f stays allowed" allow "$(bp "cd \"\$W\" && gh pr create $f --title x --body y" "$PUSHED")"
+done
+check "secret in the title with no body denied" deny "$(bp "gh pr create --title 'y $AWS'" "$PUSHED")"
+check "secret in a body from an unreadable file: title judged, body skipped" allow "$(bp 'gh pr create --title x --body-file /nonexistent/b.md' "$PUSHED")"
+check "secret in the title with an unreadable body denied" deny "$(bp "gh pr create --title 'y $AWS' --body \"\$BODY\"" "$PUSHED")"
+reason_lacks "skipped form: the secret is never shown in full" "$(bp "gh pr create --web --title x --body 'y $AWS'" "$PUSHED")" "$AWS"
+check "gh issue create --web with a secret in the title denied" deny "$(bp "gh issue create --web --title 'y $AWS'" "$PUSHED")"
+# -R=owner/repo is -R owner/repo
+newrepo plain5
+check "-R=owner/repo naming this repo is judged" deny "$(bp "gh pr create -R=owner/plain5 --title x --body 'y $AWS'")"
+check "-R=owner/repo naming another repo skipped" allow "$(bp "gh pr create -R=owner/elsewhere --title x --body 'y $AWS'")"
+check "unknown directory: -R=owner/repo not denied as unknown" allow "$(bp 'cd "$W" && gh pr create -R=owner/elsewhere --title x --body y' "$PUSHED")"
+check "-t=title attached value with a secret denied" deny "$(bp "gh pr create -t=\"y $AWS\" --body y" "$PUSHED")"
+# a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
+check "W=<pushed repo>; W=\`pwd\`; cd \"\$W\" && gh pr create: unknown directory, denied" deny "$(bp 'W='"$PUSHED"'; W=`pwd`; cd "$W" && '"$(prc 'body text')" "$elsewhere")"
+reason_has "backtick reassignment: the denial says the directory is unknown" "$(bp 'W='"$PUSHED"'; W=`pwd`; cd "$W" && '"$(prc 'body text')" "$elsewhere")" "unknown-directory"
+# without _cmd_dirs.py the gate falls back to the literal-directory scan
+iso3="$(mktemp -d "$HOME/iso3.XXXXXX")"; cp -r "$hooks" "$iso3/lh"; rm -f "$iso3/lh/_cmd_dirs.py"
+isocheck() {  # NAME EXPECT PAYLOAD
+  local out; out="$(printf '%s' "$3" | bash "$iso3/lh/pr-gate.sh" 2>/dev/null)"
+  if { [ "$2" = deny ] && grep -q '"permissionDecision": *"deny"' <<<"$out"; } || { [ "$2" = allow ] && [ -z "$out" ]; }; then ok "$1"; else bad "$1 (expected $2)" "output: $out"; fi
+}
+isocheck "without _cmd_dirs.py: an unpushed branch in a literal directory denied" deny "$(bp "$(prc 'body text')" "$LOCAL")"
+isocheck "without _cmd_dirs.py: cd <repo> && gh pr create unpushed denied" deny "$(bp "cd $LOCAL && $(prc 'body text')" "$elsewhere")"
+isocheck "without _cmd_dirs.py: a secret in a literal directory denied" deny "$(bp "$(prc "x $AWS")" "$PUSHED")"
+isocheck "without _cmd_dirs.py: a pushed branch allowed" allow "$(bp "$(prc 'body text')" "$PUSHED")"
+isocheck "without _cmd_dirs.py: an unknown directory is not judged (the old behaviour)" allow "$(bp "cd \"\$W\" && $(prc 'body text')" "$LOCAL")"
+errout="$(CMD='gh pr create --title x --body y' CWD="$PUSHED" python3 "$iso3/lh/_pr-gate-check.py" 2>&1 >/dev/null)"
+[ "$(wc -l <<<"$errout")" -eq 1 ] && grep -q '_cmd_dirs.py could not be loaded' <<<"$errout"; ok "without _cmd_dirs.py: one line on standard error"
+rm -rf "$iso3"
+newrepo  # leave R on a fresh repository for the sections below
+
 
 # --- body from file and from stdin ---
 newrepo; mktemplate .github/pull_request_template.md

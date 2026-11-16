@@ -472,8 +472,8 @@ check "(cd repo; commit) is judged" deny "$(bp "(cd $R && git commit -m 'feat: x
 check "cd into the repo then add -A and commit is judged" deny "$(bp "cd $R && git add -A && git commit -m 'feat: x'" "$elsewhere")"
 check "commit after leaving the repo with cd is not judged against it" allow "$(bp "cd $R && cd $elsewhere && git commit -m 'feat: x'" "$elsewhere")"
 check "commit in a directory that is not a repository allowed" allow "$(bp "git commit -m 'feat: x'" "$elsewhere")"
-check "undeterminable directory (variable) allowed" allow "$(bp 'cd "$SOMEWHERE" && git commit -m "feat: x"' "$elsewhere")"
-check "undeterminable -C (substitution) allowed" allow "$(bp 'git -C "$(pwd)" commit -m "feat: x"' "$elsewhere")"
+check "undeterminable directory (variable) denied: staged content cannot be inspected" deny "$(bp 'cd "$SOMEWHERE" && git commit -m "feat: x"' "$elsewhere")"
+check "undeterminable -C (substitution) denied: staged content cannot be inspected" deny "$(bp 'git -C "$(pwd)" commit -m "feat: x"' "$elsewhere")"
 check "missing payload cwd with a plain commit allowed" allow "$(jq -n '{tool_input:{command:"git commit -m x"}}')"
 check "nonexistent directory allowed" allow "$(bp "git -C $T/nope commit -m 'feat: x'" "$elsewhere")"
 check "-c option before commit is judged" deny "$(bp "git -C $R -c user.name=x commit -m 'feat: x'" "$elsewhere")"
@@ -481,6 +481,146 @@ check "git status mentioning commit is not a commit" allow "$(bp 'git status # g
 check "echo of a git commit is not a commit" allow "$(bp 'echo "git commit -m x"')"
 check "git log --grep=commit is not a commit" allow "$(bp 'git log --grep=commit')"
 
+# --- directory not written literally (shared walker: _cmd_dirs.py) ---
+UNK='could not tell which repository the commit runs in'
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env; DIRTY="$R"
+newrepo; echo ok > "$R/ok.txt"; git -C "$R" add ok.txt; CLEAN="$R"
+# resolvable plain assignments are judged exactly like the literal path
+check "W=<repo>; cd \"\$W\" && commit: staged .env denied like the literal form" deny "$(bp "W=$DIRTY && cd \"\$W\" && git commit -m 'feat: x'" "$elsewhere")"
+check "W=<repo>; cd \"\$W\" && commit: clean repo allowed like the literal form" allow "$(bp "W=$CLEAN && cd \"\$W\" && git commit -m 'feat: x'" "$elsewhere")"
+check "W=<repo>; git -C \"\$W\" commit: staged .env denied" deny "$(bp "W=$DIRTY; git -C \"\$W\" commit -m 'feat: x'" "$elsewhere")"
+check "W=<repo>; git -C \"\$W\" commit: clean repo allowed" allow "$(bp "W=$CLEAN; git -C \"\$W\" commit -m 'feat: x'" "$elsewhere")"
+check "W=<repo>; (cd \"\$W\" && commit): staged .env denied" deny "$(bp "W=$DIRTY; (cd \"\$W\" && git commit -m 'feat: x')" "$elsewhere")"
+check "W=<repo>; pushd \"\$W\" && commit: staged .env denied" deny "$(bp "W=$DIRTY; pushd \"\$W\" >/dev/null && git commit -m 'feat: x'" "$elsewhere")"
+check "literal pushd && commit: staged .env denied" deny "$(bp "pushd $DIRTY >/dev/null && git commit -m 'feat: x'" "$elsewhere")"
+check "literal pushd && commit: clean repo allowed" allow "$(bp "pushd $CLEAN >/dev/null && git commit -m 'feat: x'" "$elsewhere")"
+newrepo; echo "v=1" > "$R/.env"
+check "W=<repo>; same-line add -A then commit: untracked .env denied" deny "$(bp "W=$R; cd \"\$W\" && git add -A && git commit -m 'feat: x'" "$elsewhere")"
+newrepo; echo x > "$R/ok.txt"; echo "v=1" > "$R/.env"
+check "W=<repo>; add of another file does not pick up an untracked .env" allow "$(bp "W=$R; cd \"\$W\" && git add ok.txt && git commit -m 'feat: x'" "$elsewhere")"
+# a directory that cannot be established: deny, the standard message
+for form in 'cd "$W" && git commit -m "feat: x"' \
+            'W=$(pwd) && cd "$W" && git commit -m "feat: x"' \
+            '(cd "$W" && git commit -m "feat: x")' \
+            'pushd "$W" >/dev/null && git commit -m "feat: x"' \
+            'git -C "$W" commit -m "feat: x"' \
+            'cd "$(pwd)" && git commit -m "feat: x"' \
+            'cd - && git commit -m "feat: x"' \
+            'pushd /tmp >/dev/null; popd >/dev/null; git commit -m "feat: x"' \
+            'GIT_DIR="$W" git commit -m "feat: x"' \
+            'git --git-dir="$W" commit -m "feat: x"' \
+            'bash -c '"'"'cd "$W" && git commit -m "feat: x"'"'" \
+            'sh -c "cd \"\$W\" && git commit -m x"' \
+            'eval "cd \$W && git commit -m x"' \
+            'env -C "$W" git commit -m "feat: x"'; do
+  check "unknown directory denied: $form" deny "$(bp "$form" "$DIRTY")"
+  check "unknown directory denied even from a clean repository: $form" deny "$(bp "$form" "$CLEAN")"
+done
+reason_has "unknown-directory denial says it could not tell which repository and to write it literally" "$(bp 'cd "$W" && git commit -m "feat: x"' "$CLEAN")" "unknown-directory.*$UNK.*Write the directory literally"
+reason_has "unknown-directory denial names the reason" "$(bp 'cd "$W" && git commit -m "feat: x"' "$CLEAN")" 'not written literally'
+check "unknown directory: --amend --no-edit denied too" deny "$(bp 'cd "$W" && git commit --amend --no-edit' "$CLEAN")"
+check "unknown directory: --dry-run is not a commit" allow "$(bp 'cd "$W" && git commit --dry-run -m "feat: x"' "$DIRTY")"
+check "unknown directory: git commit --help is not a commit" allow "$(bp 'cd "$W" && git commit --help' "$DIRTY")"
+# explicit git directories are judged by their work tree
+check "GIT_DIR=<repo>/.git commit: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git GIT_WORK_TREE=$DIRTY git commit -m 'feat: x'" "$elsewhere")"
+check "GIT_DIR=<repo>/.git alone: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git git commit -m 'feat: x'" "$elsewhere")"
+check "GIT_DIR=<repo>/.git: clean repo allowed" allow "$(bp "GIT_DIR=$CLEAN/.git git commit -m 'feat: x'" "$elsewhere")"
+check "--git-dir/--work-tree commit: staged .env denied" deny "$(bp "git --git-dir=$DIRTY/.git --work-tree=$DIRTY commit -m 'feat: x'" "$elsewhere")"
+check "--git-dir/--work-tree commit: clean repo allowed" allow "$(bp "git --git-dir=$CLEAN/.git --work-tree=$CLEAN commit -m 'feat: x'" "$elsewhere")"
+check "env GIT_DIR on a bash -c body: staged .env denied" deny "$(bp "bash -c 'GIT_DIR=$DIRTY/.git git commit -m x'" "$elsewhere")"
+# command bodies are judged like the literal forms (3 levels deep)
+check "bash -c with a literal cd: staged .env denied" deny "$(bp "bash -c 'cd $DIRTY && git commit -m x'" "$elsewhere")"
+check "bash -c with a literal cd: clean repo allowed" allow "$(bp "bash -c 'cd $CLEAN && git commit -m x'" "$elsewhere")"
+check "bash -c in the payload directory: staged .env denied" deny "$(bp "bash -c 'git commit -m x'" "$DIRTY")"
+check "sh -c with a resolvable assignment: staged .env denied" deny "$(bp "sh -c 'W=$DIRTY; cd \"\$W\" && git commit -m x'" "$elsewhere")"
+check "eval of a literal cd: staged .env denied" deny "$(bp "eval \"cd $DIRTY && git commit -m x\"" "$elsewhere")"
+check "bash -c inside bash -c inside sh -c: staged .env denied" deny "$(bp "sh -c \"bash -c 'cd $DIRTY && git commit -m x'\"" "$elsewhere")"
+check "env -C <repo> commit: staged .env denied" deny "$(bp "env -C $DIRTY git commit -m x" "$elsewhere")"
+check "bash -c whose body cannot be parsed and holds a commit denied" deny "$(bp "bash -c 'git commit -m \"unterminated'" "$CLEAN")"
+check "bash -c whose body cannot be parsed and holds no commit allowed" allow "$(bp "bash -c 'echo \"commit unterminated'" "$CLEAN")"
+# the message is scanned from its text whatever the directory
+for form in "cd \"\$W\" && git commit -m \"feat: add $AWS\"" \
+            "git -C \"\$W\" commit -m \"feat: add $AWS\"" \
+            "bash -c 'cd \"\$W\" && git commit -m \"feat: add $AWS\"'" \
+            "cd \"\$(mktemp -d)\" && git commit -m \"feat: add $AWS\"" \
+            "GIT_DIR=\"\$W\" git commit -m \"feat: add $AWS\""; do
+  check "commit-message secret denied: ${form//$AWS/<key>}" deny "$(bp "$form" "$CLEAN")"
+done
+reason_has "unknown directory: the denial reports the message secret as kind plus six characters" "$(bp "cd \"\$W\" && git commit -m \"feat: add $AWS\"" "$CLEAN")" "secret-in-message.*${AWS:0:6}\.\.\."
+reason_has "unknown directory: the same denial also says the directory is unknown" "$(bp "cd \"\$W\" && git commit -m \"feat: add $AWS\"" "$CLEAN")" "unknown-directory"
+reason_lacks "unknown directory: the message secret is never shown in full" "$(bp "cd \"\$W\" && git commit -m \"feat: add $AWS\"" "$CLEAN")" "$AWS"
+reason_lacks "unknown directory: no more than six characters of the secret" "$(bp "cd \"\$W\" && git commit -m \"feat: add $AWS\"" "$CLEAN")" "${AWS:0:7}"
+printf 'feat: add %s\n' "$AWS" > "$T/msg-abs.txt"
+check "unknown directory: -F absolute message file with a secret denied" deny "$(bp "cd \"\$W\" && git commit -F $T/msg-abs.txt" "$CLEAN")"
+check "unknown directory: heredoc message with a secret denied" deny "$(bp "cd \"\$W\" && git commit -F - <<'EOF'
+feat: add $AWS
+EOF" "$CLEAN")"
+check "message secret with no payload cwd and a plain commit denied" deny "$(jq -n --arg c "git commit -m 'feat: add $AWS'" '{tool_input:{command:$c}}')"
+# a directory made by a bare mktemp -d is allowed
+check "cd \"\$(mktemp -d)\" && init && commit allowed" allow "$(bp 'cd "$(mktemp -d)" && git init -q && git commit -q --allow-empty -m "feat: x"' "$DIRTY")"
+check "T=\$(mktemp -d); cd \"\$T\" && commit allowed (the staged .env is in another repository)" allow "$(bp 'T=$(mktemp -d); cd "$T" && git init -q && git commit -q --allow-empty -m "feat: x"' "$DIRTY")"
+check "git -C \"\$(mktemp -d)\" commit allowed" allow "$(bp 'git -C "$(mktemp -d)" commit --allow-empty -m "feat: x"' "$DIRTY")"
+check "mktemp -d with -p is not a temporary directory: denied" deny "$(bp 'cd "$(mktemp -d -p /var/tmp)" && git commit -m "feat: x"' "$CLEAN")"
+# text as data and read-only commands are not commits
+check "echo of a git commit with an unknown directory is not a commit" allow "$(bp 'cd "$W" && echo "git commit -m x"' "$DIRTY")"
+check "printf of a git commit is not a commit" allow "$(bp "printf '%s' 'git commit -m x'" "$DIRTY")"
+check "a message that mentions git commit is not a commit" allow "$(bp 'cd "$W" && git log --grep="git commit" -1' "$DIRTY")"
+check "git status after an unknown cd is not a commit" allow "$(bp 'cd "$W" && git status # commit' "$DIRTY")"
+check "git diff --cached after an unknown cd is not a commit" allow "$(bp 'cd "$W" && git diff --cached --stat # to commit' "$DIRTY")"
+check "grep for git commit in a file is not a commit" allow "$(bp 'cd "$W" && grep -n "git commit" notes.txt' "$DIRTY")"
+check "bash -c with an echo of git commit is not a commit" allow "$(bp "bash -c 'cd \"\$W\" && echo git commit'" "$DIRTY")"
+# a line with too many commands to analyse: the commit directory is unknown
+many="$(for i in $(seq 1 320); do printf 'cd %s; ' "$CLEAN"; done)"
+check "line over the analysis budget with a commit denied" deny "$(bp "${many}git commit -m 'feat: x'" "$CLEAN")"
+check "line over the analysis budget without a commit allowed" allow "$(bp "${many}git status # commit" "$CLEAN")"
+check "line over the analysis budget: message secret denied" deny "$(bp "${many}git commit -m 'feat: $AWS'" "$CLEAN")"
+
+# --- review round: bodies on an over-budget line, linked worktrees, -h as a value, missing shared module ---
+for body in "bash -c 'git commit -m x'" "sh -c 'git commit -m x'" "eval 'git commit -m x'" "env -S 'git commit -m x'" "bash -c \"cd $DIRTY && git commit -m x\"" "bash -c 'bash -c \"git commit -m x\"'"; do
+  check "over-budget line: commit inside a body denied: $body" deny "$(bp "${many}$body" "$CLEAN")"
+done
+reason_has "over-budget line: a body with a commit is denied as unknown-directory" "$(bp "${many}bash -c 'git commit -m x'" "$CLEAN")" "unknown-directory.*too many commands"
+check "over-budget line: a body with a message secret denied" deny "$(bp "${many}bash -c 'git commit -m \"feat: $AWS\"'" "$CLEAN")"
+check "over-budget line: a body without a commit allowed" allow "$(bp "${many}bash -c 'git status'; echo commit" "$CLEAN")"
+check "over-budget line: a body with a dry run allowed" allow "$(bp "${many}bash -c 'git commit --dry-run -m x'" "$CLEAN")"
+# a linked worktree's git directory is judged by its work tree
+newrepo; LMAIN="$R"; git -C "$LMAIN" worktree add -q -b linkedwt "$T/linked1" 2>/dev/null
+echo "v=1" > "$T/linked1/.env"; git -C "$T/linked1" add .env
+LGD="$(git -C "$T/linked1" rev-parse --absolute-git-dir)"
+check "GIT_DIR=<linked worktree git dir> commit: staged .env denied" deny "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")"
+check "--git-dir=<linked worktree git dir> commit: staged .env denied" deny "$(bp "git --git-dir=$LGD commit -m 'feat: x'" "$elsewhere")"
+git -C "$T/linked1" reset -q; echo ok > "$T/linked1/ok.txt"; git -C "$T/linked1" add ok.txt
+check "GIT_DIR=<linked worktree git dir> commit: clean worktree allowed" allow "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")"
+rm -f "$LGD/gitdir"
+check "linked worktree git dir whose work tree cannot be resolved: denied as unknown" deny "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")"
+reason_has "unresolvable linked worktree: the denial says the directory could not be worked out" "$(bp "GIT_DIR=$LGD git commit -m 'feat: x'" "$elsewhere")" "unknown-directory.*could not be worked out"
+# -h and --help only in option position
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env; HR="$R"
+check "-m -h is a message, not a help request: staged .env denied" deny "$(bp 'git commit -m -h' "$HR")"
+check "-am -h is a message: staged .env denied" deny "$(bp 'git commit -am -h' "$HR")"
+check "-m --help is a message: staged .env denied" deny "$(bp 'git commit -m --help' "$HR")"
+check "-m x -h is a help request: allowed" allow "$(bp 'git commit -m x -h' "$HR")"
+check "git commit -h is a help request: allowed" allow "$(bp 'git commit -h' "$HR")"
+check "git commit --help is a help request: allowed" allow "$(bp 'git commit --help' "$HR")"
+check "-m --dry-run is a message: staged .env denied" deny "$(bp 'git commit -m --dry-run' "$HR")"
+# a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
+check "W=<clean repo>; W=\`pwd\`; cd \"\$W\" && commit: unknown directory, denied" deny "$(bp 'W='"$CLEAN"'; W=`pwd`; cd "$W" && git commit -m "feat: x"' "$elsewhere")"
+reason_has "backtick reassignment: the denial says the directory is unknown" "$(bp 'W='"$CLEAN"'; W=`pwd`; cd "$W" && git commit -m "feat: x"' "$elsewhere")" "unknown-directory"
+# without _cmd_dirs.py the gate falls back to the literal-directory scan
+iso2="$(mktemp -d "$HOME/iso2.XXXXXX")"; cp -r "$hooks" "$iso2/lh"; rm -f "$iso2/lh/_cmd_dirs.py"
+isocheck() {  # NAME EXPECT PAYLOAD: run the copy without _cmd_dirs.py
+  local out; out="$(printf '%s' "$3" | bash "$iso2/lh/commit-gate.sh" 2>/dev/null)"
+  if { [ "$2" = deny ] && grep -q '"permissionDecision": *"deny"' <<<"$out"; } || { [ "$2" = allow ] && [ -z "$out" ]; }; then ok "$1"; else bad "$1 (expected $2)" "output: $out"; fi
+}
+isocheck "without _cmd_dirs.py: staged .env in a literal directory denied" deny "$(bp 'git commit -m "feat: x"' "$HR")"
+isocheck "without _cmd_dirs.py: cd <repo> && commit denied" deny "$(bp "cd $HR && git commit -m 'feat: x'" "$elsewhere")"
+isocheck "without _cmd_dirs.py: clean repository allowed" allow "$(bp 'git commit -m "feat: x"' "$CLEAN")"
+isocheck "without _cmd_dirs.py: a message secret in a literal directory denied" deny "$(bp "git commit -m 'feat: $AWS'" "$CLEAN")"
+isocheck "without _cmd_dirs.py: an unknown directory is not judged (the old behaviour)" allow "$(bp 'cd "$W" && git commit -m "feat: x"' "$HR")"
+errout="$(CMD='git commit -m "feat: x"' CWD="$HR" python3 "$iso2/lh/_commit-gate-check.py" 2>&1 >/dev/null)"
+[ "$(wc -l <<<"$errout")" -eq 1 ] && grep -q '_cmd_dirs.py could not be loaded' <<<"$errout"; ok "without _cmd_dirs.py: one line on standard error"
+rm -rf "$iso2"
+newrepo; echo "v=1" > "$R/.env"; git -C "$R" add .env   # the repository the escape tests below commit in
 # --- escape ---
 export CLAUDE_GIT_GUARD=off
 check "CLAUDE_GIT_GUARD=off allows" allow "$(bp 'git commit -m "feat: x"')"
@@ -500,7 +640,7 @@ touch "$CLAUDE_GIT_GUARD_OFF_FILE"
 check "off-file path override honoured" allow "$(bp 'git commit -m "feat: x"')"
 unset CLAUDE_GIT_GUARD_OFF_FILE
 iso="$(mktemp -d "$HOME/iso.XXXXXX")"
-cp "$hooks/commit-gate.sh" "$hooks/_commit-gate-check.py" "$hooks/_git_gates_lib.py" "$hooks/_secret_patterns.py" "$hooks/_git-cmd-scan.py" "$hooks/_bash-write-check.py" "$hooks/_public-text-check.py" "$iso/"
+cp "$hooks/commit-gate.sh" "$hooks/_commit-gate-check.py" "$hooks/_git_gates_lib.py" "$hooks/_secret_patterns.py" "$hooks/_git-cmd-scan.py" "$hooks/_cmd_dirs.py" "$hooks/_bash-write-check.py" "$hooks/_public-text-check.py" "$iso/"
 mkdir -p "$iso/../hooks.tmp" 2>/dev/null; rmdir "$iso/../hooks.tmp" 2>/dev/null
 touch "$off"
 out="$(printf '%s' "$(bp 'git commit -m "feat: x"')" | bash "$iso/commit-gate.sh" 2>&1)"

@@ -7,8 +7,11 @@
 #
 # Text comes from `git commit` messages and `gh pr create|edit|comment|review`
 # title/body (including body files). The repo is the effective directory's
-# `origin` (or gh --repo/-R); visibility comes from local config globs, a
-# 7-day cache, or a 4s `gh repo view` lookup. Unknown visibility allows.
+# `origin` (or gh --repo/-R, whatever the directory); visibility comes from local
+# config globs, a 7-day cache, or a 4s `gh repo view` lookup. Unknown visibility
+# allows. When the directory cannot be established and no --repo is given, a text
+# that trips a detector is denied (the repository could not be established; write
+# the directory literally); a temporary (bare `mktemp -d`) directory is silent.
 # Parsing and scanning live in _public-text-check.py.
 #
 # Config (data only, never sourced): ${CLAUDE_PUBLIC_TEXT_GATE_CONF:-~/.claude/public-text-gate.conf};

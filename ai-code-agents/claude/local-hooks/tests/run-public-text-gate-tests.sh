@@ -251,6 +251,11 @@ for form in 'timeout $(echo 5)s git commit' 'git 2>&1 commit' 'sudo -u $(id -un)
 done
 check "a term inside a substitution glued to the message is denied in a public repo" deny "$(bp 'git commit -m x$(echo "fakehost-01")y')"
 check "a clean substitution glued to the message is allowed in a public repo" allow "$(bp 'git commit -m x$(echo ok)y')"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: the over-budget path
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a term inside a substitution is denied in a public repo" deny "$(bp "${PAD}echo \$(git commit -m 'fakehost-01')")"
+check "over the budget: a clean text inside a substitution is allowed in a public repo" allow "$(bp "${PAD}echo \$(git commit -m 'feat: x')")"
 check "--git-dir/--work-tree on the public repo denied" deny "$(bp "git --git-dir=$PUB/.git --work-tree=$PUB commit -m 'fakehost-01'" "$plain")"
 # a directory that cannot be established: a hit is denied, a clean text is silent
 for form in 'cd "$W" && git commit -m "TEXT"' \

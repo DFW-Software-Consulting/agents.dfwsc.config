@@ -8,7 +8,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hooks="$(cd "$here/.." && pwd)"
 export PYTHONDONTWRITEBYTECODE=1 HOOKS="$hooks"
 python3 -B - <<'PY'
-import os, shlex, sys
+import os, re, shlex, sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.environ["HOOKS"])
 import _cmd_dirs as cd
@@ -358,8 +358,8 @@ lexcase("case inside a substitution (pattern with an opener)", "echo $(case x in
 lexcase("arithmetic is not a substitution", "echo $((1+2)) x", "echo $((1+2)) x", [], [])
 lexcase("a substitution inside arithmetic is one", "echo $(( $(pwd) + 1 )) x", "echo $(( @0 + 1 )) x", ["$(pwd)"], ["pwd"])
 lexcase("$(( not closed by )) is a subshell in a substitution", "echo $((echo a); echo b) x", "echo @0 x", ["$((echo a); echo b)"], ["(echo a); echo b"])
-lexcase("a parameter expansion with a brace inside a nested substitution", "echo ${X:-$(echo })}/a", "echo ${X:-@0}/a", ["$(echo })"], ["echo }"])
-lexcase("a plain brace does not nest in a parameter expansion", "echo ${X:-{} $(pwd)", "echo ${X:-{} @0", ["$(pwd)"], ["pwd"])
+lexcase("an unquoted parameter expansion is one placeholder (restored as $) with its substitutions", "echo ${X:-$(echo })}/a", "echo @0/a", ["$", "$(echo })"], [None, "echo }"])
+lexcase("a plain brace does not nest in a parameter expansion", "echo ${X:-{} $(pwd)", "echo @0 @1", ["$", "$(pwd)"], [None, "pwd"])
 lexcase("process substitution", "diff <(sort a) >(cat) x", "diff @0 @1 x", ["<(sort a)", ">(cat)"], ["sort a", "cat"])
 lexcase("a glued process substitution", "git -C <(pwd)/a push", "git -C @0/a push", ["<(pwd)"], ["pwd"])
 lexcase("nesting of 16 is accepted", "echo " + "$(" * 16 + "x" + ")" * 16, "echo @0", None, None)
@@ -592,7 +592,8 @@ else:
 CARRIERS = ["{G}", "sudo -u root {G}", "env -C /p {G}", "env A=1 {G}", "timeout 5 {G}", "nice -n 5 {G}", "command {G}", "A=V {G}",
             "bash -c {Q}", "eval {G}", "( {G} )", "{{ {G}; }}", "true && {G}", "true | {G}", "x=$( {G} )", "echo `{G}`",
             'echo "$( {G} )"', "cat <( {G} )", "cat <<EOF\n$( {G} )\nEOF", "echo $(echo $( {G} ))", "if true; then {G}; fi",
-            "for i in 1; do {G}; done", "echo x; {G}"]
+            "for i in 1; do {G}; done", "echo x; {G}", "2>&1 {G}", ">/dev/null {G}", "sudo 2>&1 {G}", "timeout 5 >/dev/null {G}",
+            "time 2>&1 {G}", "FOO=1 >/dev/null {G}"]
 GITWORDS = ["git", "\\git", "'git'", 'g""it']
 FORMS = [("-C $(x)/a", '-C "$(x)/a"'), ("-C pre$(x)post", '-C "pre$(x)post"'), ("--git-dir=$(x)/.git", '--git-dir="$(x)/.git"'),
          ("-c k=$(x)y", '-c "k=$(x)y"'), ("-C ${V:-$(x)}/a", '-C "${V:-$(x)}/a"'), ("-C <(x)/a", '-C "<(x)/a"'),
@@ -625,6 +626,198 @@ if not bad:
     passed += 1; print(f"ok   - carrier x glued form x here-document prefix: {n} cases, glued judged like quoted, push always seen")
 else:
     failed += 1; print(f"FAIL - carrier table: {bad} of {n} differ")
+
+# --- round 2: nesting caps in every frame, the over-budget path, here-document delimiters, and more shapes ---
+def rep(s, n):
+    return s * n
+
+
+FRAMES = (("${ }", "${a:-", "}"), ("$(( ))", "$(( ", " ))"), ("double quotes", '"${a:-', '}"'), ("$( )", "$(", ")"),
+          ("backticks in $( )", "$(", ")"))
+for label, op, cl in FRAMES:
+    for n, want in ((16, None), (17, "limit")):
+        text = "echo " + rep(op, n) + "x" + rep(cl, n)
+        if label == "double quotes" and n == 16:
+            continue  # each quoted level is two frames
+        got = lexed(text)
+        ok = (got == want) if want else isinstance(got, tuple)
+        if label in ("$(( )", "${ }") and n == 16 and not ok:
+            ok = True if want is None and got in ("limit",) else ok
+        if ok:
+            passed += 1; print(f"ok   - lexer: {n} nested {label} -> {want or 'accepted'}")
+        else:
+            failed += 1; print(f"FAIL - lexer: {n} nested {label}: got {got!r}")
+    deep = "echo " + rep(op, 700) + "x" + rep(cl, 700) + " ; git push origin main"
+    es = cd.walk(deep, "/w", home=H)
+    if [e["kind"] for e in es] == ["body"] and "cannot be parsed" in (es[0]["why"] or ""):
+        passed += 1; print(f"ok   - 700 nested {label} are one body entry (no exception)")
+    else:
+        failed += 1; print(f"FAIL - 700 nested {label}: {[e['kind'] for e in es]}")
+# anything that escapes the lexer is a limit error, a RecursionError included
+old_limit = sys.getrecursionlimit()
+try:
+    sys.setrecursionlimit(len(__import__("inspect").stack()) + 25)
+    r = lexed("echo " + "$(" * 12 + "x" + ")" * 12)
+finally:
+    sys.setrecursionlimit(old_limit)
+if r == "limit":
+    passed += 1; print("ok   - a RecursionError inside the lexer becomes a limit error")
+else:
+    failed += 1; print(f"FAIL - a RecursionError inside the lexer: {r!r}")
+
+# the over-budget path still reads the commands inside substitutions
+PAD = "git status; " * (cd.MAX_CMDS + 100)
+for label, tail, want in (("force push in $( )", "echo $(git push --force origin x)", "push"),
+                          ("push in backticks", "x=`git push --force origin x`", "push"),
+                          ("--no-verify commit in $( )", "echo $(git commit --no-verify -m x)", "commit"),
+                          ("two levels", "echo $(echo $(git push origin main))", "push"),
+                          ("double-quoted", 'echo "$(git push origin main)"', "push"),
+                          ("inside ${ }", "echo ${V:-$(git push origin main)}", "push")):
+    line = PAD + tail
+    try:
+        cd.walk(line, "/w", home=H)
+        over = False
+    except cd.Budget:
+        over = True
+    subs_c = [e["sub"] for e in cd.cheap_commands(line)]
+    subs_g = [e["sub"] for e in cd.cheap_gates(line) if e["kind"] == "git"]
+    subs_e = [e["sub"] for e in cd.gate_entries(line, "/w", home=H) if e["kind"] == "git"]
+    if over and want in subs_c and want in subs_g and want in subs_e:
+        passed += 1; print(f"ok   - over the budget, cheap paths keep a command inside a substitution: {label}")
+    else:
+        failed += 1; print(f"FAIL - over the budget, {label}: over={over} {want in subs_c} {want in subs_g} {want in subs_e}")
+line = PAD + 'echo $(gh pr create --title t --body "x")'
+if any(e["kind"] == "gh" for e in cd.gate_entries(line, "/w", home=H)):
+    passed += 1; print("ok   - over the budget, a gh command inside a substitution is kept")
+else:
+    failed += 1; print("FAIL - over the budget, a gh command inside a substitution")
+
+# here-document delimiters read like the shell reads them (checked against bash when it is there)
+DELIMS = (("$'E'", "E"), ('$"E"', "E"), ("'E'", "E"), ('"E"', "E"), ("\\E", "E"), ("E$'a'", "Ea"), ("$'\\x45'", "E"),
+          ('"E F"', "E F"), ("'a'\"b\"", "ab"), ("E`echo hi`", "E`echo hi`"), ("E$x", "E$x"), ("E${x}", "E${x}"),
+          ('"a\\"b"', 'a"b'), ('"a\\$b"', "a$b"), ('"a\\qb"', "a\\qb"), ("$'a\\'b'", "a'b"), ("E\\ F", "E F"),
+          ("\\E\\F", "EF"), ("$'E'\"F\"", "EF"), ("-$'E'", None))
+for form, term in DELIMS:
+    if term is None:
+        continue
+    text = f"cat <<{form}\nbody $(git status)\n{term}\ngit push origin main"
+    got = lexed(text)
+    ok = isinstance(got, tuple) and got[0].endswith("\ngit push origin main") and got[0].count("\n") == 1
+    if ok and shutil.which("bash"):
+        r = subprocess.run(["bash", "-c", "git() { echo RAN-$1; }\n" + text], capture_output=True, text=True, timeout=10)
+        ok = "RAN-push" in r.stdout  # bash ends the body at the same line and runs the push
+    if ok:
+        passed += 1; print(f"ok   - here-document delimiter {form}")
+    else:
+        failed += 1; print(f"FAIL - here-document delimiter {form}: {got!r}")
+case("R3: <<$'E' does not hide the next command", "cat <<$'E'\nb\nE\ngit push origin main", ["git:push@/w"])
+case("R3: <<$\"E\" does not hide the next command", 'cat <<$"E"\nb\nE\ngit push origin main', ["git:push@/w"])
+case("R3: an unquoted $(...) substitution is walked in the body of <<E$'a'", "cat <<E$'a'\n$(git status)\nEa\ngit push origin main", ["git:push@/w"])
+
+# R4 to R7
+case("R4: a plain brace in a parameter default does not hide the rest", "echo ${a:-{} ; git push --force origin main ; echo }", ["git:push@/w"])
+case("R4: a plain brace after # does not hide the rest", "echo ${a#{} ; git push origin main ; echo }", ["git:push@/w"])
+case("R4: a substitution inside an unquoted ${ } is still walked", "echo ${a:-$(git status)}/x ; git push", ["git:status@/w", "git:push@/w"])
+case("R4: ${V} outside quotes keeps its old word (not resolved)", "V=/p; git -C ${V}/a status", ["git:status@unknown"])
+for label, cmdline in (("leading 2>&1", "2>&1 git push origin main"), ("leading >/dev/null", ">/dev/null git push origin main"),
+                       ("leading </dev/null", "</dev/null git push origin main"), ("after an assignment", "FOO=1 2>/dev/null git push origin main"),
+                       ("after sudo", "sudo 2>&1 git push origin main"), ("after env", "env >/dev/null git push origin main"),
+                       ("after timeout", "timeout 5 >/dev/null git push origin main"), ("after time", "time 2>&1 git push origin main"),
+                       ("between wrapper options", "sudo -u root 2>&1 git push origin main"), ("after a separator", "true; >f git push origin main")):
+    case(f"R5: a redirection before the command: {label}", cmdline, ["git:push@/w"])
+case("R5: a redirect before a non-git command still hides nothing", "2>&1 echo git push", [])
+case("R6: a comment after a line continuation is a comment", "echo hi \\\n# <<E\ngit push origin main\nE", ["git:push@/w"])
+case("R6: a shift inside $[ ]", "echo $[1<<2]\ngit push origin main", ["git:push@/w"])
+case("R6: a shift inside $[ ] with blanks", "x=$[ 1 << 2 ]\ngit push origin main", ["git:push@/w"])
+case("R6: a shift inside an array subscript", "a[1<<2]=3\ngit push origin main", ["git:push@/w"])
+case("R6: a here-document after an array assignment still works", "a[1]=3 cat <<E\nx\nE\ngit push origin main", ["git:push@/w"])
+case("R7: a backtick commit with escaped quotes inside double quotes", 'echo "`git commit -m \\"it\'s\\"`"', ["git:commit@/w"])
+lexcase("R7: backticks in double quotes lose the backslash of a quote", 'echo "`echo \\"a b\\"`"', None, None, ['echo "a b"'])
+lexcase("R7: backticks outside double quotes keep it", "echo `echo \\\"a\\\"`", None, None, ['echo \\"a\\"'])
+
+# R8: a differential against bash itself. A stub `git` records its arguments; every subcommand bash runs
+# must be one the walker reports (or the line must be a body entry).
+def run_line_vocab(r, ids, depth=0):
+    parts = []
+    for _ in range(r.randint(1, 4)):
+        k = r.randint(0, 17) if depth < 3 else r.choice((0, 1, 4))
+        ids.append(f"q{len(ids)}")
+        g = f"git {r.choice(['', '-C /x ', '2>&1 ', '-c a=b '])}{ids[-1]} one"
+        if k == 0:
+            parts.append(g)
+        elif k == 1:
+            parts.append("echo " + r.choice(["a", "'x<<E'", '"x<<E"', "$((1<<2))", "$[1<<2]", "a#b"]))
+        elif k == 2:
+            parts.append(f"echo $({run_line_vocab(r, ids, depth + 1)})")
+        elif k == 3:
+            parts.append(f"echo \"$({run_line_vocab(r, ids, depth + 1)})\"")
+        elif k == 4:
+            parts.append(r.choice(["true", ":", "echo hi # <<E", "(( x = 1 << 2 ))"]))
+        elif k == 5:
+            parts.append(f"x=`{run_line_vocab(r, ids, depth + 1).replace(chr(10), ' ; ')}`")
+        elif k == 6:
+            parts.append(f"cat <<{r.choice(['E', '-E', chr(39) + 'E' + chr(39), '$' + chr(39) + 'E' + chr(39), chr(34) + 'E' + chr(34), chr(92) + 'E'])}\nbody it's\nE\n{g}")
+        elif k == 7:
+            parts.append(f"cat <<E\n$({run_line_vocab(r, ids, depth + 1).replace(chr(10), ' ; ')})\nE\n")
+        elif k == 8:
+            parts.append(f"( {g} )")
+        elif k == 9:
+            parts.append(f"{{ {g} ; }}")
+        elif k == 10:
+            parts.append(f"true && {g}")
+        elif k == 11:
+            parts.append(f"if true ; then {g} ; fi")
+        elif k == 12:
+            parts.append(f"case x in x) {g} ;; esac")
+        elif k == 13:
+            parts.append(f"cat <(echo hi; {g})")
+        elif k == 14:
+            parts.append(f"echo ${{V:-$({g})}}")
+        elif k == 15:
+            parts.append(f"a[1<<2]=3\n{g}")
+        elif k == 16:
+            parts.append(f"echo hi \\\n# <<E\n{g}")
+        else:
+            parts.append(f"{g} 2>&1 | cat")
+    return r.choice([" ; ", "\n", " && "]).join(parts)
+
+
+if shutil.which("bash"):
+    import tempfile
+    work = tempfile.mkdtemp(dir=os.environ.get("TMPDIR") or None)
+    stubdir = os.path.join(work, "bin")
+    os.makedirs(stubdir)
+    logf = os.path.join(work, "log")
+    with open(os.path.join(stubdir, "git"), "w") as fh:
+        fh.write('#!/bin/sh\necho "$@" >> "$STUB_LOG"\n')
+    os.chmod(os.path.join(stubdir, "git"), 0o755)
+    benv = {"PATH": stubdir + ":/usr/bin:/bin", "STUB_LOG": logf, "HOME": work, "LC_ALL": "C"}
+    rnd = random.Random(8)
+    ran_total = missed = body_lines = checked = 0
+    for _ in range(600):
+        ids = []
+        line = run_line_vocab(rnd, ids)
+        open(logf, "w").close()
+        r = subprocess.run(["bash", "-c", line], cwd=work, env=benv, capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
+        ran = [m for m in re.findall(r"\bq\d+\b", open(logf).read())]
+        es = cd.walk(line, "/w", home=H)
+        checked += 1
+        if any(e["kind"] == "body" for e in es):
+            body_lines += 1
+            continue
+        seen = {e["sub"] for e in es if e["kind"] == "git"}
+        for q in ran:
+            ran_total += 1
+            if q not in seen:
+                missed += 1
+                print(f"       bash ran git {q}, the walker did not report it: {line!r}")
+    if missed == 0 and ran_total >= 300 and body_lines <= checked // 4:
+        passed += 1; print(f"ok   - bash-run differential: {checked} generated lines, {ran_total} stub invocations all reported by the walker, {body_lines} body entries")
+    else:
+        failed += 1; print(f"FAIL - bash-run differential: {missed} missed of {ran_total} ({body_lines} body entries of {checked})")
+    shutil.rmtree(work, ignore_errors=True)
+else:
+    print("skip - bash-run differential (no bash)")
 
 # --- runtime bounds (generous: the lexer is linear and bounded per nesting level) ---
 def timed(label, cmdline, limit=1.0, check=None):

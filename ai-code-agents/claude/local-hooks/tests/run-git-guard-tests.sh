@@ -366,6 +366,33 @@ check "case pattern parenthesis inside a substitution does not end it" deny "$(b
 check "an escaped parenthesis inside a substitution does not end it" deny "$(bp 'echo $(echo \) ; git push origin main)' "$R")"
 check "a brace in a parameter default holding a substitution" deny "$(bp 'echo ${V:-$(echo }; git push origin main)}' "$R")"
 check "an unparseable line after complete lines is judged as text (push denied)" deny "$(bp $'git push origin main\necho \'oops' "$R")"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: nesting in every frame, the over-budget path, here-document delimiters, brace and redirection shapes
+for frame in '${a:-|}' '$(( | ))' '"${a:-|}"' '$(|)'; do
+  open="${frame%%|*}"; close="${frame#*|}"
+  deep="echo $(rep "$open" 700)x$(rep "$close" 700)"
+  check "700 nested $open: push to main denied (fails closed, no crash)" deny "$(bp "$deep ; git push origin main" "$R")"
+  check "700 nested $open: force push denied" deny "$(bp "$deep ; git push --force origin feat" "$R")"
+  check "700 nested $open: a line without a guarded command stays silent" allow "$(bp "$deep ; git status" "$R")"
+done
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a force push inside \$( ) is denied" deny "$(bp "${PAD}echo \$(git push --force origin x)" "$R")"
+check "over the budget: a force push inside backticks is denied" deny "$(bp "${PAD}x=\`git push --force origin x\`" "$R")"
+check "over the budget: --no-verify inside \$( ) is denied" deny "$(bp "${PAD}echo \$(git commit --no-verify -m x)" "$R")"
+check "over the budget: a force push inside a double-quoted substitution is denied" deny "$(bp "${PAD}echo \"\$(git push --force origin x)\"" "$R")"
+for form in $'cat <<$\'E\'\nb\nE\ngit push origin main' $'cat <<$"E"\nb\nE\ngit push origin main' $'cat <<E$\'a\'\nb\nEa\ngit push origin main' \
+            $'cat <<\\E\nb\nE\ngit push origin main' $'cat <<"E"\nb\nE\ngit push origin main'; do
+  check "here-document delimiter spelling does not hide the next line: ${form%%$'\n'*}" deny "$(bp "$form" "$R")"
+done
+check "a plain brace in a parameter default does not hide a force push" deny "$(bp 'echo ${a:-{} ; git push --force origin main ; echo }' "$R")"
+check "a plain brace after # does not hide a push" deny "$(bp 'echo ${a#{} ; git push origin main ; echo }' "$R")"
+for form in '2>&1 git push origin main' '>/dev/null git push origin main' 'sudo 2>&1 git push origin main' 'timeout 5 >/dev/null git push origin main' \
+            'time 2>&1 git push origin main' 'FOO=1 2>/dev/null git push origin main'; do
+  check "a redirection before the command does not hide it: $form" deny "$(bp "$form" "$R")"
+done
+check "a comment after a line continuation does not open a here-document" deny "$(bp $'echo hi \\\n# <<E\ngit push origin main\nE' "$R")"
+check "a shift inside \$[ ] does not open a here-document" deny "$(bp $'echo $[1<<2]\ngit push origin main' "$R")"
+check "a shift inside an array subscript does not open a here-document" deny "$(bp $'a[1<<2]=3\ngit push origin main' "$R")"
 check "GIT_DIR=\$(pwd)/.git push to a feature branch: unknown directory is not a denial here" allow "$(bp 'GIT_DIR=$(pwd)/.git git push origin feat' "$X")"
 check "GIT_WORK_TREE=x push -f denied" deny "$(bp 'GIT_WORK_TREE=x git push -f origin x' "$X")"
 check "--git-dir=x push --force denied" deny "$(bp 'git --git-dir=x push --force origin x' "$X")"

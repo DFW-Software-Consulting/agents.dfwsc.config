@@ -62,18 +62,28 @@ text inside each substitution is walked at the token that holds it, in the
 directory in effect there (a `cd` inside does not leak out), with the certain
 variables of the line seeded; that covers substitutions inside double quotes,
 `${ }`, `$(( ))` and unquoted here-document bodies too. A redirection inside a
-command (`git 2>&1 push`) is skipped, not the end of the command. A line the
-lexer cannot parse (unclosed quote or substitution, nesting over MAX_NEST) is
-one "body" entry holding the whole text: the gates judge it with BODY_GUARDS, so
-it fails closed. legacy=True does not use the lexer (frozen).
+command (`git 2>&1 push`, `2>&1 git push`, `sudo 2>&1 git push`) is skipped, not
+the end of the command. An unquoted `${ }` is one span of its own, so the
+tokenizer never counts its braces. A line the lexer cannot parse (unclosed quote
+or substitution, nesting over MAX_NEST in any frame, or any failure inside the
+lexer) is one "body" entry holding the whole text: the gates judge it with
+BODY_GUARDS, so it fails closed. legacy=True does not use the lexer (frozen).
 Known limits: `bash -c`/`eval` nesting deeper than 3, aliases,
 xargs/find -exec/ssh wrappers, lines over about 128 KB and word splitting under a
-changed IFS are not followed; a command word that is itself an expansion
-(`$(echo git) push`, `"$cmd" push`) is not a command; the refspec of a push
-(`git push origin $(echo main)`) is not resolved; a `cd` to a missing directory
-or after `false &&` is followed as if it ran; the lexer reads a few degenerate
-forms differently from bash (an empty `$(()` fallback, a backtick inside a
-here-document delimiter, `#` inside `${ }` in a substitution).
+changed IFS are not followed; a command word that is, or starts with, an
+expansion (`$(echo git) push`, `"$cmd" push`, `$x git push`, `$(true)git push`) is
+not a command; the refspec of a push (`git push origin $(echo main)`) is not
+resolved; a `cd` to a missing directory or after `false &&` is followed as if it
+ran; a line holding U+E000 or U+E001 (the placeholder characters) is refused as a
+body entry; the shell wrappers skip a line whose command name is spelled in a way
+their word prefilter does not match (`g""it push`); a line over the budget is
+judged by cheap_commands/cheap_gates without directories (the default-branch
+rule is skipped there); the commands inside a substitution that is an argument
+are reported after their own command, although the shell runs them first (a
+`git add` inside `git commit -m "$(...)"` is not seen as preceding the commit);
+the lexer refuses a few degenerate forms bash accepts (an empty `$(()` fallback,
+a backtick inside a here-document delimiter, `#` inside `${ }` inside a
+substitution), which fail closed.
 """
 import bisect
 import importlib.util
@@ -214,6 +224,45 @@ def _ph(n):
     return "$" + _PO + str(n) + _PC
 
 
+_SUBSCRIPT = re.compile(r"[A-Za-z_]\w*\[")
+_ANSI = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r", "t": "\t",
+         "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
+_ANSI_NUM = re.compile(r"x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|c.")
+
+
+def _ansi_text(raw):
+    """The text of an ANSI-C quoted string body ($'...') after its escapes."""
+    out, i, n = [], 0, len(raw)
+    while i < n:
+        c = raw[i]
+        if c != "\\" or i + 1 >= n:
+            out.append(c)
+            i += 1
+            continue
+        d = raw[i + 1]
+        if d in _ANSI:
+            out.append(_ANSI[d])
+            i += 2
+            continue
+        m = _ANSI_NUM.match(raw, i + 1)
+        if not m:
+            out.append(c)
+            i += 1
+            continue
+        g = m.group(0)
+        try:
+            if g[0] == "x" or g[0] in "uU":
+                out.append(chr(int(g[1:], 16)))
+            elif g[0] == "c":
+                out.append(chr(ord(g[1]) & 0x1f))
+            else:
+                out.append(chr(int(g, 8) & 0xff))
+        except (ValueError, OverflowError):
+            out.append(g)
+        i = m.end()
+    return "".join(out)
+
+
 class _Lexer:
     """Frames: command (top level, `$( )`, `<( )`, `>( )`), double quote,
     `${ }`, `$(( ))`, here-document body. Every character is visited once per
@@ -245,7 +294,9 @@ class _Lexer:
         """At `$` or a backtick: the end of the expansion that starts there, or None."""
         s = self.s
         if s[i] == "`":
-            return self.bt(i, nest, rec)
+            return self.bt(i, nest, rec, dq)
+        if s.startswith("$[", i):
+            return self.bracket(i + 2, nest, rec)
         if s.startswith("$((", i):
             if i not in self.noarith:
                 e = self.try_arith(i, 3, nest, rec)
@@ -265,7 +316,7 @@ class _Lexer:
         if rec is not None:
             rec.append((start, end, kind, inner))
 
-    def bt(self, i, nest, rec):
+    def bt(self, i, nest, rec, dq=False):
         s, n, k = self.s, self.n, i + 1
         while k < n and s[k] != "`":
             k += 2 if s[k] == "\\" else 1
@@ -273,7 +324,10 @@ class _Lexer:
             raise LexError("syntax", "unclosed backtick")
         if nest + 1 > MAX_NEST:
             raise LexError("limit", "nesting too deep")
-        inner = s[i + 1:k].replace("\\`", "`").replace("\\$", "$").replace("\\\\", "\\")
+        inner = s[i + 1:k]
+        if dq:  # inside double quotes the shell also removes the backslash of \"
+            inner = inner.replace('\\"', '"')
+        inner = inner.replace("\\`", "`").replace("\\$", "$").replace("\\\\", "\\")
         self.record(rec, i, k + 1, "`", inner)
         return k + 1
 
@@ -301,6 +355,9 @@ class _Lexer:
             return None
 
     def arith(self, i, skip, nest, rec):
+        if nest + 1 > MAX_NEST:
+            raise LexError("limit", "nesting too deep")
+        nest += 1
         s, n, k, depth = self.s, self.n, i + skip, 2
         while k < n:
             c = s[k]
@@ -323,9 +380,55 @@ class _Lexer:
             k += 1
         raise LexError("syntax", "unclosed arithmetic")
 
+    def bracket(self, k, nest, rec):
+        """The index after the `]` that closes a `[` opened just before k (`$[ ]`, an array
+        subscript), or None when it does not close: its text is arithmetic, so a `<<` in it
+        starts no here-document."""
+        if nest + 1 > MAX_NEST:
+            raise LexError("limit", "nesting too deep")
+        nest += 1
+        s, n, depth = self.s, self.n, 1
+        mark = len(rec) if rec is not None else 0
+        try:
+            while k < n:
+                c = s[k]
+                if c == "\\":
+                    k += 2
+                    continue
+                if c == "'":
+                    f = s.find("'", k + 1)
+                    if f < 0:
+                        break
+                    k = f + 1
+                    continue
+                if c == '"':
+                    k = self.dq(k, nest, rec)
+                    continue
+                if c in "$`":
+                    e = self.dollar(k, nest, rec)
+                    if e is not None:
+                        k = e
+                        continue
+                if c == "[":
+                    depth += 1
+                elif c == "]":
+                    depth -= 1
+                    if depth == 0:
+                        return k + 1
+                k += 1
+        except LexError as e:
+            if e.kind == "limit":
+                raise
+        if rec is not None:
+            del rec[mark:]
+        return None
+
     def param(self, i, nest, rec):
         """`${...}`: ends at the first unquoted `}`; only a nested `${` (and the
         quotes and substitutions inside) nests, a plain `{` does not (as in bash)."""
+        if nest + 1 > MAX_NEST:
+            raise LexError("limit", "nesting too deep")
+        nest += 1
         s, n, k = self.s, self.n, i + 2
         while k < n:
             c = s[k]
@@ -349,6 +452,9 @@ class _Lexer:
         raise LexError("syntax", "unclosed ${")
 
     def dq(self, i, nest, rec):
+        if nest + 1 > MAX_NEST:
+            raise LexError("limit", "nesting too deep")
+        nest += 1
         s, n, k = self.s, self.n, i + 1
         while k < n:
             c = s[k]
@@ -423,8 +529,10 @@ class _Lexer:
         pending.clear()
         return k
 
-    def read_delim(self, k):
-        """After `<<` / `<<-`: (end, delimiter, quoted)."""
+    def read_delim(self, k, nest):
+        """After `<<` / `<<-`: (end, delimiter, quoted), read like the shell reads a word and
+        removes its quotes: `'..'`, `".."` (a backslash only before `$`, a backtick, `"`, `\\`),
+        `$'..'` (ANSI-C escapes), `$".."`, a backslash; an expansion is kept as written."""
         s, n = self.s, self.n
         while k < n and s[k] in " \t":
             k += 1
@@ -436,20 +544,34 @@ class _Lexer:
                 out.append(s[k + 1:e - 1])
                 quoted = True
                 k = e
-            elif c == '"':
-                e = k + 1
+            elif c == '"' or s.startswith('$"', k):
+                q = k + (2 if c == "$" else 1)
+                e = q
                 while e < n and s[e] != '"':
                     e += 2 if s[e] == "\\" else 1
                 if e >= n:
                     raise LexError("syntax", "unclosed delimiter quote")
-                out.append(s[k + 1:e])
+                out.append(re.sub(r'\\([$`"\\\n])', r"\1", s[q:e]))
                 quoted = True
                 k = e + 1
-            elif c == "\\":
-                if k + 1 < n:
-                    out.append(s[k + 1])
+            elif s.startswith("$'", k):
+                e = self.ansi(k)
+                out.append(_ansi_text(s[k + 2:e - 1]))
                 quoted = True
+                k = e
+            elif c == "\\":
+                if k + 1 < n and s[k + 1] != "\n":
+                    out.append(s[k + 1])
+                    quoted = True
                 k += 2
+            elif c in "$`":
+                e = self.dollar(k, nest, None)
+                if e is None:
+                    out.append(c)
+                    k += 1
+                else:
+                    out.append(s[k:e])
+                    k = e
             else:
                 out.append(c)
                 k += 1
@@ -485,6 +607,9 @@ class _Lexer:
                 k = n if e < 0 else e
                 continue
             if c == "\\":
+                if s.startswith("\n", k + 1):
+                    k += 2  # a line continuation joins the lines: nothing in between
+                    continue
                 k += 2
                 word_start = cmd_start = False
                 continue
@@ -494,6 +619,15 @@ class _Lexer:
                 continue
             if c == '"':
                 k = self.dq(k, nest, rec)
+                word_start = cmd_start = False
+                continue
+            if c == "$" and nest == 0 and s.startswith("${", k):
+                # An unquoted ${ } is one span of its own: the tokenizer counts a plain `{`
+                # in it, the shell does not, so it must never see the braces.
+                inner = []
+                e = self.param(k, nest, inner)
+                self.top.append((k, e, "${", inner))
+                k = e
                 word_start = cmd_start = False
                 continue
             if c in "$`":
@@ -517,7 +651,7 @@ class _Lexer:
             if c == "<" and s.startswith("<<", k):
                 strip = s.startswith("<<-", k)
                 anchor = k
-                k, delim, quoted = self.read_delim(k + (3 if strip else 2))
+                k, delim, quoted = self.read_delim(k + (3 if strip else 2), nest)
                 if delim:  # none: not a here-document (the shell rejects the line, the lexer need not)
                     pending.append((delim, quoted, strip, anchor))
                 word_start, cmd_start = True, False
@@ -565,6 +699,14 @@ class _Lexer:
                 k += 1
                 word_start, cmd_start = True, False
                 continue
+            if word_start and cmd_start:
+                m = _SUBSCRIPT.match(s, k)
+                if m:  # NAME[subscript]= : arithmetic, so a << in it starts no here-document
+                    e = self.bracket(m.end(), nest, rec)
+                    if e is not None and (s.startswith("=", e) or s.startswith("+=", e)):
+                        k = e
+                        word_start = False
+                        continue
             e = k  # a run of plain characters
             while e < n and s[e] not in _DELIM and s[e] not in "'\"\\$`#":
                 e += 1
@@ -619,9 +761,16 @@ class _Lexer:
             olen += len(seg)
             if what == 0:
                 kind, inner = data
-                subs.append({"kind": kind, "raw": cmd[a:b], "inner": inner})
-                p = _ph(len(subs) - 1)
-                anchors.append((olen, len(subs) - 1))
+                if kind == "${":  # restored as `$`, what the tokenizer makes of an unquoted ${ }
+                    subs.append({"kind": kind, "raw": "$", "inner": None})
+                    p = _ph(len(subs) - 1)
+                    for a2, b2, kind2, inner2 in inner:
+                        subs.append({"kind": kind2, "raw": cmd[a2:b2], "inner": inner2})
+                        anchors.append((olen, len(subs) - 1))
+                else:
+                    subs.append({"kind": kind, "raw": cmd[a:b], "inner": inner})
+                    p = _ph(len(subs) - 1)
+                    anchors.append((olen, len(subs) - 1))
                 out.append(p)
                 olen += len(p)
             pos = b
@@ -645,7 +794,12 @@ def _lex(cmd):
              its `<<` operator."""
     if _PO in cmd or _PC in cmd:
         raise LexError("limit", "placeholder characters in the input")
-    return _Lexer(cmd).lex()
+    try:
+        return _Lexer(cmd).lex()
+    except LexError:
+        raise
+    except Exception as e:  # RecursionError and anything unforeseen: the line fails closed
+        raise LexError("limit", f"lexer failure ({type(e).__name__})")
 
 
 def _restore(word, subs):
@@ -699,8 +853,24 @@ def prefix_span(toks, i, legacy):
     s = i
     while s > 0 and toks[s - 1][0] == "w" and toks[s - 1][1] not in scan.KEYWORDS:
         s -= 1
+        while s > 0 and toks[s - 1][0] == "o" and toks[s - 1][1] in REDIR_OPS:
+            s -= 1  # the word was the target of a redirection
     p, idx, chdirs = s, [], []
-    while p < i and toks[p][0] == "w":
+
+    def redirect(p):
+        """p past the redirection (operator and target word) at p, recorded in idx; p if none."""
+        while p < i and toks[p][0] == "o" and toks[p][1] in REDIR_OPS:
+            idx.append(p)
+            if p + 1 < i and toks[p + 1][0] == "w":
+                idx.append(p + 1)
+                p += 1
+            p += 1
+        return p
+
+    while True:
+        p = redirect(p)
+        if not (p < i and toks[p][0] == "w"):
+            break
         w = toks[p][1]
         if scan.bwc.ASSIGN.match(w):
             idx.append(p)
@@ -712,7 +882,10 @@ def prefix_span(toks, i, legacy):
         idx.append(p)
         p += 1
         seen_duration = False
-        while p < i and toks[p][0] == "w":
+        while True:
+            p = redirect(p)
+            if not (p < i and toks[p][0] == "w"):
+                break
             o = toks[p][1]
             if o.startswith("-") and len(o) > 1:
                 idx.append(p)
@@ -1301,24 +1474,37 @@ def body_guarded(e, which):
     return bool(BODY_GUARDS[which].search(e.get("text", "")))
 
 
+def _cheap_token_lists(cmd, depth=0):
+    """The token list of the line and, in turn, of the command text inside each of its
+    substitutions (to the nesting the lexer allows), for the cheap paths that read no
+    directories. A text that cannot be lexed gives nothing."""
+    try:
+        toks, subs_at = _tokens(cmd)
+    except ValueError:
+        return []
+    out = [toks]
+    if depth < MAX_NEST:
+        for texts in subs_at.values():
+            for inner in texts:
+                out.extend(_cheap_token_lists(inner, depth + 1))
+    return out
+
+
 def cheap_commands(cmd):
     """git commands on a line that is too big for walk(): one pass, no
     directories (every entry's directory is unknown with reason NO_CWD), no
     wrapper bodies. For the rules that need no directory."""
-    try:
-        toks = _tokens(cmd)[0]
-    except ValueError:
-        return []
     out = []
-    for i, (kind, t) in enumerate(toks):
-        if kind != "w" or os.path.basename(t) != "git":
-            continue
-        ok, idx, _ = prefix_span(toks, i, False)
-        if not ok:
-            continue
-        r = git_target(words_after(toks, i + 1), None, NO_CWD, False, {}, set())
-        out.append(_entry("git", None, NO_CWD, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
-                          redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
+    for toks in _cheap_token_lists(cmd):
+        for i, (kind, t) in enumerate(toks):
+            if kind != "w" or os.path.basename(t) != "git":
+                continue
+            ok, idx, _ = prefix_span(toks, i, False)
+            if not ok:
+                continue
+            r = git_target(words_after(toks, i + 1), None, NO_CWD, False, {}, set())
+            out.append(_entry("git", None, NO_CWD, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
+                              redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
     return out
 
 
@@ -1393,29 +1579,26 @@ def cheap_gates(cmd):
     entry of kind "body" (not followed: a gate asks body_guarded whether it
     holds a command it judges). Every directory is unknown with reason
     BUDGET_WHY. For a line over the analysis budget."""
-    try:
-        toks = _tokens(cmd)[0]
-    except ValueError:
-        return []
     out = []
-    for i, (kind, t) in enumerate(toks):
-        name = os.path.basename(t) if kind == "w" else ""
-        if name not in ("git", "gh", "eval", "env") and name not in SHELLS:
-            continue
-        ok, idx, _ = prefix_span(toks, i, False)
-        if not ok:
-            continue
-        args = words_after(toks, i + 1)
-        if name == "gh":
-            out.append(_entry("gh", None, BUDGET_WHY, False, args=args, env=prefix_env(toks, idx)))
-        elif name == "git":
-            r = git_target(args, None, BUDGET_WHY, False, {}, set())
-            out.append(_entry("git", None, BUDGET_WHY, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
-                              redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
-        else:
-            body = shell_body(name, args)
-            if body:
-                out.append(_entry("body", None, BUDGET_WHY, False, text=body, depth=1))
+    for toks in _cheap_token_lists(cmd):
+        for i, (kind, t) in enumerate(toks):
+            name = os.path.basename(t) if kind == "w" else ""
+            if name not in ("git", "gh", "eval", "env") and name not in SHELLS:
+                continue
+            ok, idx, _ = prefix_span(toks, i, False)
+            if not ok:
+                continue
+            args = words_after(toks, i + 1)
+            if name == "gh":
+                out.append(_entry("gh", None, BUDGET_WHY, False, args=args, env=prefix_env(toks, idx)))
+            elif name == "git":
+                r = git_target(args, None, BUDGET_WHY, False, {}, set())
+                out.append(_entry("git", None, BUDGET_WHY, False, sub=r["sub"], args=r["rest"], pre=r["pre"],
+                                  redirect=r["redirect"], env=prefix_env(toks, idx), config=r["config"]))
+            else:
+                body = shell_body(name, args)
+                if body:
+                    out.append(_entry("body", None, BUDGET_WHY, False, text=body, depth=1))
     return out
 
 

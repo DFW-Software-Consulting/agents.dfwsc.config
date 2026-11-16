@@ -190,6 +190,12 @@ check "substitution glued to an argument: status allowed" allow "$(bp 'git -C $(
 check "a commit inside double quotes holding a substitution is judged (primary checkout denied)" deny "$(bp "echo \"\$(git -C $primary checkout x)\"" "$plain")"
 check "a command inside an unquoted here-document substitution is judged" deny "$(bp "cat <<EOF"$'\n'"\$(git -C $primary checkout x)"$'\n'"EOF" "$plain")"
 check "phantom here-document does not hide the next line" deny "$(bp $'echo "x<<EOF"\n'"git -C $primary checkout x" "$plain")"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: the over-budget path, nesting and redirections
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a checkout inside a substitution in the primary checkout is denied" deny "$(bp "${PAD}echo \$(git -C $primary checkout x)" "$plain")"
+check "700 nested \${ }: a checkout is denied (fails closed)" deny "$(bp "echo $(rep '${a:-' 700)x$(rep '}' 700) ; git -C $primary checkout x" "$plain")"
+check "a redirection before the command does not hide a commit in the primary checkout" deny "$(bp '2>&1 git commit -m x' "$P")"
 check "--git-dir=\$W commit denied" deny "$(bp 'git --git-dir="$W2" commit -m x' "$plain")"
 check "doubtful assignment is unknown: true && W=x; cd \$W denied" deny "$(bp "true && W=$wt; cd \"\$W\" && git commit -m x" "$plain")"
 check "conditional assignment is unknown denied" deny "$(bp "if true; then W=$wt; fi; cd \"\$W\" && git commit -m x" "$plain")"

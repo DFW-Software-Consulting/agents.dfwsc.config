@@ -606,6 +606,11 @@ check "secret inside a substitution glued to the body: denied" deny "$(bp "gh pr
 check "secret inside a substitution glued to the title: denied" deny "$(bp "gh pr create --title x\$(echo \"$AWS\")y --body z" "$PUSHED")"
 check "secret inside a backtick substitution glued to the body: denied" deny "$(bp "gh pr create --title x --body x\`echo \"$AWS\"\`y" "$PUSHED")"
 check "clean substitution glued to the body: allowed" allow "$(bp 'gh pr create --title x --body x$(echo ok)y' "$PUSHED")"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: the over-budget path and nesting
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a secret in gh pr create inside \$( ) is denied" deny "$(bp "${PAD}echo \$(gh pr create --title t --body \"$AWS\")" "$PUSHED")"
+check "700 nested \${ }: a gh pr create with a secret body is denied (fails closed)" deny "$(bp "echo $(rep '${a:-' 700)x$(rep '}' 700) ; gh pr create --title t --body \"$AWS\"" "$PUSHED")"
 check "gh pr create behind a glued substitution carrier is still judged" deny "$(bp "git -C \$(pwd)/a status; echo \"\$(gh pr create --title x --body '$AWS')\"" "$PUSHED")"
 # --- round 2: secrets always, matching of the override, git dirs judged as git dirs, ambiguity ---
 # D1: the secret rule runs for every recognised create, with or without a resolvable repository

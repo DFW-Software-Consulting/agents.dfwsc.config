@@ -548,6 +548,18 @@ check "secret inside a substitution glued to the message: denied" deny "$(bp "gi
 check "secret inside a backtick substitution glued to the message: denied" deny "$(bp "git commit -m x\`echo \"$AWS\"\`y" "$CLEAN")"
 check "secret inside a substitution in a double-quoted message: denied" deny "$(bp "git commit -m \"x\$(echo $AWS)y\"" "$CLEAN")"
 check "clean substitution glued to the message: allowed" allow "$(bp 'git commit -m x$(echo ok)y' "$CLEAN")"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: nesting in every frame, the over-budget path, here-document delimiters, redirections
+for frame in '${a:-|}' '$(( | ))' '"${a:-|}"'; do
+  open="${frame%%|*}"; close="${frame#*|}"
+  check "700 nested $open: a commit with a secret-shaped message is denied (fails closed)" deny "$(bp "echo $(rep "$open" 700)x$(rep "$close" 700) ; git commit -m \"key $AWS\"" "$CLEAN")"
+done
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a commit with a secret inside \$( ) is denied" deny "$(bp "${PAD}echo \$(git commit -m \"key $AWS\")" "$CLEAN")"
+check "over the budget: --no-verify commit inside backticks is denied" deny "$(bp "${PAD}x=\`git commit --no-verify -m x\`" "$CLEAN")"
+check "over the budget: a clean commit inside \$( ) stays judged by the directory rule (unknown directory denied)" deny "$(bp "${PAD}echo \$(git commit -m x)" "$CLEAN")"
+check "a redirection before the command does not hide the commit (staged .env denied)" deny "$(bp '2>&1 git commit -m "feat: x"' "$DIRTY")"
+check "a redirection after a wrapper does not hide the commit (staged .env denied)" deny "$(bp 'sudo 2>&1 git commit -m "feat: x"' "$DIRTY")"
 # explicit git directories are judged by their work tree
 check "GIT_DIR=<repo>/.git commit: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git GIT_WORK_TREE=$DIRTY git commit -m 'feat: x'" "$elsewhere")"
 check "GIT_DIR=<repo>/.git alone: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git git commit -m 'feat: x'" "$elsewhere")"

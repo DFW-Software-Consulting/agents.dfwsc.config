@@ -6,7 +6,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `ai-code-agents/` : per-tool configuration (below).
 - `engineering-principles/` : the SOP and the work issue and PR templates.
 - `setup-agent-configs.sh` : creates symlinks from a tool's config directory to files in this repository. Targets: claude, claude-personal, opencode, codex, gemini, hermes, plannotator, all (all does not link gemini).
-- `opencode.json`, `README.md` : repo-level config and overview.
+- `opencode.json`, `README.md` : an OpenCode config file and the repo overview.
 
 ## ai-code-agents/
 - `claude/` : Claude Code config: `CLAUDE.md`, `settings.json`, `agents/`, `commands/`, `skills/`, `hooks/`, `local-hooks/`, `personal-hooks/`, `claude_desktop_config.json`.
@@ -16,6 +16,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `cline/` : `README.md`, `commands/`, `skills/`.
 - `hermes/` : `README.md` and `skills/` only.
 - `skills/` : a README on shared skills.
+- Each tool directory under `ai-code-agents/` (claude, opencode, codex, gemini, cline, hermes) and `skills/` has a `README.md` with that tool's setup steps; read it before changing the tool's config.
 
 ## What the setup script links
 - `claude` links `CLAUDE.md`, `settings.json`, `agents`, `commands` and `skills` from `ai-code-agents/claude/` into `~/.claude/`.
@@ -27,7 +28,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 
 ## Claude directory notes
 - `agents/` includes same-named shadows of built-in agents (for example `Explore`, `Plan`, `general-purpose`).
-- `skills/context-docs/SKILL.md` defines the `docs/context/` convention this directory follows.
+- `skills/` holds one directory per skill, each with a `SKILL.md`. `skills/context-docs/SKILL.md` defines the `docs/context/` convention; `skills/git-verify/SKILL.md` runs `local-hooks/run-checks.sh`.
 - `commands/` holds slash commands. Command headers use `allowed-tools`, which pre-approves tools and does not restrict them (see errors.md).
 
 ## Work convention

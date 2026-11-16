@@ -1,5 +1,5 @@
 ---
-allowed-tools: Task, Read
+allowed-tools: Agent, Read
 description: Structured code review focused on cleanliness, idioms, coupling, and cohesion
 ---
 

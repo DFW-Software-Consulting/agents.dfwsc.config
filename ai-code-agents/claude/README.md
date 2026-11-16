@@ -84,7 +84,6 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 | `/lint` | Run lint in the check subagent and summarize issues |
 | `/prettier` | Run Prettier check mode in the check subagent |
 | `/smallwins` | Read-only codebase audit — dead code, naming, lint drift |
-| `/ce/slop` | Remove AI-generated bloat from diff against main |
 | `/ce/cm` | Context compact — summarize state before token limit; handoff also saved under `memory-bank/handoff/` |
 | `/ce/kb-log` | Create a knowledge base entry in `.claude/` |
 

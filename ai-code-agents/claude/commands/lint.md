@@ -1,5 +1,5 @@
 ---
-allowed-tools: Task(subagent:check)
+allowed-tools: Agent(check)
 description: Run the project's lint command in the check subagent and return a concise issue report.
 ---
 

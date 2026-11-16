@@ -1,5 +1,5 @@
 ---
-allowed-tools: Task(subagent:git-workflow)
+allowed-tools: Agent(git-workflow)
 description: Delegate git commit, push, PR, and issue workflows to a subagent using the git-workflow skill.
 ---
 

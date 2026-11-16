@@ -11,9 +11,20 @@ Hard rules (always deny): A head branch pushed and in sync (pr create), B secret
 in title or body. Soft rules (warn, or deny in deny mode): C required template
 sections, D unfilled template placeholders, E size cap; F is the issue variant
 of C and D. Limits: rule A is skipped on a detached HEAD; a template heading with
-an empty section still passes; `bash -c '...'` bodies and shell aliases are not
-parsed. gh commands and their directory come from find_hits() in
-_public-text-check.py; flags are parsed here.
+an empty section still passes; shell aliases and text fed to a shell are not
+parsed.
+Commands and their directory come from _cmd_dirs.py (the shared walker): the
+payload cwd followed through `cd`, `pushd`, `git -C`, `env -C`, plain variable
+assignments certain to have run, and `bash -c`/`sh -c`/`eval`/`env -S` bodies (3
+levels deep); flags are parsed here. When the directory cannot be established
+(variable not certain, substitution, `cd -`, `popd`, an unparseable wrapper body
+holding `gh pr create`, a line over the analysis budget) `gh pr create` is denied
+(pr-gate unknown-directory: write the directory literally), except in the forms
+this gate skips anyway (--web, --fill*, --template, no body, --head owner:branch,
+-R/--repo); rule B always runs on the title and body text, and the repository
+rules (A, C, D, E, F) are skipped. A directory made by a bare `mktemp -d` and a
+payload without a cwd are treated the same, minus the denial. A literal
+directory behaves exactly as before.
 """
 import datetime
 import os
@@ -23,6 +34,7 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _git_gates_lib as L  # noqa: E402
+import _cmd_dirs as cd  # noqa: E402
 
 VALUE_FLAGS = {"--assignee", "-a", "--label", "-l", "--milestone", "-m", "--project", "-p",
                "--reviewer", "-r", "--recover", "--body-file", "-F", "--title", "-t",
@@ -116,6 +128,8 @@ def parse_gh(args, cmddir, bodies, used, ptc):
     if k == "file":
         if v == "-":
             text = heredoc()
+        elif not cmddir and not os.path.isabs(v):
+            text = None  # no directory to read a relative path from
         else:
             try:
                 with open(v if os.path.isabs(v) else os.path.join(cmddir, v),
@@ -429,31 +443,71 @@ def judge(o, d, cfg):
     return hard, soft
 
 
+def judge_text(o):
+    """Rule B alone, from the text: the denials for one parsed gh command."""
+    hard = []
+    for where, text in (("title", o["title"]), ("body", o["body"])):
+        for kind, first in L.find_secrets(text or ""):
+            hard.append(f"pr-gate (secret-in-text): the {where} contains a {kind} ({first}...). "
+                        f"Remove it before posting.")
+    return hard
+
+
+def unknown_denial(why):
+    return (f"pr-gate (unknown-directory): could not tell which repository gh pr create runs in "
+            f"({why}), so the head branch cannot be checked against its remote. Write the directory "
+            f"literally, for example: cd <path> && gh pr create ... or gh -R owner/name pr create ...")
+
+
+BODY_CREATE = re.compile(r"\bgh\b\s+pr\s+create\b(?![^;&|]*(?:--web|--fill|--template))")
+
+
 def main():
     cmd = os.environ.get("CMD", "")
     cwd = os.environ.get("CWD", "")
     if "gh" not in cmd:
         return
-    scan = L.load_scan()
     ptc = L.load_text_check()
     cfg = L.parse_config()
     stripped, bodies = ptc.split_heredocs(cmd)
-    toks = scan.bwc.tokenize(stripped)
-    hits = [(d, a) for kind, d, a in ptc.find_hits(toks, cwd, scan) if kind == "gh"]
     hard, soft, used = [], [], [0]
-    for d, args in hits:
+    for e in cd.gate_entries(cmd, cwd, home=os.environ.get("HOME", "")):
+        if e["kind"] == "body":
+            if cd.body_guarded(e, "pr"):
+                if BODY_CREATE.search(e["text"]):
+                    hard.append(unknown_denial(e["why"]))
+                for kind, first in L.find_secrets(e["text"]):
+                    hard.append(f"pr-gate (secret-in-text): the command text contains a {kind} "
+                                f"({first}...). Remove it before posting.")
+            continue
+        if e["kind"] != "gh":
+            continue
+        args = e["args"]
         if len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in ("create", "edit"):
             continue
         if args[0] == "issue" and args[1] != "create":
             continue
-        if not d or not os.path.isdir(d):
+        status, dirs, why = cd.gate_dirs(e)
+        if status == "known":
+            d = dirs[0]
+            if not d or not os.path.isdir(d):
+                continue
+            o, _why = parse_gh(args, d, bodies, used, ptc)
+            if not o:
+                continue
+            h, s = judge(o, d, cfg)
+            hard += h
+            soft += s
             continue
-        o, _why = parse_gh(args, d, bodies, used, ptc)
+        # No repository to read: the text is judged alone; a pr create whose
+        # directory is unknown is denied (unless the command is one the gate skips).
+        o, _why = parse_gh(args, None, bodies, used, ptc)
         if not o:
             continue
-        h, s = judge(o, d, cfg)
-        hard += h
-        soft += s
+        if status == "unknown" and o["kind"] == "pr" and o["sub"] == "create" \
+                and not o["repo"] and not (o["head"] and ":" in o["head"]):
+            hard.append(unknown_denial(why))
+        hard += judge_text(o)
     if not hard and not soft:
         return
     deny_soft = soft_denies(cfg)

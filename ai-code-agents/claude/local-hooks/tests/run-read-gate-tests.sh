@@ -70,6 +70,26 @@ check "5 MB file handled" deny "$(rd "$w/big5mb.txt")"
 start=$SECONDS; echo "$(rd "$w/big5mb.txt")" | bash $hooks/read-size-gate.sh >/dev/null; el=$((SECONDS - start))
 if [ "$el" -le 2 ]; then pass=$((pass + 1)); echo "ok   - 5 MB file decided in ${el}s"; else fail=$((fail + 1)); echo "FAIL - 5 MB file took ${el}s"; fi
 
+# --- symlinks, limit ordering ---
+head -c 200000000 /dev/zero | tr '\0' 'z' > "$w/huge1line.txt" 2>/dev/null
+ln -s "$w/huge1line.txt" "$w/link-huge.txt"
+ln -s "$w/l301.txt" "$w/link-l301.txt"
+ln -s "$w/small.txt" "$w/link-small.txt"
+start=$SECONDS
+check "symlink to huge file denied" deny "$(rd "$w/link-huge.txt")"
+el=$((SECONDS - start))
+if [ "$el" -le 2 ]; then pass=$((pass + 1)); echo "ok   - symlink to 200 MB file decided in ${el}s"; else fail=$((fail + 1)); echo "FAIL - symlink to huge file took ${el}s"; fi
+rm -f "$w/huge1line.txt"
+check "symlink to large (lines) file denied" deny "$(rd "$w/link-l301.txt")"
+check "symlink to small file allowed" allow "$(rd "$w/link-small.txt")"
+check "symlink to large file with limit 100 allowed" allow "$(rdx "$w/link-l301.txt" '{"limit":100}')"
+check "small file with limit 5000 allowed" allow "$(rdx "$w/small.txt" '{"limit":5000}')"
+check "large file limit 300 allowed" allow "$(rdx "$w/l301.txt" '{"limit":300}')"
+check "large file limit 301 denied (item)" deny "$(rdx "$w/l301.txt" '{"limit":301}')"
+for lv in 0 -5 100.5 '"abc"' null '"0"' '""'; do
+  check "large file limit $lv denied" deny "$(rdx "$w/l301.txt" "{\"limit\":$lv}")"
+done
+
 # gate off
 CLAUDE_DELEGATE_GATE=off; ENVV="CLAUDE_DELEGATE_GATE=off"
 check "env gate off allowed" allow "$(rd "$w/l301.txt")"

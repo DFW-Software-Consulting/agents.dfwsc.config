@@ -40,7 +40,7 @@ dow=$(( (yy + yy/4 - yy/100 + yy/400 + t[mo-1] + d) % 7 ))   # 0 = Sunday
 
 days_match() {
   local spec="$1" part a b
-  [[ "$spec" =~ ^[1-7]([-,][1-7])*$ ]] || return 1
+  [[ "$spec" =~ ^[1-7](-[1-7])?(,[1-7](-[1-7])?)*$ ]] || return 1
   local IFS=','
   for part in $spec; do
     if [[ "$part" == *-* ]]; then
@@ -59,25 +59,35 @@ while IFS= read -r line || [ -n "$line" ]; do
   line="${line%$'\r'}"
   [[ "$line" =~ ^[[:space:]]*$ ]] && continue
   [[ "$line" =~ ^[[:space:]]*# ]] && continue
-  IFS='|' read -r name days window glob message <<<"$line"
   [[ "$line" == *'|'*'|'*'|'*'|'* ]] || continue
-  # message is everything after the 4th separator (may itself contain '|').
+  # The message is everything after the 4th separator (it may contain '|').
+  IFS='|' read -r name days window glob _ <<<"$line"
   message="${line#*|*|*|*|}"
   [ -n "$name" ] && [ -n "$message" ] || continue
   [[ "$window" =~ ^([0-9]{2}):([0-9]{2})-([0-9]{2}):([0-9]{2})$ ]] || continue
   s=$((10#${BASH_REMATCH[1]} * 60 + 10#${BASH_REMATCH[2]}))
   e=$((10#${BASH_REMATCH[3]} * 60 + 10#${BASH_REMATCH[4]}))
-  [ "${BASH_REMATCH[1]}" -lt 24 ] && [ "${BASH_REMATCH[3]}" -lt 24 ] || continue
-  [ "${BASH_REMATCH[2]}" -lt 60 ] && [ "${BASH_REMATCH[4]}" -lt 60 ] || continue
+  # Hours 0-23 for the start; the end may also be exactly 24:00.
+  [ "$((10#${BASH_REMATCH[1]}))" -lt 24 ] && [ "$((10#${BASH_REMATCH[2]}))" -lt 60 ] && [ "$((10#${BASH_REMATCH[4]}))" -lt 60 ] || continue
+  [ "$e" -le 1440 ] || continue
   [ "$s" -lt "$e" ] || continue
   days_match "$days" || continue
   [ "$nowmin" -ge "$s" ] && [ "$nowmin" -lt "$e" ] || continue
   # shellcheck disable=SC2254
   case "$cwd" in $glob) ;; *) continue ;; esac
+  # Marker name: sanitised name plus a checksum of the raw name, so distinct names never collide.
   safe="$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')"
-  marker="$cache/$today.$safe"
+  sum="$(printf '%s' "$name" | cksum | cut -d' ' -f1)"
+  marker="$cache/clockrem.$today.$safe.$sum"
   [ -e "$marker" ] && continue
-  mkdir -p "$cache" 2>/dev/null && : > "$marker" 2>/dev/null || continue
+  if mkdir -p "$cache" 2>/dev/null && ( set -C; : > "$marker" ) 2>/dev/null; then
+    # Created by this process: it alone emits. Prune this hook's own markers older than 7 days.
+    find "$cache" -maxdepth 1 -type f -name 'clockrem.????-??-??.*' -mtime +7 -delete 2>/dev/null
+  elif [ -e "$marker" ]; then
+    continue   # another process created it first
+  elif [ "$event" != "SessionStart" ]; then
+    continue   # cache unwritable: only SessionStart may emit, so prompts cannot repeat it
+  fi
   msgs+=("$message")
 done < "$conf"
 

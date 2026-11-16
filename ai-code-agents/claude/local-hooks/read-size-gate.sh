@@ -51,6 +51,8 @@ if [[ "$path" != /* ]]; then
   [ -n "$cwd" ] || exit 0
   path="$cwd/$path"
 fi
+# Resolve symlinks so size and line checks apply to the target.
+path="$(readlink -f -- "$path" 2>/dev/null)" || exit 0
 [ -f "$path" ] || exit 0
 
 # Non-text by extension (images, PDFs, notebooks), then by NUL byte in the head.
@@ -69,20 +71,21 @@ deny() {
 }
 ways="Delegate the read to a subagent (Agent tool) and ask for a summary, or pass offset and limit to read a known range of at most $max_lines lines."
 
-# A limit is only honoured when numeric; non-numeric is treated as absent.
-if pos_int "$limit"; then
-  [ "$limit" -le "$max_lines" ] && exit 0
-  deny "Read gate: limit $limit exceeds the $max_lines-line cap for reads in the main session. $ways Blocked path: $path"
-fi
-
-size="$(stat -c %s -- "$path" 2>/dev/null)" || exit 0
-pos_int "$size" || exit 0
+size="$(stat -L -c %s -- "$path" 2>/dev/null)" || exit 0
+[[ "$size" =~ ^[0-9]+$ ]] || exit 0
+reason=""
 if [ "$size" -gt "$max_bytes" ]; then
-  deny "Read gate: $path is $size bytes (over the $max_bytes-byte threshold) and the main session does not read large files. $ways"
+  reason="$path is $size bytes (over the $max_bytes-byte threshold)"
+else
+  # Under the byte threshold, so counting lines is cheap. grep -c '' also counts an unterminated last line.
+  lines="$(grep -c '' -- "$path" 2>/dev/null)" || exit 0
+  [ "$lines" -gt "$max_lines" ] && reason="$path is $lines lines (over the $max_lines-line threshold)"
 fi
-# Under the byte threshold, so counting lines is cheap. grep -c '' also counts an unterminated last line.
-lines="$(grep -c '' -- "$path" 2>/dev/null)" || exit 0
-if [ "$lines" -gt "$max_lines" ]; then
-  deny "Read gate: $path is $lines lines (over the $max_lines-line threshold) and the main session does not read large files. $ways"
-fi
-exit 0
+[ -n "$reason" ] || exit 0   # small file: allow whatever the limit
+
+# Large file: only an integer limit from 1 to max_lines is accepted;
+# anything else (zero, negative, fractional, non-numeric, null) counts as absent.
+if pos_int "$limit" && [ "$limit" -le "$max_lines" ]; then exit 0; fi
+extra=""
+pos_int "$limit" && extra=" The limit $limit exceeds the $max_lines-line cap."
+deny "Read gate: $reason and the main session does not read large files.$extra $ways"

@@ -521,6 +521,14 @@ reason_has "unknown-directory denial names the reason" "$(bp 'cd "$W" && git com
 check "unknown directory: --amend --no-edit denied too" deny "$(bp 'cd "$W" && git commit --amend --no-edit' "$CLEAN")"
 check "unknown directory: --dry-run is not a commit" allow "$(bp 'cd "$W" && git commit --dry-run -m "feat: x"' "$DIRTY")"
 check "unknown directory: git commit --help is not a commit" allow "$(bp 'cd "$W" && git commit --help' "$DIRTY")"
+# a prefix assignment holding a substitution used to hide the command from the walker (never judged)
+for form in 'GIT_DIR=$(pwd)/.git git commit -m "feat: x"' 'GIT_DIR=`pwd`/.git git commit -m "feat: x"' \
+            'env GIT_DIR=$(pwd)/.git git commit -m "feat: x"' "bash -c 'GIT_DIR=\$(pwd)/.git git commit -m \"feat: x\"'" \
+            'GIT_DIR=$(pwd) git commit -m "feat: x"'; do
+  check "substitution in a GIT_DIR prefix: unknown directory denied: $form" deny "$(bp "$form" "$CLEAN")"
+done
+check "substitution in another prefix assignment: the commit is judged (staged .env denied)" deny "$(bp 'X=$(pwd)/a git commit -m "feat: x"' "$DIRTY")"
+check "substitution in another prefix assignment: a clean repository allowed" allow "$(bp 'X=$(pwd)/a git commit -m "feat: x"' "$CLEAN")"
 # explicit git directories are judged by their work tree
 check "GIT_DIR=<repo>/.git commit: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git GIT_WORK_TREE=$DIRTY git commit -m 'feat: x'" "$elsewhere")"
 check "GIT_DIR=<repo>/.git alone: staged .env denied" deny "$(bp "GIT_DIR=$DIRTY/.git git commit -m 'feat: x'" "$elsewhere")"

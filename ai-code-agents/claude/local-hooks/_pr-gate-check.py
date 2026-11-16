@@ -30,8 +30,12 @@ On a line over the analysis budget a wrapper body holding gh pr create is denied
 _cmd_dirs.py the previous literal-directory scan runs and one line goes to standard error. A repository override (-R/--repo in any
 spelling, before or after the subcommand, or GH_REPO in the environment) naming another repository runs
 rule B only (A, C, D, E, F read this directory's repository); naming this one runs every rule.
-GIT_DIR=<repo>/.git gh pr create (also env, export, same-line variable) is judged against that
-repository, an unresolvable value as an unknown directory. Not judged: a cd that would fail or not run is still
+Rule B runs for every recognised command whatever the directory. The override is compared with the
+repository's own name after normalising (.git, scheme, host, case); a value that is not a literal may be
+the own one. GIT_DIR=<git dir> gh pr create (also env, export, same-line variable) is judged as a git dir
+(its own HEAD and upstream; GIT_WORK_TREE only gives the template rules their work tree); when it may not
+reach gh (no export, unset, env -u/-i) the directory's repository is judged too; an unresolvable value is
+an unknown directory. Not judged: a cd that would fail or not run is still
 followed; nesting deeper than 3, lines over about 128 KB and text piped into a shell.
 """
 import datetime
@@ -72,12 +76,14 @@ def parse_gh(args, cmddir, bodies, used, ptc, lenient=False):
     None) so the secret rule can still run on it."""
     kind, sub = args[0], args[1]
     o = {"kind": kind, "sub": sub, "title": "", "body": None, "repo": "",
-         "head": None, "base": None}
+         "head": None, "base": None, "body_raw": None}
     body_src = None
     i = 2
     while i < len(args):
         t = args[i]
         has_next = i + 1 < len(args)
+        if t == "--":
+            break  # everything after is positional, never a flag
         name, eq, val = t.partition("=") if t.startswith("--") else (t, "", "")
         if t in BODY_UNJUDGEABLE or (t.startswith("--") and name in BODY_UNJUDGEABLE):
             if not lenient:
@@ -135,12 +141,9 @@ def parse_gh(args, cmddir, bodies, used, ptc, lenient=False):
                 o["repo"] = v
         i += 1
     if body_src is None:
-        if kind == "pr" and sub == "edit" and o["title"] and "$(" not in o["title"] \
-                and "`" not in o["title"]:
+        if kind == "pr" and sub == "edit" and o["title"]:
             return o, None  # title only: still checked for secrets
         if lenient:
-            if "$(" in o["title"] or "`" in o["title"]:
-                o["title"] = ""
             return o, None
         return None, "no body"
 
@@ -170,14 +173,12 @@ def parse_gh(args, cmddir, bodies, used, ptc, lenient=False):
     else:
         text = v
     if text is None:
+        if k == "text":
+            o["body_raw"] = v  # still scanned for secrets: the literal parts around an expansion
         if lenient:
-            if "$(" in o["title"] or "`" in o["title"]:
-                o["title"] = ""
             return o, None
         return None, "body unreadable"
     o["body"] = text
-    if "$(" in o["title"] or "`" in o["title"]:
-        o["title"] = ""
     return o, None
 
 
@@ -388,31 +389,67 @@ def changed_lines(top, o):
     return None
 
 
-def judge(o, d, cfg):
-    """(denials, softs) for one parsed gh command."""
+def norm_slug(v):
+    """owner/repo, lower case, from any spelling gh accepts for a repository:
+    OWNER/REPO, HOST/OWNER/REPO, a URL, scp-style user@host:owner/repo; a
+    trailing .git or slash dropped. "" when it cannot be told."""
+    v = (v or "").strip().strip("'\"")
+    if not v:
+        return ""
+    m = re.match(r"^[a-z][a-z0-9+.-]*://(?:[^/@]*@)?[^/]+/(.+)$", v, re.I)
+    if m:
+        path = m.group(1)
+    elif re.match(r"^(?:[^/@\s]+@)?[^/:\s]+:(?!//)", v):
+        path = v.split(":", 1)[1]
+    else:
+        path = v
+    path = path.strip("/")
+    if path.lower().endswith(".git"):
+        path = path[:-4]
+    parts = [p for p in path.split("/") if p]
+    return "/".join(parts[-2:]).lower() if len(parts) >= 2 else ""
+
+
+def other_repo(o, own, cenv):
+    """True when the repository override certainly names another repository than
+    `own` (a set of slugs; empty when unknown). A value that is not a literal
+    after same-line resolution may be the own one: False."""
+    if not o["repo"]:
+        return False
+    val = cd.subst(o["repo"], cenv or {}) if cd else o["repo"]
+    if re.search(r"[$`]", val):
+        return False
+    return norm_slug(val) not in own
+
+
+def judge(o, v, cfg, cenv=None):
+    """(denials, softs) for one parsed gh command against one repository
+    variant (see _cmd_dirs.gh_variants). The secret rule is not here (see
+    judge_text): it needs no repository."""
     hard, soft = [], []
-    top = L.toplevel(d)
+    if v["gitdir"]:
+        top = L.GitDir(v["gitdir"])
+        wt = v["wt"] if v["tmpl"] else None
+    else:
+        top = L.toplevel(v["dir"])
+        wt = (v["wt"] or top) if v["tmpl"] else None
     if not top:
-        # No repository to read; a repository override still gets the secret rule.
-        return (judge_text(o) if o["repo"] else hard), soft
+        return hard, soft
     dir_slug = ""
     ptc = L.load_text_check()
+    own = set()
     raw = L.git(top, "config", "--get", "remote.origin.url")
     if raw and raw.strip():
         dir_slug = ptc.slug_from_url(raw.strip())
-    if not dir_slug:
+        own.add(norm_slug(raw))
+    if not dir_slug and not v["gitdir"]:
         dir_slug = ptc.slug_from_dir(top)
-    if o["repo"]:
-        flag_slug = ptc.gh_repo_flag(["-R", o["repo"]])
-        if not flag_slug or not dir_slug or flag_slug.lower() != dir_slug.lower():
-            # The target is not this directory's repository, so its branch, template and
-            # diff say nothing about the request: only the text rule applies.
-            return judge_text(o), soft
-    body, title = o["body"], o["title"]
+    own.add(norm_slug(dir_slug))
+    own.discard("")
+    if other_repo(o, own, cenv):
+        return hard, soft  # another repository's request: this one's branch, template and diff say nothing
+    body = o["body"]
     if body is None:  # gh pr edit --title: only the title is judged
-        for kind, first in L.find_secrets(title):
-            hard.append(f"pr-gate (secret-in-text): the title contains a {kind} ({first}...). "
-                        f"Remove it before posting.")
         return hard, soft
     is_pr, create = o["kind"] == "pr", o["sub"] == "create"
 
@@ -420,24 +457,21 @@ def judge(o, d, cfg):
         a = rule_a(top, o)
         if a:
             hard.append(a)
-    for where, text in (("title", title), ("body", body)):
-        for kind, first in L.find_secrets(text):
-            hard.append(f"pr-gate (secret-in-text): the {where} contains a {kind} ({first}...). "
-                        f"Remove it before posting.")
 
-    # template
+    # template (needs a work tree)
     sop = L.repo_glob(dir_slug, cfg["SOP_REPOS"])
-    if is_pr:
-        status, template = find_pr_template(top)
-        sop_path = cfg["SOP_PR_TEMPLATE"]
-    else:
-        status, template = find_issue_template(top)
-        sop_path = cfg["SOP_ISSUE_TEMPLATE"]
-    source = "the repository template"
-    if status == "none" and sop and sop_path:
-        t = read(os.path.expanduser(sop_path))
-        if t is not None:
-            status, template, source = "one", t, "the SOP template"
+    status, template, source = "skip", "", "the repository template"
+    if wt:
+        if is_pr:
+            status, template = find_pr_template(wt)
+            sop_path = cfg["SOP_PR_TEMPLATE"]
+        else:
+            status, template = find_issue_template(wt)
+            sop_path = cfg["SOP_ISSUE_TEMPLATE"]
+        if status == "none" and sop and sop_path:
+            t = read(os.path.expanduser(sop_path))
+            if t is not None:
+                status, template, source = "one", t, "the SOP template"
     if status == "one":
         optional = {L.norm_heading(h) for h in cfg["OPTIONAL_HEADINGS"]}
         have = {n for _, n in L.headings(body)}
@@ -482,6 +516,8 @@ def lift_repo(args):
     head, moved, i = [], [], 0
     while i < len(args) and len(head) < 2:
         t = args[i]
+        if t == "--":
+            break
         if t in ("-R", "--repo") and i + 1 < len(args):
             moved += [t, args[i + 1]]
             i += 2
@@ -494,18 +530,10 @@ def lift_repo(args):
     return head + args[i:] + moved
 
 
-def env_repo(o, e):
-    """A GH_REPO in the command's environment is -R; the flag wins."""
-    if o is not None and not o["repo"]:
-        for k, v in e["env"]:
-            if k == "GH_REPO":
-                o["repo"] = v
-
-
 def judge_text(o):
     """Rule B alone, from the text: the denials for one parsed gh command."""
     hard = []
-    for where, text in (("title", o["title"]), ("body", o["body"])):
+    for where, text in (("title", o["title"]), ("body", o["body"]), ("body", o.get("body_raw"))):
         for kind, first in L.find_secrets(text or ""):
             hard.append(f"pr-gate (secret-in-text): the {where} contains a {kind} ({first}...). "
                         f"Remove it before posting.")
@@ -518,31 +546,72 @@ def unknown_denial(why):
                              "cd <path> && gh pr create ... or gh -R owner/name pr create ...")
 
 
+LOOSE_CREATE = re.compile(r"\bgh\b[\s\S]*?\b(?:pr|issue)\b[\s\S]*?\bcreate\b")
+NO_WALKER = ("pr-gate: the shared walker (_cmd_dirs.py) could not be loaded, so the literal-directory "
+             "scan judged this command: directories written any other way and GH_REPO / GIT_DIR "
+             "forms are not followed; the secret rule scanned the whole command.")
+
+
+def here_strings(cmd):
+    """The texts of `<<<` here-strings on the line, in order (stdin for `-F -`)."""
+    try:
+        scan = L.load_scan()
+        toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
+    except Exception:
+        return []
+    return [toks[k + 1][1] for k, (kind, t) in enumerate(toks)
+            if kind == "o" and t == "<<<" and k + 1 < len(toks) and toks[k + 1][0] == "w"]
+
+
 def legacy_hits(cmd, cwd, ptc, cfg):
     """The scan used before the shared walker (literal directories only); the
-    fallback when _cmd_dirs.py cannot be loaded. -> (hard, soft)."""
+    fallback when _cmd_dirs.py cannot be loaded. -> (hard, soft). A command that
+    loosely reads gh ... pr|issue ... create also has its whole text scanned for
+    secrets, whatever the directory, flags or spelling."""
     scan = L.load_scan()
     stripped, bodies = ptc.split_heredocs(cmd)
+    bodies = bodies + here_strings(cmd)
     toks = scan.bwc.tokenize(stripped)
     hard, soft, used = [], [], [0]
+    if LOOSE_CREATE.search(cmd):
+        for kind, first in L.find_secrets(cmd):
+            hard.append(f"pr-gate (secret-in-text): the command text contains a {kind} "
+                        f"({first}...). Remove it before posting.")
     for kind, d, args in ptc.find_hits(toks, cwd, scan):
-        if kind != "gh" or len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in ("create", "edit"):
+        if kind != "gh":
+            continue
+        args = lift_repo(args)
+        if len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in ("create", "edit"):
             continue
         if args[0] == "issue" and args[1] != "create":
             continue
-        if not d or not os.path.isdir(d):
-            continue
-        o, _why = parse_gh(args, d, bodies, used, ptc)
+        have = bool(d) and os.path.isdir(d)
+        o, _why = parse_gh(args, d if have else None, bodies, used, ptc)
         if not o:
+            o2, _w = parse_gh(args, d if have else None, bodies, [used[0]], ptc, lenient=True)
+            if o2:
+                hard += judge_text(o2)
             continue
-        h, s = judge(o, d, cfg)
-        hard += h
-        soft += s
-    return hard, soft
+        hard += judge_text(o)
+        if have:
+            h, s = judge(o, {"status": "known", "dir": d, "gitdir": None, "wt": None, "tmpl": True,
+                             "why": None}, cfg)
+            hard += h
+            soft += s
+    return list(dict.fromkeys(hard)), soft
+
+
+def env_repo(o, e):
+    """A GH_REPO in the command's environment is -R; the flag wins."""
+    if o is not None and not o["repo"]:
+        for k, v in e["env"]:
+            if k == "GH_REPO" and v:
+                o["repo"] = v
 
 
 def walked_hits(cmd, cwd, ptc, cfg):
     stripped, bodies = ptc.split_heredocs(cmd)
+    bodies = bodies + here_strings(cmd)
     hard, soft, used = [], [], [0]
     for e in cd.gate_entries(cmd, cwd, home=os.environ.get("HOME", "")):
         if e["kind"] == "body":
@@ -560,33 +629,31 @@ def walked_hits(cmd, cwd, ptc, cfg):
             continue
         if args[0] == "issue" and args[1] != "create":
             continue
-        status, dirs, why = cd.gh_gate_dirs(e)
-        d = dirs[0] if status == "known" else None
-        missing = status == "known" and (not d or not os.path.isdir(d))
-        if missing and not any(a in ("-R", "--repo") or a.startswith(("--repo=", "-R")) for a in args) \
-                and not any(k == "GH_REPO" for k, _ in e["env"]):
-            continue
+        d = e["dir"] if e["state"] == "known" else None
+        if d and not os.path.isdir(d):
+            d = None
         o, _why = parse_gh(args, d, bodies, used, ptc)
         env_repo(o, e)
         if not o:
             # A form the gate skips (--web, --fill, --template, no body, an
             # unreadable body): the secret rule still runs on any text present.
             o2, _w = parse_gh(args, d, bodies, [used[0]], ptc, lenient=True)
+            env_repo(o2, e)
             if o2:
                 hard += judge_text(o2)
             continue
-        if status == "known":
-            h, s = judge(o, d, cfg)
-            hard += h
-            soft += s
-            continue
-        # No repository to read: the text is judged alone; a pr create whose
-        # directory is unknown is denied (unless the command is one the gate skips).
-        if status == "unknown" and o["kind"] == "pr" and o["sub"] == "create" \
-                and not o["repo"] and not (o["head"] and ":" in o["head"]):
-            hard.append(unknown_denial(why))
-        hard += judge_text(o)
-    return hard, soft
+        hard += judge_text(o)  # the secret rule needs no repository: it always runs
+        for v in cd.gh_variants(e):
+            if v["status"] == "known":
+                h, sf = judge(o, v, cfg, e["cenv"])
+                hard += h
+                soft += sf
+            elif v["status"] == "unknown" and o["kind"] == "pr" and o["sub"] == "create" \
+                    and not (o["head"] and ":" in o["head"]):
+                val = cd.subst(o["repo"], e["cenv"]) if o["repo"] else ""
+                if not val or re.search(r"[$`]", val):  # no override, or one that may be this repository
+                    hard.append(unknown_denial(v["why"]))
+    return list(dict.fromkeys(hard)), soft
 
 
 def main():
@@ -596,21 +663,27 @@ def main():
         return
     ptc = L.load_text_check()
     cfg = L.parse_config()
+    notice = ""
     if cd is None:
         sys.stderr.write("pr-gate: _cmd_dirs.py could not be loaded; using the literal-directory scan\n")
         hard, soft = legacy_hits(cmd, cwd, ptc, cfg)
+        if LOOSE_CREATE.search(cmd):
+            notice = NO_WALKER  # stderr never reaches the caller: say it in the output too
     else:
         hard, soft = walked_hits(cmd, cwd, ptc, cfg)
     if not hard and not soft:
+        if notice:
+            L.emit(L.warn_json(notice))
         return
     deny_soft = soft_denies(cfg)
     if hard or (soft and deny_soft):
         parts = hard + soft
         reason = " ".join(parts) + (" To bypass: JC can launch with CLAUDE_PR_GATE=off." )
-        L.emit(L.deny_json(reason))
+        L.emit(L.deny_json(reason + (" " + notice if notice else "")))
     else:
         L.emit(L.warn_json(" ".join(soft) + " (pr-gate is in warn mode; it will start denying "
-                           "when PR_GATE_MODE=deny or PR_GATE_DENY_AFTER passes.)"))
+                           "when PR_GATE_MODE=deny or PR_GATE_DENY_AFTER passes.)"
+                           + (" " + notice if notice else "")))
 
 
 if __name__ == "__main__":

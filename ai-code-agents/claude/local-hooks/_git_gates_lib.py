@@ -46,6 +46,17 @@ def load_text_check():
     return load("_public_text_check", os.path.join(HERE, "_public-text-check.py"))
 
 
+class GitDir(str):
+    """A git directory (not a work tree) to query: git(GitDir(p), ...) runs
+    `git --git-dir=p ...`, so a bare repository, a separate git dir or a linked
+    worktree's own HEAD and refs are what is read."""
+
+
+def _git_argv(d, args):
+    pre = ["--git-dir=" + str(d)] if isinstance(d, GitDir) else []
+    return ["git", *pre, "-C", str(d), "-c", "core.quotepath=off", *args]
+
+
 def git(d, *args):
     """Read-only git query in directory d. Output text, or None on failure,
     timeout or an exhausted time budget."""
@@ -53,7 +64,7 @@ def git(d, *args):
     if left <= 0 or not d:
         return None
     try:
-        r = subprocess.run(["git", "-C", d, "-c", "core.quotepath=off", *args],
+        r = subprocess.run(_git_argv(d, args),
                            capture_output=True, timeout=min(PER_CALL, left), env=GIT_ENV)
     except Exception:
         return None
@@ -71,7 +82,7 @@ def git_capped(d, cap, *args):
     if left <= 0 or not d:
         return None, False
     try:
-        proc = subprocess.Popen(["git", "-C", d, "-c", "core.quotepath=off", *args],
+        proc = subprocess.Popen(_git_argv(d, args),
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=GIT_ENV)
     except Exception:
         return None, False
@@ -110,7 +121,7 @@ def stream_added(d, args, per_file_cap, total_cap):
     if left <= 0 or not d:
         return None, [], False
     try:
-        proc = subprocess.Popen(["git", "-C", d, "-c", "core.quotepath=off", *args],
+        proc = subprocess.Popen(_git_argv(d, args),
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=GIT_ENV)
     except Exception:
         return None, [], False

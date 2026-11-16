@@ -65,7 +65,8 @@ for label, val in (("backticks", "`pwd`"), ("command substitution", "$(pwd)"), (
                    ("glob star", "/q/*"), ("glob question mark", "/q/?"), ("glob bracket", "/q/[ab]"),
                    ("brace expansion", "/q/{a,b}"), ("other user's tilde", "~someone/q"), ("ANSI-C escape", "$'\\x2f'"),
                    ("backticks after text", "/q/`pwd`"), ("backticks before text", "`pwd`/q"),
-                   ("export with backticks", "`pwd`")):
+                   ("export with backticks", "`pwd`"), ("process substitution inside text", "/q/<(echo)"),
+                   ("output process substitution inside text", "/q/>(cat)"), ("tilde after a colon", "/q/a:~/b"), ("two tildes", "~/x:~/y")):
     pre = "export W=" if label == "export with backticks" else "W="
     for leg in (False, True):
         case(f"stale value dropped after {label}{' (legacy)' if leg else ''}",

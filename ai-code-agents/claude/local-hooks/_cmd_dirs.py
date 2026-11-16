@@ -44,7 +44,8 @@ need no directory (see cheap_commands). legacy=True is not bounded.
 A variable resolves only from a standalone, plain-literal assignment certain to
 have run (certain_env); anything doubtful is unknown. A value counts as a plain
 literal only through certain_literal: no `$`, backtick, glob, brace, bracket,
-backslash escape or foreign tilde form; a later assignment of any other value makes
+backslash escape, `:~`, `<(`/`>(` or foreign tilde form (quoting is not tracked, so a
+quoted value with brackets or braces is unknown too); a later assignment of any other value makes
 the name unknown, never its earlier value. Command prefixes
 (`sudo`, `env`, `timeout 5`, `nice -n 5`, `builtin`, ...) are skipped.
 effective(entry) is the one place that turns an entry into the directory to
@@ -274,9 +275,9 @@ def prefix_env(toks, idx):
 
 def certain_literal(v):
     """True when assigning v gives exactly the text v: no expansion of any kind
-    (`$`, backtick, glob, brace, bracket, a tilde form other than a bare `~` or
-    `~/...`). Anything else makes the name unknown."""
-    if not scan.literal(v) or any(c in v for c in "{}[]\\"):
+    (`$`, backtick, glob, brace, bracket, `:~`, a tilde form other than a bare `~` or
+    `~/...`; process substitution is caught where the tokens are read). Anything else makes the name unknown."""
+    if not scan.literal(v) or ":~" in v or any(c in v for c in "{}[]\\"):
         return False
     return not v.startswith("~") or v == "~" or v.startswith("~/")
 
@@ -350,6 +351,9 @@ def certain_env(toks, i, temps=None, taint=False):
             if "TMPDIR" in t:
                 taint = True
             continue
+        if words and t in ("<", ">") and n + 1 < len(toks) and toks[n + 1] == ("o", "(") \
+                and scan.bwc.ASSIGN.match(words[-1]):
+            words = words[:-1] + [words[-1].partition("=")[0] + "=$"]  # NAME=text<(cmd): process substitution
         if words:
             mk = None
             if t == "(":

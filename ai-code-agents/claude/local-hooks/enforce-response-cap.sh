@@ -19,7 +19,7 @@
 # CLAUDE_CODE_ENTRYPOINT in the hook's environment, else from the transcript:
 # every "entrypoint" value in it must be the same allowed one, so a session that
 # began headless and was resumed interactively (mixed values) keeps the cap. An
-# allow-list, never "anything but cli": cli, claude-desktop, claude-vscode, a
+# allow-list, never "anything but cli": null, numeric, cli, claude-desktop, claude-vscode, a
 # missing, unknown, mixed or unreadable value all keep the cap.
 #
 # Long-reply approvals (written by reply-cap-prompt.sh) are honoured: a one-shot
@@ -49,9 +49,16 @@ entrypoint="${CLAUDE_CODE_ENTRYPOINT:-}"
 if [ -z "$entrypoint" ]; then
   _tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty | strings' 2>/dev/null)
   if [ -n "$_tp" ] && [ -f "$_tp" ]; then
-    # Every distinct value; more than one (or none) is ambiguous: keep the cap.
-    _eps=$(grep -oE '"entrypoint"[[:space:]]*:[[:space:]]*"[^"]*"' "$_tp" 2>/dev/null | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' | sort -u)
-    [ "$(printf '%s\n' "$_eps" | grep -c .)" -eq 1 ] && entrypoint="$_eps"
+    # Every distinct raw value of the key, whatever its type (string, null, number,
+    # object...); more than one (or none) is ambiguous: keep the cap. Only a lone
+    # quoted string becomes the entrypoint, so null or a number is a non-allowed value.
+    _eps=$(grep -oE '"entrypoint"[[:space:]]*:[[:space:]]*[^,}]*' "$_tp" 2>/dev/null | sed -E 's/^"entrypoint"[[:space:]]*:[[:space:]]*//; s/[[:space:]]+$//' | sort -u)
+    if [ "$(printf '%s\n' "$_eps" | grep -c .)" -eq 1 ]; then
+      case "$_eps" in
+        \"sdk-cli\") entrypoint=sdk-cli ;;
+        \"sdk-ts\") entrypoint=sdk-ts ;;
+      esac
+    fi
   fi
 fi
 case "$entrypoint" in

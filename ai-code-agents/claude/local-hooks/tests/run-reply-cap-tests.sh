@@ -239,6 +239,15 @@ mk_ep "$tr_dir/ep-same.jsonl" "sdk-cli"; jq -nc '{type:"user",entrypoint:"sdk-cl
 ep_expect "transcript sdk-cli in every record skipped" "" "$(fb "$tr_dir/ep-same.jsonl" "f-same-$run")" none
 mk_ep "$tr_dir/ep-text.jsonl" "cli"; jq -nc '{type:"user",message:{content:"{\"entrypoint\":\"sdk-cli\"}"}}' >>"$tr_dir/ep-text.jsonl"
 ep_expect "transcript cli with sdk-cli only inside message text capped" "" "$(fb "$tr_dir/ep-text.jsonl" "f-text-$run")" block
+# a record whose entrypoint is null or numeric is a non-allowed value: the cap stays on
+mk_ep "$tr_dir/ep-null.jsonl" "sdk-cli"; jq -nc '{type:"user",entrypoint:null,message:{content:"x"}}' >>"$tr_dir/ep-null.jsonl"
+ep_expect "transcript sdk-cli mixed with a null entrypoint capped" "" "$(fb "$tr_dir/ep-null.jsonl" "f-null-$run")" block
+mk_ep "$tr_dir/ep-num.jsonl" "sdk-ts"; jq -nc '{type:"user",entrypoint:5,message:{content:"x"}}' >>"$tr_dir/ep-num.jsonl"
+ep_expect "transcript sdk-ts mixed with a numeric entrypoint capped" "" "$(fb "$tr_dir/ep-num.jsonl" "f-num-$run")" block
+mk_ep "$tr_dir/ep-nn.jsonl" "sdk-cli"; jq -nc '{type:"user",entrypoint:null,message:{content:"x"}}' >>"$tr_dir/ep-nn.jsonl"; jq -nc '{type:"user",entrypoint:7,message:{content:"x"}}' >>"$tr_dir/ep-nn.jsonl"
+ep_expect "transcript sdk-cli mixed with null and numeric entrypoints capped" "" "$(fb "$tr_dir/ep-nn.jsonl" "f-nn-$run")" block
+jq -nc '{type:"user",entrypoint:null,message:{content:"x"}}' >"$tr_dir/ep-onlynull.jsonl"; jq -nc --arg t "$long" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >>"$tr_dir/ep-onlynull.jsonl"
+ep_expect "transcript with only a null entrypoint capped" "" "$(fb "$tr_dir/ep-onlynull.jsonl" "f-onlynull-$run")" block
 # last_assistant_message payload plus transcript entrypoint (the real Stop shape)
 ep_expect "message field + transcript sdk-ts skipped" "" "$(stop "$long" "f-both-$run" | jq --arg t "$tr_dir/ep-sdk-ts.jsonl" '.transcript_path=$t')" none
 

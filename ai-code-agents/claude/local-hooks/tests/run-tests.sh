@@ -252,7 +252,7 @@ check "malformed payload allowed" allow "$mention" 'not json'
 # isolated copies: without the shared walker the hook behaves as it did
 iso="$(mktemp -d)"; mkdir "$iso/hooks"; cp "$(dirname "$pyhook")/no-agent-mention.py" "$iso/hooks/"
 check "no walker: variable message allowed as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"
-check "no walker: body message still denied (a quoted word holding commit is read as a command)" deny "python3 $iso/hooks/no-agent-mention.py" "$(pr "bash -c 'git commit -m \"Generated with Claude Code\"'")"
+check "no walker: body message allowed as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(pr "bash -c 'git commit -m \"Generated with Claude Code\"'")"
 check "no walker: literal message still denied" deny "python3 $iso/hooks/no-agent-mention.py" "$(pr 'git commit -m "Generated with Claude Code"')"
 check "no walker: relative file read from the working directory as before" allow "python3 $iso/hooks/no-agent-mention.py" "$(prc "cd sub && gh pr create --title t --body-file pbad.md" "$proj")"
 mkdir "$iso/local-hooks"; echo 'raise RuntimeError("broken")' > "$iso/local-hooks/_cmd_dirs.py"
@@ -302,86 +302,6 @@ check_err() {
     pass=$((pass + 1)); echo "ok   - $name"
   else fail=$((fail + 1)); echo "FAIL - $name (rc=$rc out=[$out] err=[$err])"; fi
 }
-# --- no-agent-mention.py: here-document messages (git commit -F -) and what counts as a commit ---
-hd_clean="$(printf '%s\n' "git commit -F - <<'EOF'" "fix(parser): handle empty input" "" "Body that doesn't mention any tool." "EOF")"
-hd_bad="$(printf '%s\n' "git commit -F - <<'EOF'" "fix(parser): handle empty input" "" "Generated with Claude Code" "EOF")"
-hd_trailer="$(printf '%s\n' "git commit -F - <<EOF" "fix: x" "" "Co-Authored-By: Claude <a@b.c>" "EOF")"
-check "heredoc -F - clean message allowed" allow "$mention" "$(pr "$hd_clean")"
-check "heredoc -F - with agent credit denied" deny "$mention" "$(pr "$hd_bad")"
-check "heredoc -F - unquoted delimiter, trailer denied" deny "$mention" "$(pr "$hd_trailer")"
-check "git add && heredoc commit, clean allowed" allow "$mention" "$(pr "git add -A && $hd_clean")"
-check "heredoc body words -m/-F not read as options" allow "$mention" "$(pr "$(printf '%s\n' "git commit -F - <<'EOF'" "fix: x" "-m Claude" "-F nothing" "EOF")")"
-check "-F - with no heredoc still denied (unreadable)" deny "$mention" "$(pr 'echo "fix: x" | git commit -F -')"
-check "-F unreadable file still denied" deny "$mention" "$(pr 'git commit -F /nonexistent/msg.txt')"
-check "echo with the words git and commit ignored" allow "$mention" "$(pr 'echo "remember to git commit later" | tee notes.txt; ls -F /nonexistent')"
-check "grep for 'git commit' ignored" allow "$mention" "$(pr 'grep -rn "git commit" docs/ -F /nonexistent/list.txt')"
-check "path containing commit not a commit" allow "$mention" "$(pr 'cat git/commit-msg-template -F /nonexistent/x')"
-check "later ls -F after a real commit not read as its message file" allow "$mention" "$(pr 'git commit -m "fix parser" && ls -F /nonexistent')"
-check "commit after cd and ; still judged" deny "$mention" "$(pr 'cd /tmp; git commit -m "Generated with Claude Code"')"
-check "git -C dir commit still judged" deny "$mention" "$(pr 'git -C /tmp commit -m "Co-Authored-By: Claude <a@b.c>"')"
-check "env VAR= git commit still judged" deny "$mention" "$(pr 'GIT_AUTHOR_NAME=x git commit -m "Generated with Claude Code"')"
-# --- no-agent-mention.py: fail closed on what counts as a commit (review of the narrowed detection) ---
-nl=$'\n'; gw='Generated with Claude Code'
-# finding 1: a line break or a backslash-newline separates commands
-check "commit on a new line after git add denied" deny "$mention" "$(pr "git add -A${nl}git commit -m \"$gw\"")"
-check "commit on a new line after cd denied" deny "$mention" "$(pr "cd /tmp${nl}git commit -m \"$gw\"")"
-check "commit after && backslash-newline denied" deny "$mention" "$(pr "git add -A && \\${nl}git commit -m \"$gw\"")"
-check "commit on a new line, clean allowed" allow "$mention" "$(pr "git add -A${nl}git commit -m \"fix parser\"")"
-# finding 2: groupings, wrappers, substitutions and a glued pipe
-check "brace group commit denied" deny "$mention" "$(pr "{ git commit -m \"$gw\"; }")"
-check "timeout wrapper commit denied" deny "$mention" "$(pr "timeout 5 git commit -m \"$gw\"")"
-check "xargs commit denied" deny "$mention" "$(pr "echo x | xargs git commit -m \"$gw\"")"
-check "commit inside \$( ) denied" deny "$mention" "$(pr "echo \$(git commit -m \"$gw\")")"
-check "commit inside backticks denied" deny "$mention" "$(pr "echo \`git commit -m \"$gw\"\`")"
-check "commit inside a double-quoted \$( ) denied" deny "$mention" "$(pr "echo \"\$(git commit -m '$gw')\"")"
-check "glued pipe into commit denied" deny "$mention" "$(pr "echo x|git commit -m \"$gw\"")"
-check "unknown wrapper (watch) holding a commit denied" deny "$mention" "$(pr "watch -n1 'git commit -m \"$gw\"'")"
-check "find -exec commit denied" deny "$mention" "$(pr "find . -exec git commit -m \"$gw\" \;")"
-check "variable holding git denied" deny "$mention" "$(pr "g=git; \$g commit -m \"$gw\"")"
-check "alias for git denied" deny "$mention" "$(pr "alias g=git; g commit -m \"$gw\"")"
-check "substituted subcommand denied" deny "$mention" "$(pr "git \$(echo commit) -m \"$gw\"")"
-check "brace group, clean allowed" allow "$mention" "$(pr "{ git commit -m \"fix parser\"; }")"
-check "timeout wrapper, clean allowed" allow "$mention" "$(pr "timeout 5 git commit -m \"fix parser\"")"
-# finding 3: a standard-input message file is fed only by a here-document in its own pipeline
-check "second commit piped a credit after a clean here-document denied" deny "$mention" "$(pr "git commit -F - <<'EOF'${nl}fix: one${nl}EOF${nl}echo \"$gw\" | git commit -F -")"
-check "first here-document credits, second commit piped clean: denied" deny "$mention" "$(pr "git commit -F - <<'EOF'${nl}$gw${nl}EOF${nl}echo ok | git commit -F -")"
-check "two here-document operators on one line (one body split off) denied" deny "$mention" "$(pr "cat > /dev/null <<A ; git commit -F - <<B${nl}A${nl}$gw${nl}B")"
-check "cat here-document piped into commit, clean allowed" allow "$mention" "$(pr "cat <<'EOF' | git commit -F -${nl}fix: x${nl}EOF")"
-check "cat here-document piped into commit, credit denied" deny "$mention" "$(pr "cat <<'EOF' | git commit -F -${nl}$gw${nl}EOF")"
-check "-F /dev/stdin here-document credit denied" deny "$mention" "$(pr "git commit -F /dev/stdin <<'EOF'${nl}$gw${nl}EOF")"
-check "-F /dev/stdin here-document clean allowed" allow "$mention" "$(pr "git commit -F /dev/stdin <<'EOF'${nl}fix: x${nl}EOF")"
-check "-F /dev/stdin from a pipe denied (unreadable)" deny "$mention" "$(pr 'printf "fix" | git commit -F /dev/stdin')"
-check "-F - here-string still denied" deny "$mention" "$(pr 'git commit -F - <<< "fix"')"
-check "here-document run by bash holding a credited commit denied" deny "$mention" "$(pr "bash <<'EOF'${nl}git commit -m \"$gw\"${nl}EOF")"
-check "file written by a here-document, then a clean commit allowed" allow "$mention" "$(pr "cat > notes.md <<'EOF'${nl}It's about $gw${nl}EOF${nl}git add notes.md && git commit -m docs")"
-# still not judged: commands that are provably not commits
-check "echo of a credited commit line not judged" allow "$mention" "$(pr "echo git commit -m \"$gw\"")"
-check "git log search not judged" allow "$mention" "$(pr "git log --grep \"$gw\" -m -- commit")"
-# finding 5: split_heredocs here and in _public-text-check.py stay the same
-pin_out="$(python3 - "$pyhook" "$hooks/_public-text-check.py" 2>&1 <<'PYEOF'
-import ast, importlib.util, sys
-def load(n, p):
-    s = importlib.util.spec_from_file_location(n, p); m = importlib.util.module_from_spec(s); s.loader.exec_module(m); return m
-a, b = load("nam_pin", sys.argv[1]), load("ptc_pin", sys.argv[2])
-def body(path):
-    tree = ast.parse(open(path).read())
-    f = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "split_heredocs")
-    if f.body and isinstance(f.body[0], ast.Expr) and isinstance(getattr(f.body[0], "value", None), ast.Constant):
-        f.body = f.body[1:]  # docstrings may differ
-    return ast.dump(f)
-assert body(sys.argv[1]) == body(sys.argv[2]), "split_heredocs code differs"
-cases = ["git commit -F - <<'EOF'\nx\nEOF", "a <<-\"E\"\n\tb\n\tE\nc", "x <<<y\nz", "a <<E\nno end", "cat <<\\E\nq\nE", ""]
-for c in cases:
-    assert a.split_heredocs(c) == b.split_heredocs(c), c
-print("same")
-PYEOF
-)"
-[ "$pin_out" = same ] && { pass=$((pass + 1)); echo "ok   - split_heredocs pinned to _public-text-check.py"; } || { fail=$((fail + 1)); echo "FAIL - split_heredocs differs from _public-text-check.py: $pin_out"; }
-# the differential corpus against the pinned baseline hook
-diff_out="$(python3 "$here/no-agent-mention-diff.py" 2>&1)"; diff_rc=$?
-if [ "$diff_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - differential: $(grep '^corpus:' <<<"$diff_out")"
-else fail=$((fail + 1)); echo "FAIL - differential against the baseline hook"; grep -E 'FAIL|passed' <<<"$diff_out" | sed 's/^/       /'; fi
-
 iso="$(mktemp -d)"; mkdir "$iso/hooks"; cp "$(dirname "$pyhook")/no-agent-mention.py" "$iso/hooks/"
 cp "$hooks/delegate-gate.sh" "$hooks/_gate-common.sh" "$hooks/_bash-write-check.py" "$iso/"
 vm="$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"

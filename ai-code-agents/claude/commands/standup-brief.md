@@ -1,6 +1,6 @@
 ---
-allowed-tools: mcp__claude_ai_Slack__slack_search_users, mcp__claude_ai_Slack__slack_read_channel, Bash(git:*), Bash(gh:*), Task
-description: Check a teammate's last Slack DM, cross-reference it against this repo's open PRs/issues, and draft one consolidated portal task.
+allowed-tools: mcp__claude_ai_Slack__slack_search_users, mcp__claude_ai_Slack__slack_read_channel, Bash(git:*), Bash(gh:*), Agent, Skill, ToolSearch, mcp__claude_ai_Supabase__execute_sql
+description: Check a teammate's last Slack DM, cross-reference it against this repo's open PRs/issues, and turn the result into a Brain story (via brain-story-split) linked to those issues.
 ---
 
 # Standup brief: $ARGUMENTS
@@ -17,25 +17,23 @@ Default the target person to **Derek Brenner** if `$ARGUMENTS` doesn't name some
 
 4. **Cross-reference.** Identify which open PRs/issues are actually tied to the DM's topic (e.g. a client-feedback thread, a feature the person asked about). If more than 2-3 items need deep detail (full PR body, review status, linked issue), delegate to a `git-workflow` subagent to fetch `gh pr view --json title,body,mergeable,statusCheckRollup,reviews` and `gh issue view` for each, and summarize — don't dump raw JSON into the main conversation.
 
-5. **Write ONE consolidated task** (not one per PR) using this exact template, filling every field:
+5. **Turn it into a Brain story.** Don't hand-draft a task block here — invoke the
+   `brain-story-split` skill and hand it what steps 1-4 gathered:
 
-   ```
-   Title:
-   Owner: JC Ashley
-   Priority: P_ · Product Development
-   Estimated time (hours):
-   Due date:
-   Milestone:
-   Status:
-   Definition of done:
-   Notes:
-   ```
+   - What the DM is actually asking for / reacting to — this becomes the story's
+     title + plain-language description (understandable with no extra context).
+   - The cross-referenced issues from step 4. These already exist, so skip
+     `brain-story-split`'s step 3 ("create issues") entirely and go straight to
+     its step 4 — link each one to the story via `task_external_links`. Only let
+     it fall through to step 3 if the DM surfaces work that has no issue yet.
+   - Derek as the reader the linked issues / Projects board need to be legible
+     to — that's carried by the issues themselves, not restated in the story.
+   - Let `brain-story-split` run its own new-story-vs-existing-story judgment
+     call (its step 1) — if that's ambiguous, it will ask; don't pre-decide it
+     here.
+   - Let it drive the actual writes (task row, links, standup entry) — it
+     confirms before anything live-writes.
 
-   Guidance for filling it in:
-   - **Estimated time** = remaining work only (merge/deploy/verify), not time already spent building — assume the linked PRs are already code-complete unless stated otherwise.
-   - **Definition of done** = a checklist of specific, verifiable end-states (PRs merged, migrations pushed to sandbox+prod, secrets set, a manual smoke-check performed) — never a vague "finish the feature."
-   - **Due date** — leave as "(your call)" rather than guessing; it's JC's decision.
-   - **Milestone** — check `gh issue list --json number,milestone` for the linked issues first; only suggest creating a new one if none exists and it'd meaningfully group the work.
-   - **Notes** — call out anything that changed scope from the original issue, anything still blocked on a client/human decision, and any issue number this batch explicitly does *not* close (to avoid false-closing related work).
-
-Keep the final output to: the Slack reply draft, then the one task block. No per-PR breakdowns unless asked.
+Keep the final output to: the Slack reply draft, then whatever `brain-story-split`
+reports back (story `task_id`/title, issues linked, which standup entry it landed
+in). No manual task-block template, no per-PR breakdown unless asked.

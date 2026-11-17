@@ -4,3 +4,10 @@ ai-code-agents/opencode/.env
 ai-code-agents/codex/tmp/
 __pycache__/
 *.pyc
+
+# Synced skills are generated at run time
+/ai-code-agents/claude/skills/synced/
+/ai-code-agents/codex/skills/synced/
+
+# Tool trash directories
+.trash/

@@ -30,37 +30,27 @@ link_path() {
   ln -s "$source" "$target_path"
 }
 
-install_codex_only_toggle() {
-  local script="$repo_root/ai-code-agents/opencode/tools/codex-only.sh"
-  local state_file="$HOME/.config/opencode/codex-only.env"
+install_opencode_model_profiles() {
+  local script="$repo_root/ai-code-agents/opencode/tools/model-profile.sh"
   local bin_dir="$HOME/.local/bin"
   local zshrc="$HOME/.zshrc"
-  local begin_marker="# >>> agents.dfwsc.config codex-only >>>"
-  local end_marker="# <<< agents.dfwsc.config codex-only <<<"
+  local begin_marker="# >>> agents.dfwsc.config opencode mixed profile >>>"
+  local end_marker="# <<< agents.dfwsc.config opencode mixed profile <<<"
   local block
+  local profile_command
 
   chmod +x "$script"
-  mkdir -p "$HOME/.config/opencode" "$bin_dir"
-  link_path "$script" "$bin_dir/codex-only"
+  mkdir -p "$bin_dir"
 
-  if [ ! -f "$state_file" ]; then
-    printf 'export OPENCODE_CODEX_ONLY=0\n' > "$state_file"
-  fi
+  for profile_command in opencode-codex opencode-go opencode-claude; do
+    link_path "$script" "$bin_dir/$profile_command"
+  done
 
   block=$(cat <<EOF
 $begin_marker
-_OC_CODEX_ONLY="$script"
-if [ -x "\$_OC_CODEX_ONLY" ]; then
-  eval "\$("\$_OC_CODEX_ONLY" exports)"
-fi
-codex-only() {
-  if [ -x "\$_OC_CODEX_ONLY" ]; then
-    "\$_OC_CODEX_ONLY" "\$@"
-    eval "\$("\$_OC_CODEX_ONLY" exports)"
-  else
-    echo "codex-only script not found: \$_OC_CODEX_ONLY" >&2
-    return 1
-  fi
+_OC_MODEL_PROFILE="$script"
+opencode() {
+  "\$_OC_MODEL_PROFILE" mixed "\$@"
 }
 $end_marker
 EOF
@@ -112,7 +102,7 @@ link_opencode() {
   link_path "$repo_root/ai-code-agents/opencode/commands" "$HOME/.config/opencode/commands"
   link_path "$repo_root/ai-code-agents/opencode/skills" "$HOME/.config/opencode/skills"
   link_path "$repo_root/ai-code-agents/opencode/tools/db-readonly.mjs" "$HOME/.config/opencode/tools/db-readonly.mjs"
-  install_codex_only_toggle
+  install_opencode_model_profiles
 
   if command -v npm >/dev/null 2>&1; then
     npm install --prefix "$HOME/.config/opencode" better-sqlite3 pg mysql2 mssql

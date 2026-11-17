@@ -21,7 +21,9 @@
             }
         }
     },
-    "model": "{env:OPENCODE_FAST_MODEL}",
+    "default_agent": "{env:OPENCODE_DEFAULT_AGENT}",
+    "model": "{env:OPENCODE_PRIMARY_MODEL}",
+    "small_model": "{env:OPENCODE_SMALL_MODEL}",
     "experimental": {
         "hook": {
             "file_edited": {
@@ -39,6 +41,8 @@
         }
     },
     "agent": {
+        "build": { "model": "{env:OPENCODE_PRIMARY_MODEL}", "variant": "{env:OPENCODE_PRIMARY_VARIANT}" },
+        "plan": { "model": "{env:OPENCODE_PLAN_MODEL}", "variant": "{env:OPENCODE_PLAN_VARIANT}" },
         "working": {
             "permission": {
                 "bash": {
@@ -54,7 +58,8 @@
                 "task": "deny"
             }
         },
-        "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
+        "git-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "", "permission": { "bash": { "git fetch *": "allow", "git checkout *": "allow" } } },
+        "sql-runner": { "mode": "subagent", "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "" },
         "check": { "mode": "subagent", "model": "{env:OPENCODE_FAST_MODEL}", "variant": "{env:OPENCODE_FAST_VARIANT}" },
         "codebase-locator": { "model": "{env:OPENCODE_LOCATOR_MODEL}", "variant": "{env:OPENCODE_LOCATOR_VARIANT}" },
         "codebase-analyzer": { "model": "{env:OPENCODE_ANALYZER_MODEL}", "variant": "{env:OPENCODE_ANALYZER_VARIANT}" },
@@ -63,6 +68,8 @@
         "frontend-developer": { "model": "{env:OPENCODE_FRONTEND_MODEL}", "variant": "{env:OPENCODE_FRONTEND_VARIANT}" },
         "mobile-developer": { "model": "{env:OPENCODE_MOBILE_MODEL}", "variant": "{env:OPENCODE_MOBILE_VARIANT}" },
         "backend-architect": { "model": "{env:OPENCODE_BACKEND_MODEL}", "variant": "{env:OPENCODE_BACKEND_VARIANT}" },
+        "backend-fix-workunit": { "model": "{env:OPENCODE_BACKEND_MODEL}", "variant": "{env:OPENCODE_BACKEND_VARIANT}" },
+        "frontend-fix-workunit": { "model": "{env:OPENCODE_FRONTEND_MODEL}", "variant": "{env:OPENCODE_FRONTEND_VARIANT}" },
         "cloud-architect": { "model": "{env:OPENCODE_CLOUD_MODEL}", "variant": "{env:OPENCODE_CLOUD_VARIANT}" },
         "database-optimizer": { "model": "{env:OPENCODE_DB_MODEL}", "variant": "{env:OPENCODE_DB_VARIANT}" },
         "deployment-engineer": { "model": "{env:OPENCODE_DEPLOY_MODEL}", "variant": "{env:OPENCODE_DEPLOY_VARIANT}" },
@@ -72,7 +79,6 @@
         "executor": { "model": "{env:OPENCODE_EXECUTOR_MODEL}", "variant": "{env:OPENCODE_EXECUTOR_VARIANT}" },
         "general": { "model": "{env:OPENCODE_GENERAL_MODEL}", "variant": "{env:OPENCODE_GENERAL_VARIANT}" },
         "explore": { "model": "{env:OPENCODE_EXPLORE_MODEL}", "variant": "{env:OPENCODE_EXPLORE_VARIANT}" },
-        "response-reviewer": { "model": "{env:OPENCODE_RESPONSE_REVIEWER_MODEL}", "variant": "{env:OPENCODE_RESPONSE_REVIEWER_VARIANT}" },
         "spec-reviewer": { "model": "{env:OPENCODE_SPEC_REVIEWER_MODEL}", "variant": "{env:OPENCODE_SPEC_REVIEWER_VARIANT}" }
     },
     "mcp": {

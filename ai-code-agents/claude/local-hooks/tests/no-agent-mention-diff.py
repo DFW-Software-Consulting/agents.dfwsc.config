@@ -154,6 +154,30 @@ CORPUS = {
     "gh-create": 'gh pr create --title t --body "{M}"',
     "gh-and-commit": 'git commit -m "fix" && gh pr create --title t --body "{M}"',
 }
+# Text run by a shell interpreter or evaluator (stdin, here-document,
+# here-string, substitution, argument string), plain and wrapped.
+P = 'git commit -m "{M}"'
+for sh in ("bash", "sh", "zsh", "dash"):
+    CORPUS["sh-pipe-echo+" + sh] = "echo '%s' | %s" % (P, sh)
+    CORPUS["sh-pipe-printf+" + sh] = "printf '%%s\\n' '%s' | %s" % (P, sh)
+    CORPUS["sh-cat-hd+" + sh] = "cat <<'EOF' | %s\n%s\nEOF" % (sh, P)
+    CORPUS["sh-hd+" + sh] = "%s <<'EOF'\n%s\nEOF" % (sh, P)
+    CORPUS["sh-hd-unquoted+" + sh] = "%s <<EOF\n%s\nEOF" % (sh, P)
+    CORPUS["sh-herestring+" + sh] = "%s <<< '%s'" % (sh, P)
+    CORPUS["sh-procsub+" + sh] = "%s <(echo '%s')" % (sh, P)
+    CORPUS["sh-xargs+" + sh] = "echo '%s' | xargs -I{} %s -c '{}'" % (P, sh)
+for w in ("env", "nohup", "time", "nice"):
+    CORPUS["sh-pipe-wrapped+" + w] = "echo '%s' | %s bash" % (P, w)
+    CORPUS["sh-hd-wrapped+" + w] = "%s bash <<'EOF'\n%s\nEOF" % (w, P)
+    CORPUS["sh-herestring-wrapped+" + w] = "%s bash <<< '%s'" % (w, P)
+CORPUS["sh-ssh-pipe"] = "ssh host \"echo 'git commit -m \\\"{M}\\\"' | bash\""
+CORPUS["sh-ssh-hd"] = "ssh host bash <<'EOF'\n%s\nEOF" % P
+CORPUS["eval-subst"] = "eval \"$(echo '%s')\"" % P
+CORPUS["eval-dq"] = "eval \"git commit -m '{M}'\""
+CORPUS["eval-sq"] = "eval '%s'" % P
+CORPUS["source-stdin"] = "echo '%s' | source /dev/stdin" % P
+CORPUS["dot-stdin"] = "echo '%s' | . /dev/stdin" % P
+CORPUS["source-procsub"] = "source <(echo '%s')" % P
 for bk, b in BASES.items():
     for pk, p in PREFIXES.items():
         CORPUS["%s+%s" % (pk, bk)] = p + b
@@ -172,7 +196,14 @@ EXCEPTIONS = {
 
 # Spellings that are or may be a commit: the crediting message must be denied.
 NOT_COMMITS = {k for k in CORPUS if k.startswith(("n-", "gh-create"))}
-MUST_DENY = {k for k in CORPUS if k not in NOT_COMMITS
+# Not caught before or now: text that only reaches a shell as a single quoted
+# word on its standard input (a pipe from echo or printf, xargs -I{} sh -c,
+# source /dev/stdin). The baseline allowed every one of these too; listed so
+# a change in either direction shows up here.
+NOT_CAUGHT = {k for k in CORPUS if k.startswith(("sh-pipe-echo+", "sh-pipe-printf+",
+                                                 "sh-xargs+", "sh-pipe-wrapped+"))} | {
+    "sh-ssh-pipe", "source-stdin", "dot-stdin"}
+MUST_DENY = {k for k in CORPUS if k not in NOT_COMMITS and k not in NOT_CAUGHT
              and k not in ("hd-file-then-commit",)}  # the body is a file, not the message
 # Clean message must be allowed (unreadable or ambiguous standard input still denies).
 MUST_ALLOW = {k for k in CORPUS} - {
@@ -247,6 +278,10 @@ def main():
             bad.append("crediting message not denied")
         if kind == "clean" and key in MUST_ALLOW and new != "allow":
             bad.append("clean message not allowed")
+        if tag == "c" and new != ("allow" if kind == "clean" else "deny"):
+            bad.append("exception c: clean file must be allowed and crediting file denied")
+        if key in NOT_CAUGHT and kind == "credit" and (old, new) != ("allow", "allow"):
+            bad.append("listed as not caught but a hook now denies it: update NOT_CAUGHT")
         if bad:
             failed += 1
             errors.append("FAIL - %s: %s\n       %r" % (name, "; ".join(bad), cmd))

@@ -302,6 +302,25 @@ check_err() {
     pass=$((pass + 1)); echo "ok   - $name"
   else fail=$((fail + 1)); echo "FAIL - $name (rc=$rc out=[$out] err=[$err])"; fi
 }
+# --- no-agent-mention.py: here-document messages (git commit -F -) and what counts as a commit ---
+hd_clean="$(printf '%s\n' "git commit -F - <<'EOF'" "fix(parser): handle empty input" "" "Body that doesn't mention any tool." "EOF")"
+hd_bad="$(printf '%s\n' "git commit -F - <<'EOF'" "fix(parser): handle empty input" "" "Generated with Claude Code" "EOF")"
+hd_trailer="$(printf '%s\n' "git commit -F - <<EOF" "fix: x" "" "Co-Authored-By: Claude <a@b.c>" "EOF")"
+check "heredoc -F - clean message allowed" allow "$mention" "$(pr "$hd_clean")"
+check "heredoc -F - with agent credit denied" deny "$mention" "$(pr "$hd_bad")"
+check "heredoc -F - unquoted delimiter, trailer denied" deny "$mention" "$(pr "$hd_trailer")"
+check "git add && heredoc commit, clean allowed" allow "$mention" "$(pr "git add -A && $hd_clean")"
+check "heredoc body words -m/-F not read as options" allow "$mention" "$(pr "$(printf '%s\n' "git commit -F - <<'EOF'" "fix: x" "-m Claude" "-F nothing" "EOF")")"
+check "-F - with no heredoc still denied (unreadable)" deny "$mention" "$(pr 'echo "fix: x" | git commit -F -')"
+check "-F unreadable file still denied" deny "$mention" "$(pr 'git commit -F /nonexistent/msg.txt')"
+check "echo with the words git and commit ignored" allow "$mention" "$(pr 'echo "remember to git commit later" | tee notes.txt; ls -F /nonexistent')"
+check "grep for 'git commit' ignored" allow "$mention" "$(pr 'grep -rn "git commit" docs/ -F /nonexistent/list.txt')"
+check "path containing commit not a commit" allow "$mention" "$(pr 'cat git/commit-msg-template -F /nonexistent/x')"
+check "later ls -F after a real commit not read as its message file" allow "$mention" "$(pr 'git commit -m "fix parser" && ls -F /nonexistent')"
+check "commit after cd and ; still judged" deny "$mention" "$(pr 'cd /tmp; git commit -m "Generated with Claude Code"')"
+check "git -C dir commit still judged" deny "$mention" "$(pr 'git -C /tmp commit -m "Co-Authored-By: Claude <a@b.c>"')"
+check "env VAR= git commit still judged" deny "$mention" "$(pr 'GIT_AUTHOR_NAME=x git commit -m "Generated with Claude Code"')"
+
 iso="$(mktemp -d)"; mkdir "$iso/hooks"; cp "$(dirname "$pyhook")/no-agent-mention.py" "$iso/hooks/"
 cp "$hooks/delegate-gate.sh" "$hooks/_gate-common.sh" "$hooks/_bash-write-check.py" "$iso/"
 vm="$(pr 'M="Generated with Claude Code"; git commit -m "$M"')"

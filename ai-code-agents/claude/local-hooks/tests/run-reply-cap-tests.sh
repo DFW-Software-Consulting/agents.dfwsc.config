@@ -9,7 +9,7 @@ export HOME; HOME="$(mktemp -d)"
 trap 'rm -rf "$HOME"' EXIT
 scratch="${SCRATCH:-/home/messyginger0804/.cache/tmp/claude-1000/-home-messyginger0804/7d9c7718-6dce-42d0-bf45-720a9e7269da/scratchpad}"
 mkdir -p "$scratch"; export TMPDIR="$scratch"
-unset XDG_CACHE_HOME
+unset XDG_CACHE_HOME CLAUDE_CODE_ENTRYPOINT
 run="$(date +%s)-$$"
 
 cap="$hooks/enforce-response-cap.sh"; pr="$hooks/reply-cap-prompt.sh"
@@ -198,6 +198,37 @@ export XDG_CACHE_HOME="$HOME/xdg"
 call "$pr" "$(up "go long" "c2-$run" "")"
 [ -f "$HOME/xdg/claude-hooks/reply-cap-approval-c2-$run" ] && ok "XDG_CACHE_HOME honoured" || bad "xdg marker"
 unset XDG_CACHE_HOME
+
+# --- headless exemption: allow-list of entrypoints (sdk-cli, sdk-ts) ---
+ep_call() { # ENTRYPOINT PAYLOAD: runs the hook with CLAUDE_CODE_ENTRYPOINT set ("" = unset)
+  if [ -n "$1" ]; then out="$(printf '%s' "$2" | CLAUDE_CODE_ENTRYPOINT="$1" bash "$cap" 2>&1)"; else out="$(printf '%s' "$2" | bash "$cap" 2>&1)"; fi; rc=$?
+}
+ep_expect() { # NAME ENTRYPOINT PAYLOAD block|none
+  ep_call "$2" "$3"
+  local got=none
+  [ -n "$out" ] && { jq -e '.decision=="block"' <<<"$out" >/dev/null 2>&1 && got=block || got=garbage; }
+  [ "$rc" -eq 0 ] && [ "$got" = "$4" ] && ok "$1" || bad "$1" "(expected $4, got $got, rc=$rc) $out"
+}
+ep_expect "env sdk-cli skipped" sdk-cli "$(stop "$long" "h1-$run")" none
+ep_expect "env sdk-ts skipped" sdk-ts "$(stop "$long" "h2-$run")" none
+ep_expect "env cli capped" cli "$(stop "$long" "h3-$run")" block
+ep_expect "env claude-desktop capped" claude-desktop "$(stop "$long" "h4-$run")" block
+ep_expect "env claude-vscode capped" claude-vscode "$(stop "$long" "h5-$run")" block
+ep_expect "env unknown value capped" sdk-python "$(stop "$long" "h6-$run")" block
+ep_expect "env look-alike sdk-cli-x capped" sdk-cli-x "$(stop "$long" "h7-$run")" block
+ep_expect "env missing, no transcript: capped" "" "$(stop "$long" "h8-$run")" block
+ep_expect "env sdk-cli, short reply still silent" sdk-cli "$(stop "$short" "h9-$run")" none
+mk_ep() { # file entrypoint: transcript whose records carry an entrypoint field
+  jq -nc --arg e "$2" '{type:"queue-operation"}' >"$1"
+  jq -nc --arg e "$2" 'if $e=="" then {type:"user",message:{content:"hi"}} else {type:"user",entrypoint:$e,message:{content:"hi"}} end' >>"$1"
+  jq -nc --arg t "$long" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >>"$1"
+}
+for e in sdk-cli sdk-ts; do mk_ep "$tr_dir/ep-$e.jsonl" "$e"; ep_expect "transcript entrypoint $e skipped" "" "$(fb "$tr_dir/ep-$e.jsonl" "f-$e-$run")" none; done
+for e in cli claude-desktop; do mk_ep "$tr_dir/ep-$e.jsonl" "$e"; ep_expect "transcript entrypoint $e capped" "" "$(fb "$tr_dir/ep-$e.jsonl" "f-$e-$run")" block; done
+mk_ep "$tr_dir/ep-none.jsonl" ""; ep_expect "transcript without entrypoint capped" "" "$(fb "$tr_dir/ep-none.jsonl" "f-none-$run")" block
+mk_ep "$tr_dir/ep-env.jsonl" "sdk-cli"; ep_expect "env cli wins over transcript sdk-cli" cli "$(fb "$tr_dir/ep-env.jsonl" "f-env-$run")" block
+# last_assistant_message payload plus transcript entrypoint (the real Stop shape)
+ep_expect "message field + transcript sdk-ts skipped" "" "$(stop "$long" "f-both-$run" | jq --arg t "$tr_dir/ep-sdk-ts.jsonl" '.transcript_path=$t')" none
 
 # --- shared file missing: old behaviour ---
 iso="$(mktemp -d)"; cp "$cap" "$pr" "$iso/"

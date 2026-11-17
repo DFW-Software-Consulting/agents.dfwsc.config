@@ -35,7 +35,17 @@ judged as written, as before. If the module cannot be found or fails, the hook
 behaves exactly as it did without it (fails open to the old behaviour) and writes
 one line to standard error; malformed input is allowed with a line on standard
 error too. `-F` with the file attached (`-Fmsg.txt`, `-aFmsg.txt`) is read as a
-file (it used to be read as a message). Read-only.
+file (it used to be read as a message).
+
+Commit detection and `-F -`:
+- only a real `git commit` command counts as a commit (git in command position,
+  global options such as `-C dir` skipped, subcommand `commit`), and only the
+  words of that command are read for messages. A command that merely holds the
+  words git and commit (an `echo`, a `grep`, a path) is not judged as a commit.
+- `git commit -F - <<'EOF' ... EOF` is judged on the here-document body, split
+  off with the same rule as local-hooks/_public-text-check.py split_heredocs. `-F -`
+  with no here-document on the line (a pipe, a file written earlier) is still
+  unreadable and denied: ask for -m. Read-only.
 """
 import json
 import os
@@ -102,7 +112,37 @@ def _at(path):
     return os.path.join(d, path) if d else path
 
 
+def split_heredocs(cmd):
+    """(command without here-document bodies, [bodies]). Same rule as
+    split_heredocs() in local-hooks/_public-text-check.py (copied, because that
+    module imports this one)."""
+    out, bodies, cur, delim, strip_tabs = [], [], [], None, False
+    for line in cmd.split("\n"):
+        if delim is not None:
+            if (line.lstrip("\t") if strip_tabs else line) == delim:
+                bodies.append("\n".join(cur))
+                cur, delim = [], None
+            else:
+                cur.append(line)
+            continue
+        out.append(line)
+        m = re.search(r"(?<!<)<<(?!<)(-?)\s*(?:\\?(\w+)|'([^']*)'|\"([^\"]*)\")", line)
+        if m:
+            strip_tabs = m.group(1) == "-"
+            delim = next(g for g in m.groups()[1:] if g is not None)
+    if delim is not None:
+        bodies.append("\n".join(cur))
+    return "\n".join(out), bodies
+
+
+# Text of the here-document bodies of the command being judged, filled by
+# main(); what `-F -` reads when the line carries one (None: no here-document).
+_STDIN_TEXT = None
+
+
 def file_contents(path):
+    if path == "-" and _STDIN_TEXT is not None:
+        return _STDIN_TEXT
     try:
         with open(_at(path), encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -182,6 +222,49 @@ def commit_texts(toks, read=None):
     return msgs
 
 
+_WRAPPERS = {"sudo", "env", "command", "exec", "time", "nohup", "nice", "then", "do", "else", "!"}
+_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix", "--config-env"}
+
+
+def _command_position(toks, i):
+    if i == 0:
+        return True
+    prev = toks[i - 1]
+    if prev in SEGMENT_END or prev in _WRAPPERS:
+        return True
+    if prev.endswith((";", "&", "|", "(")) and not prev.startswith("-"):
+        return True
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", prev):  # VAR=value git commit
+        return True
+    # `env -C dir git commit`, `sudo -u x git commit`: the first word of the
+    # segment (after assignments) is a wrapper, so git is the command it runs.
+    k = i - 1
+    while k > 0 and toks[k - 1] not in SEGMENT_END and not toks[k - 1].endswith((";", "&", "|", "(")):
+        k -= 1
+    while k < i and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[k]):
+        k += 1
+    return k < i and os.path.basename(toks[k]) in _WRAPPERS
+
+
+def commit_arg_lists(toks):
+    """The argument words (after `commit`, up to the end of the command) of every
+    real `git commit` in toks."""
+    found = []
+    for i, t in enumerate(toks):
+        if os.path.basename(t.lstrip("({")) != "git" or not _command_position(toks, i):
+            continue
+        j = i + 1
+        while j < len(toks) and toks[j].startswith("-") and toks[j] not in SEGMENT_END:
+            j += 2 if toks[j] in _GIT_VALUE_OPTS else 1
+        if j < len(toks) and toks[j] == "commit":
+            k = j + 1
+            while k < len(toks) and toks[k] not in SEGMENT_END and not toks[k].endswith(";"):
+                k += 1
+            end = k + 1 if k < len(toks) and toks[k].endswith(";") and toks[k] not in SEGMENT_END else k
+            found.append(toks[j + 1:end])
+    return found
+
+
 # Cheap test: does the line need the walker at all (a directory change, a
 # variable, a wrapper, or a message file)?
 NEEDS_WALK = re.compile(r"\$|`|\bcd\b|\bpushd\b|\s-C\b|\b(?:ba|z|da|k)?sh\b|\beval\b|\benv\b|\s-[a-zA-Z]*F|--file|--body-file")
@@ -217,6 +300,10 @@ def load_cmd_dirs():
     return None
 
 
+# Set (non-empty) when the walker saw a real `git commit`, wrapper bodies included.
+_WALK_FOUND_COMMIT = []
+
+
 def walked_texts(cmd, cwd):
     """[(kind, text)] judged in addition to the flat scan (a variable message, a
     message inside a wrapper body); also fills _FILE_DIRS for relative files
@@ -232,6 +319,8 @@ def walked_texts(cmd, cwd):
         is_pr = e["kind"] == "gh" and e["args"][:1] == ["pr"] and e["args"][1:2] and e["args"][1] in GH_SUBCMDS
         if not (is_commit or is_pr):
             continue
+        if is_commit:
+            _WALK_FOUND_COMMIT.append(True)
         args = [mod.subst(a, env) for a in e["args"]]
         where = e["dir"] if e["state"] == "known" else None
         if e["depth"] == 0:
@@ -245,7 +334,7 @@ def walked_texts(cmd, cwd):
             else:
                 gh_pr_texts(["gh"] + e["args"], note)
             for p in rec:
-                if not os.path.isabs(p):
+                if p != "-" and not os.path.isabs(p):
                     dirs.setdefault(p, set()).add(where)
             if args == e["args"]:
                 continue
@@ -267,6 +356,8 @@ def walked_texts(cmd, cwd):
 
 
 def _read(q, is_commit, shown):
+    if shown == "-" and _STDIN_TEXT is not None:
+        return _STDIN_TEXT
     try:
         with open(q, encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -286,13 +377,28 @@ def main():
     except (ValueError, AttributeError):
         note("malformed hook input; allowing")
         allow()  # malformed input: fail open (this used to end in a traceback)
-    is_commit = "git" in cmd and "commit" in cmd
+    global _STDIN_TEXT
+    maybe_commit = "git" in cmd and "commit" in cmd
     is_pr = "gh" in cmd and "pr" in cmd
-    if not is_commit and not is_pr:
+    if not maybe_commit and not is_pr:
         allow()
-    try:
-        toks = shlex.split(cmd)
-    except ValueError:
+    stripped, bodies = split_heredocs(cmd)
+    if bodies:
+        _STDIN_TEXT = "\n".join(bodies)
+    # Tokens: the whole line; with a here-document and no substitution, the line
+    # without the bodies (words inside a body must not be read as options, and an
+    # apostrophe in a body must not break the quoting).
+    toks = None
+    attempts = [cmd]
+    if bodies and "$(" not in cmd and "`" not in cmd:
+        attempts.insert(0, stripped.replace("\n", " ; "))
+    for text in attempts:
+        try:
+            toks = shlex.split(text)
+            break
+        except ValueError:
+            continue
+    if toks is None:
         allow()  # fail open on unparseable shell, as before
 
     extra = []
@@ -306,6 +412,9 @@ def main():
     def hit(texts):
         return any(pat.search(m or "") for m in texts for pat in ATTRIBUTION)
 
+    commits = commit_arg_lists(toks) if maybe_commit else []
+    is_commit = bool(commits) or bool(_WALK_FOUND_COMMIT)
+
     if not is_commit:
         if hit(gh_pr_texts(toks)):
             deny(DENY_MENTION_PR)
@@ -313,10 +422,9 @@ def main():
             deny(DENY_MENTION_PR)
         allow()
 
-    msgs = commit_texts(toks)
-
-    if any(pat.search(m or "") for m in msgs for pat in ATTRIBUTION):
-        deny(DENY_MENTION)
+    for args in commits:
+        if hit(commit_texts(args)):
+            deny(DENY_MENTION)
     if hit(gh_pr_texts(toks)):
         deny(DENY_MENTION_PR)
     if hit(m for k, m in extra if k == "commit"):

@@ -13,6 +13,14 @@
 # Code/diff/tool-output content is excluded from the count by stripping
 # fenced ``` code blocks before measuring length, per the cap's own rule.
 #
+# Headless runs are exempt: a session whose entrypoint is exactly "sdk-cli" or
+# "sdk-ts" (claude -p and the SDKs) has no reader to apologise to, and the
+# forced apology turn would become the job's output. The entrypoint is read from
+# CLAUDE_CODE_ENTRYPOINT in the hook's environment, else from the first records
+# of the transcript (each carries an "entrypoint" field). An allow-list, never
+# "anything but cli": cli, claude-desktop, claude-vscode, a missing or an
+# unknown value all keep the cap.
+#
 # Long-reply approvals (written by reply-cap-prompt.sh) are honoured: a one-shot
 # approval allows this reply and is removed (also when the reply was short); a
 # session-long approval allows and stays until "limit on".
@@ -35,6 +43,17 @@ if ! source "$_dir/_reply-cap-common.sh" 2>/dev/null; then
   reply_cap_state() { echo none; }
   reply_cap_clear() { :; }
 fi
+
+entrypoint="${CLAUDE_CODE_ENTRYPOINT:-}"
+if [ -z "$entrypoint" ]; then
+  _tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty | strings' 2>/dev/null)
+  if [ -n "$_tp" ] && [ -f "$_tp" ]; then
+    entrypoint=$(head -n 40 "$_tp" 2>/dev/null | jq -R -r 'try (fromjson | select(type=="object") | .entrypoint // empty | strings) catch empty' 2>/dev/null | head -n 1)
+  fi
+fi
+case "$entrypoint" in
+  sdk-cli|sdk-ts) exit 0 ;;
+esac
 
 sid=$(printf '%s' "$input" | jq -r '.session_id // empty | strings' 2>/dev/null)
 sdir=$(printf '%s' "$input" | jq -r '.scratchpad_dir // empty | strings' 2>/dev/null)

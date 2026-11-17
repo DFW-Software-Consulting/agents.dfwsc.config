@@ -6,7 +6,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `ai-code-agents/` : per-tool configuration (below).
 - `engineering-principles/` : the SOP and the work issue and PR templates.
 - `setup-agent-configs.sh` : creates symlinks from a tool's config directory to files in this repository. Targets: claude, claude-personal, opencode, codex, gemini, hermes, plannotator, all (all does not link gemini).
-- OpenCode's `global.opencode.json` takes infrastructure values from environment variables (`{env:SUPABASE_MCP_PROJECT_REF}`, `{env:BRAIN_MCP_URL}`, `{env:SUPABASE_ACCESS_TOKEN}`) instead of literals; `claude/settings.json` uses `<your-project-ref>`-style placeholders in its prose.
+- OpenCode's `global.opencode.json` takes infrastructure values from environment variables (`{env:SUPABASE_MCP_PROJECT_REF}`, `{env:BRAIN_MCP_URL}`, `{env:SUPABASE_ACCESS_TOKEN}`) instead of literals; `claude/settings.json` uses `<your-project-ref>`-style placeholders in its prose. Real identifiers are never committed; the same goes for the private schema card read by brain-schema-hint.
 - `opencode.json`, `README.md` : an OpenCode config file and the repo overview.
 
 ## ai-code-agents/
@@ -25,6 +25,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `opencode`, `codex` and `gemini` link their own files into the matching tool directories.
 - `hermes` links nothing; it prints the `skills.external_dirs` entry to add.
 - The script refuses to replace an existing real directory.
+- Live sessions read these from the main worktree through whole-directory links (hooks-shipping.md), not from the primary checkout.
 - It does not link `hooks/`, `local-hooks/` or `personal-hooks/`. How those reach a live session is in hooks-shipping.md.
 
 ## Claude directory notes

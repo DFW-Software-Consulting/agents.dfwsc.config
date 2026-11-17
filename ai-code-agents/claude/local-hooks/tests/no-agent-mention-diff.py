@@ -14,16 +14,15 @@ change it falls under:
   a  a git commit whose standard input (-F -, --file=-, /dev/stdin) provably
      comes from exactly one here-document: the body is judged, so the clean
      run is allowed and the crediting run is denied;
-  b  a -F that provably belongs to another program (gh api -F body=@f, a -F
-     in a here-document body after no git or commit word) no longer counts
-     as an unreadable commit message file; there is no commit message in it,
-     so both runs may be allowed;
   c  a readable message file named with shell punctuation glued to it (`f;`,
-     `f)`, a backtick): the file is read, so the clean run is allowed and the
-     crediting run is denied;
+     `f)`, a backtick) and named nowhere else on the line: the file is read,
+     so the clean run is allowed and the crediting run is denied;
   e  a message file written on the same line by `cat > f <<'EOF'` before a
      plain `git commit -F f`: the body is judged, clean allowed, crediting
      denied.
+There is no exception for another program's -F: on a line holding both words
+it is denied exactly as before, and so is every spelling of a line that may
+redefine a command name (eval, source, PATH, hash, alias, functions).
 Every listed exception must still differ, so the list stays exact. STRICTER
 lists the runs the current hook denies and the baseline allowed (d: a crediting
 here-document body or --trailer value; s: a crediting body on /dev/stdin or
@@ -78,9 +77,7 @@ EXCEPTIONS = {
     '2:hd-delim-space': 'a',
     '2:hd-tab-quoted': 'a',
     '2:hd-then-more': 'a',
-    '2:hd-trailer': 'a',
     '2:hd-trailing-ws-delim': 'a',
-    '2:hd-two-commits': 'a',
     '3:x-hd-aF': 'a',
     '3:x-hd-after-cd': 'a',
     '3:x-hd-and-m': 'a',
@@ -92,47 +89,70 @@ EXCEPTIONS = {
     '3:x-hd-in-brace': 'a',
     '3:x-hd-in-subshell': 'a',
     '3:x-hd-redir-out': 'a',
-    '3:x-hd-shell': 'a',
     '3:x-hd-then-push': 'a',
-    # b
-    '1:n-grep-credit': 'b',
-    '1:n-ls-after-commit': 'b',
-    '3:x-awk': 'b',
-    '3:x-cat-body': 'b',
-    '3:x-gh-api': 'b',
-    '3:x-gh-api-var': 'b',
-    '3:x-gh-reads-credit': 'b',
-    '3:x-grep-qF': 'b',
-    '3:x-pg-dump': 'b',
-    '3:x-subst-gh': 'b',
-    '3:x-tail-F': 'b',
+    '4:r1:a-amend': 'a',
+    '4:r1:a-dash-tabs': 'a',
+    '4:r1:a-delim-inside': 'a',
+    '4:r1:a-hd-2to1': 'a',
+    '4:r1:a-hd-C-dir': 'a',
+    '4:r1:a-hd-in-subshell': 'a',
+    '4:r1:a-hd-redir-out': 'a',
+    '4:r1:a-m-and-F': 'a',
+    '4:r1:a-m-and-F2': 'a',
+    '4:r1:a-msgfile-in-hd-cred': 'a',
+    '4:r1:a-q-delim-expand': 'a',
+    '4:r2:f-git-P': 'a',
+    '4:r2:f-git-dir': 'a',
+    '4:r2:f-git-workdir': 'a',
+    '4:r2:f-trap': 'a',
+    '4:r2:f-var-assign': 'a',
+    '4:r2:x-delim-ansic': 'a',
+    '4:r2:x-delim-bs': 'a',
+    '4:r2:x-delim-cr': 'a',
+    '4:r2:x-delim-lead-space': 'a',
+    '4:r2:x-delim-lead-tab-nodash': 'a',
+    '4:r2:x-delim-lower': 'a',
+    '4:r2:x-delim-prefix': 'a',
+    '4:r2:x-delim-quoted-space': 'a',
+    '4:r2:x-delim-space-after-op': 'a',
+    '4:r2:x-delim-split-quote': 'a',
+    '4:r2:x-delim-trailing-space': 'a',
+    '4:r2:x-delim-trailing-tab': 'a',
+    '4:r2:x-hd-and-then-cmd-on-opline': 'a',
+    '4:r2:x-hd-bs-nl-delim': 'a',
+    '4:r2:x-hd-dash-tab-space': 'a',
+    '4:r2:x-hd-heredoc-after-semi': 'a',
+    '4:r2:x-hd-semi-then-hd2': 'a',
+    '4:r2:x-hd-string-looks': 'a',
+    '4:r2:x-hd-subshell': 'a',
     # c
-    '1:backtick+F': 'c',
     '1:brace+F': 'c',
-    '1:for+F': 'c',
     '1:if+F': 'c',
-    '1:subst+F': 'c',
-    '2:F-bg': 'c',
     '2:F-brace': 'c',
     '2:F-brace-eq': 'c',
-    '2:F-brace-glued': 'c',
-    '2:F-bt': 'c',
-    '2:F-case': 'c',
-    '2:F-for': 'c',
     '2:F-glued-and': 'c',
     '2:F-glued-pipe': 'c',
     '2:F-glued-semi': 'c',
     '2:F-if': 'c',
     '2:F-paren': 'c',
-    '2:F-subst': 'c',
-    '3:x-glue-case': 'c',
     '3:x-glue-redir': 'c',
     '3:x-glue-semi': 'c',
+    '4:r1:c-sibling4': 'c',
+    '4:r1:c-sibling5': 'c',
+    '4:r1:c-sibling6': 'c',
+    '4:r1:c-sibling8': 'c',
+    '4:r2:g-and': 'c',
+    '4:r2:g-or': 'c',
+    '4:r3:probe1-15': 'c',
     # e
     '2:hd-cat-file-then-F': 'e',
     '3:x-written': 'e',
     '3:x-written-abs': 'e',
     '3:x-written-order': 'e',
+    '4:r1:e-commit-M': 'e',
+    '4:r1:e-git-add-hook': 'e',
+    '4:r1:e-plain': 'e',
+    '4:r1:e-pre-edit': 'e',
 }
 STRICTER = {
     ('1:hd-devstdin', 'credit'): 's',
@@ -269,6 +289,41 @@ KNOWN_GAPS = {
     '2:unlexable-cat',
     '2:unlexable-echo',
     '3:x-glob-cmd',
+    '4:r1:a-stdin-dev',
+    '4:r1:a-stdin-dev-fd0',
+    '4:r1:b-GIT-EXEC',
+    '4:r1:b-brace-expansion',
+    '4:r1:b-busybox-sh',
+    '4:r1:b-cmdsub-whole',
+    '4:r1:b-file-abbrev',
+    '4:r1:b-file-abbrev-eq',
+    '4:r1:b-find-exec2',
+    '4:r1:b-gh-arg-commit',
+    '4:r1:b-gh-git-arg',
+    '4:r1:b-ghalias',
+    "4:r1:b-gi''t",
+    '4:r1:b-gtcmd',
+    '4:r1:b-pathchg',
+    '4:r1:b-pathexport',
+    '4:r1:b-ssh',
+    '4:r1:b-watch',
+    '4:r1:e-devnull',
+    '4:r3:probe1-01',
+    '4:r3:probe1-07',
+    '4:r3:probe1-08',
+    '4:r3:probe1-09',
+    '4:r3:probe1-10',
+    '4:r3:probe1-12',
+    '4:r3:probe2-10',
+    '4:r3:probe2-14',
+    '4:r3:probe3-00',
+}
+# Exceptions whose crediting text is not part of the message: it sits after the
+# here-document's real delimiter (the shell runs it as a command), so both runs
+# are allowed.
+OUTSIDE_MESSAGE = {
+    "4:r1:a-delim-inside", "4:r2:x-delim-ansic", "4:r2:x-delim-quoted-space",
+    "4:r2:x-delim-space-after-op", "4:r2:x-delim-split-quote", "4:r2:x-hd-subshell",
 }
 
 
@@ -328,6 +383,23 @@ def jobs_for(files):
     return jobs
 
 
+def setup4(root):
+    """The work directory of CORPUS4 (the review's own layout)."""
+    work = os.path.join(root, "work4")
+    os.makedirs(os.path.join(work, "sub"))
+    for name, text in (("credit.txt", CREDIT), ("clean.txt", CLEAN), ("clean.txt;", CREDIT), ("c.txt", CLEAN)):
+        with open(os.path.join(work, name), "w") as f:
+            f.write(text + "\n")
+    os.symlink("credit.txt", os.path.join(work, "link.txt"))
+    return work
+
+
+def jobs4(work):
+    return [("4:" + key, kind, tmpl.replace("{M}", msg), work)
+            for key, tmpl in corpus.CORPUS4.items()
+            for kind, msg in (("credit", CREDIT), ("clean", CLEAN))]
+
+
 def pin_check():
     """Errors when the pinned copy is not the hook this change started from."""
     errs = []
@@ -352,7 +424,7 @@ def flags_check():
     nam = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(nam)
     errs, n = [], 0
-    for d in (corpus.CORPUS1, corpus.CORPUS2, corpus.CORPUS3):
+    for d in (corpus.CORPUS1, corpus.CORPUS2, corpus.CORPUS3, corpus.CORPUS4):
         for key, tmpl in d.items():
             try:
                 toks = shlex.split(tmpl.replace("{M}", CREDIT))
@@ -371,9 +443,10 @@ def main():
     dump = "--dump" in sys.argv
     root, work, files = setup()
     base = os.path.join(root, "base", "hooks", "no-agent-mention.py")
-    jobs = jobs_for(files)
+    work4 = setup4(root)
+    jobs = [j + (work,) for j in jobs_for(files)] + jobs4(work4)
     with ThreadPoolExecutor(max_workers=8) as ex:
-        res = list(ex.map(lambda j: (j, run(base, j[2], work), run(NEW, j[2], work)), jobs))
+        res = list(ex.map(lambda j: (j[:3], run(base, j[2], j[3]), run(NEW, j[2], j[3])), jobs))
     shutil.rmtree(root, ignore_errors=True)
     rows = {}
     for (key, kind, cmd), old, new in res:
@@ -402,13 +475,14 @@ def main():
                 differs.add(key)
                 if tag is None:
                     bad.append("baseline denies, current allows (not a listed exception)")
-                elif tag in "ace" and kind != "clean":
+                elif tag in "ace" and kind != "clean" and r["credit"][2] != r["clean"][2] and key not in OUTSIDE_MESSAGE:
                     bad.append("exception %s: only the clean run may be allowed" % tag)
             if old == "allow" and new == "deny":
                 stricter.add((key, kind))
                 if (key, kind) not in STRICTER:
                     bad.append("current denies, baseline allows (not listed in STRICTER)")
-            if tag in ("a", "c", "e") and new != ("allow" if kind == "clean" else "deny"):
+            same = r["credit"][2] == r["clean"][2] or key in OUTSIDE_MESSAGE  # no credit in the message
+            if tag in ("a", "c", "e") and new != ("allow" if kind == "clean" or same else "deny"):
                 bad.append("exception %s: clean run must be allowed and crediting run denied" % tag)
             if kind == "credit" and (old, new) == ("allow", "allow"):
                 gaps.add(key)
@@ -427,10 +501,10 @@ def main():
     for e in errors:
         print(e)
     failed = len(errors)
-    sizes = (len(corpus.CORPUS1), len(corpus.CORPUS2), len(corpus.CORPUS3))
+    sizes = (len(corpus.CORPUS1), len(corpus.CORPUS2), len(corpus.CORPUS3), len(corpus.CORPUS4))
     old_d = sum(1 for _j, o, _n in res if o == "deny")
     new_d = sum(1 for _j, _o, n in res if n == "deny")
-    print("corpus: %d + %d + %d spellings, %d runs per hook; baseline denies %d, current denies %d; "
+    print("corpus: %d + %d + %d + %d spellings, %d runs per hook; baseline denies %d, current denies %d; "
           "exceptions %d, stricter %d, known gaps %d" % (sizes + (len(jobs), old_d, new_d, len(EXCEPTIONS),
                                                          len(STRICTER), len(KNOWN_GAPS))))
     if table:

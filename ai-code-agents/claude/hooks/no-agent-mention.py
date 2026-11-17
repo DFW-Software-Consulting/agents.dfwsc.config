@@ -40,18 +40,23 @@ file (it used to be read as a message). Read-only.
 Message sources (see "Where a commit message file comes from" below): the same
 lines are judged and the same words scanned, but an unreadable -F/--file value
 is no longer denied when the line, read with the walker's lexer, shows it is
-(a) standard input that provably comes from one here-document (the body is
-judged), (b) another program's option (`gh api -F body=@f`), (c) a readable
-file with shell punctuation glued to its name, or (e) a file written by
-`cat > f <<'EOF'` just before a plain `git commit -F f`. Every here-document
-body on a judged line and every --trailer value is judged as well. Without the
-walker, or on any trouble, files are read exactly as before.
+(a) standard input of a plain `git commit` that provably comes from one
+here-document (the body is judged), (c) a readable file with shell punctuation
+glued to its name, or (e) a file written by `cat > f <<'EOF'` just before a
+plain `git commit -F f`. Another program's -F (`gh api -F body=@f`) on a line
+holding both words is still denied, as before. None of the three applies when
+anything before the commit may redefine a command or change how git builds the
+message (REDEFINE), when an earlier command is not on a short read-only list,
+or past MAX_LINE / MAX_VALUES. Every here-document body on a judged line and
+every --trailer value is judged as well. Without the walker, or on any
+trouble, files are read exactly as before.
 """
 import bisect
 import json
 import os
 import re
 import shlex
+import stat
 import sys
 
 sys.dont_write_bytecode = True  # no __pycache__ beside the hooks
@@ -292,31 +297,42 @@ def _read(q, is_commit, shown):
 # the words scanned are the ones above. A value the flat scan cannot read is
 # denied as before unless the line, read like the shell reads it, shows that
 # every place naming it is one of:
-#   a  a git commit reading standard input (-, /dev/stdin, /dev/fd/0) that
+#   a  standard input (-, /dev/stdin, /dev/fd/0) of a plain `git commit` that
 #      provably comes from exactly one here-document (its body is judged);
-#   b  an option of another program: the command is a program on PATH, not
-#      defined on the line, and no word naming git or commit and no expansion
-#      comes before the -F (`gh api -F body=@f`, `awk -F:`, the same inside a
-#      here-document body or a substitution);
-#   c  the same name with shell punctuation glued to it (`f;`, `f)`, a
-#      backtick), when the name itself is readable (its contents are judged);
+#   c  a readable file named with shell punctuation glued to it (`f;`, `f)`,
+#      a backtick) that nothing else on the line names (its contents are
+#      judged);
 #   e  a file written on the same line by `cat > f <<'EOF'` before a plain
 #      `git commit -F f`, on a line of nothing but that, `git add` and
 #      `git commit`, joined by `;`, `&&` or new lines (the body is judged).
-# When it is unclear whose option a -F is, it is the commit's. Every
-# here-document body on a judged line and every --trailer value is judged too.
+# Every -F counts as the commit's, whatever program it follows: another
+# program's -F on a line holding both words is still denied, as before. None of
+# the three applies (files are read exactly as before) when a command before
+# the commit may change what a name runs or how git builds the message
+# (REDEFINE), when an earlier command is not a cd, git add, git status, a cat
+# here-document writer or a read-only command (_settle), when the line is longer
+# than MAX_LINE, or when it names more than MAX_VALUES message files. Only
+# regular files are opened. Every here-document body on a
+# judged line and every --trailer value is judged too.
 STDIN_NAMES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
 GLUE = set(";&|)<>`")
 SEP_OPS = {";", "&&", "||", "|", "|&", "&", "(", ")"}
 LEAD_WORDS = {"{", "}", "!", "if", "then", "elif", "else", "do", "while", "until", "time"}
 DIR_CHANGE = re.compile(r"\b(?:cd|pushd|popd)\b|\s-C\b|--chdir|--git-dir|--work-tree|GIT_DIR|GIT_WORK_TREE")
 MAX_SRC_DEPTH = 8
-# A word that may name git: a piece of it (split at / = : , blanks and the
-# like) that starts with "git" (git, /usr/lib/git-core/git-commit, x=git).
-GIT_PIECE = re.compile(r"(?:^|[^a-z0-9_.+-])git")
+MAX_LINE = 65536
+MAX_VALUES = 50
 FILE_OPTION = re.compile(r"-[A-Za-z'\"\\]*F|--['\"\\]*f")
-VAR_REF = re.compile(r"\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
-PLAIN_VALUE = re.compile(r"^[A-Za-z0-9_./:@%+,=-]*$")
+# Anything that can redefine or redirect what a command name means or runs:
+# eval, source and `.`, alias, a function definition (`name()`, `()`,
+# `function`, zsh's functions/aliases arrays), hash, command, builtin, exec,
+# enable, and PATH, BASH_ENV or ENV (assigned, exported or otherwise named);
+# and what can change how git builds the message after reading it: export,
+# git config, hooks, an editor, HOME or XDG_CONFIG_HOME, a GIT_ variable.
+REDEFINE = re.compile(
+    r"\b(?:eval|source|alias|aliases|unalias|function|functions|hash|command|builtin|exec|enable"
+    r"|PATH|BASH_ENV|ENV|export|config|hooks|hooksPath|EDITOR|VISUAL|HOME|XDG_CONFIG_HOME)\b"
+    r"|\bGIT_\w|\(\s*\)|(?:^|[\s;&|({`])\.(?=[\s;&|)]|$)")
 _CMD_DIRS = []
 
 
@@ -370,50 +386,24 @@ def trailer_texts(toks):
     return out
 
 
-def _unquoted_special(raw):
-    """Does the written word hold an expansion, a glob or a brace outside quotes?"""
-    i, dq, n = 0, False, len(raw)
-    while i < n:
-        c = raw[i]
-        if c == "\\":
-            i += 2
-            continue
-        if c == "'" and not dq:
-            j = raw.find("'", i + 1)
-            i = n if j < 0 else j + 1
-            continue
-        if c == '"':
-            dq = not dq
-        elif c in "$`" or (not dq and c in "*?[{"):
-            return True
-        i += 1
-    return False
-
-
-def _on_path(word):
-    """A program file: a path to one, or a name found on PATH."""
-    import shutil
-    try:
-        if "/" in word:
-            return os.path.isfile(word) and os.access(word, os.X_OK)
-        return shutil.which(word) is not None
-    except Exception:
-        return False
-
-
 SAFE_GIT_OPTS = {"--no-pager", "-P", "--no-replace-objects", "--literal-pathspecs", "--no-optional-locks"}
 
 
 def plain_commit(ws):
     """`git [-C dir] commit ...` with nothing that could change the message
-    after it is read: no wrapper before git and no assignment of a git, editor,
-    loader or PATH variable, no -c/--config-env or alias, no -e/--edit (an
-    editor would run)."""
+    after it is read: no wrapper before git, no assignment of a git, editor,
+    loader, PATH, HOME or XDG variable, no -c/--config-env or alias, no
+    expansion in any word; among the commit's options no -e/--edit (an editor
+    would run) and none of -c, -C, -t and the long options starting --c, --e,
+    --fix, --r, --sq, --t (reuse, template, fixup, squash, trailer, ...), whose
+    message parts the flat scan may not see."""
+    if any("$" in w or "`" in w for w in ws):
+        return False
     while ws and re.match(r"^[A-Za-z_]\w*=", ws[0]):
-        if re.search(r"GIT|EDITOR|VISUAL|^LD_|^PATH=", ws[0].split("=", 1)[0].upper() + "="):
+        if re.search(r"GIT|EDITOR|VISUAL|^LD_|^PATH=|HOME|XDG", ws[0].split("=", 1)[0].upper() + "="):
             return False
         ws = ws[1:]
-    if not ws or os.path.basename(ws[0]) != "git":
+    if not ws or not _real_git(ws[0]):
         return False
     i = 1
     while i < len(ws) and ws[i] != "commit":
@@ -424,24 +414,51 @@ def plain_commit(ws):
         i += 1
     if i >= len(ws):
         return False
-    return not any(re.match(r"^-[a-zA-Z]*e", w) or w.startswith("--ed") for w in ws[i + 1:])
+    return not any(re.match(r"^-[a-zA-Z]*[ectC]", w)
+                   or w.startswith(("--e", "--t", "--c", "--r", "--fix", "--sq"))
+                   for w in ws[i + 1:])
+
+
+READERS = {"head", "tail", "cat", "grep", "wc", "echo", "true", "pwd", "ls"}
+
+
+def _lead(ws):
+    i = 0
+    while i < len(ws) and ws[i] in LEAD_WORDS:
+        i += 1
+    return ws[i:]
+
+
+def _real_git(word):
+    """The bare word git, or a path to the same file as the git on PATH."""
+    if word == "git":
+        return True
+    if "/" not in word or os.path.basename(word) != "git":
+        return False
+    import shutil
+    try:
+        found = shutil.which("git")
+        return bool(found) and os.path.samefile(word, found)
+    except OSError:
+        return False
 
 
 class _Sources:
-    """The line read like the shell reads it: every -F/--file option with its
-    owner, every here-document body, and the texts that failed to parse."""
+    """The line read like the shell reads it: every -F/--file value (each one
+    the commit's), every here-document body, and the texts that failed to parse."""
 
     def __init__(self, mod, cmd):
         self.mod = mod
-        self.occ = []        # dicts: value, owner ("commit"|"other"), body, written
+        self.cmd = cmd
+        self.occ = []        # dicts: value, body (stdin here-document), written (item e)
         self.bodies = []     # every here-document body
         self.opaque = []     # texts that could not be read
-        self.names = set()   # functions and aliases defined on the line
-        self._pending = []   # (occurrence, words before the option, command word, variables)
         self.top_segs = []   # the commands of the line itself, for item e
+        self.code_end = 0    # top-level commands up to the end of the last settled commit
         self._analyze(cmd, 0)
-        for o, before, word, env in self._pending:
-            o["owner"] = "other" if self._foreign(before, word, env) else "commit"
+        self.by_value = {}
+        for j, o in enumerate(self.occ):
+            self.by_value.setdefault(o["value"], []).append(j)
 
     def _lex(self, text):
         mod = self.mod
@@ -490,15 +507,6 @@ class _Sources:
             return
         for d in docs:
             self.bodies.append(d["body"])
-        for i, (k, w) in enumerate(toks):
-            if k == "w" and i + 2 < len(toks) and toks[i + 1] == ("o", "(") and toks[i + 2] == ("o", ")"):
-                self.names.add(w)
-            if k == "w" and w in ("function", "alias") and i + 1 < len(toks) and toks[i + 1][0] == "w":
-                for k2, w2 in toks[i + 1:]:
-                    if k2 == "o":
-                        break
-                    self.names.add(w2.split("=", 1)[0])
-        raw_end = starts[1:] + [len(t)]
         hd = 0
         segs, cur, prev = [], [], None
         for i, (k, w) in enumerate(toks):
@@ -525,24 +533,12 @@ class _Sources:
             while lead < len(ws) and ws[lead] in LEAD_WORDS:
                 lead += 1
             stdin = self._stdin_doc(t, starts, toks, idx, prev, seg_hd) if plain_commit(ws[lead:]) else None
-            env = {}
-            if depth == 0 and idx:
-                try:
-                    env = self.mod.certain_env(toks, idx[0])
-                except Exception:
-                    env = {}
             occs = []
-            for fi, value in flags:
-                if fi < lead:
-                    continue
-                before = [(ws[j], t[starts[words[j]]:raw_end[words[j]]]) for j in range(lead, fi)]
-                word = next((w for w in ws[lead:fi] if not re.match(r"^[A-Za-z_]\w*=", w)), None)
-                o = {"value": value, "owner": None,
-                     "body": stdin["body"] if (value in STDIN_NAMES and stdin) else None,
-                     "written": False}
+            for _fi, value in flags:
+                o = {"value": value, "written": False, "settled": False,
+                     "body": stdin["body"] if (value in STDIN_NAMES and stdin) else None}
                 self.occ.append(o)
                 occs.append(o)
-                self._pending.append((o, before, word, env))
             if depth == 0:
                 self.top_segs.append((idx, prev, ws, seg_hd, occs))
         for s in inner:
@@ -550,7 +546,68 @@ class _Sources:
         for d in docs:
             self._analyze(d["body"], depth + 1)
         if depth == 0:
+            self._settle(toks)
             self._written(toks)
+
+    def _settle(self, toks):
+        """Mark the -F places of a plain git commit on the line itself that nothing
+        before it (or beside it in its pipeline) can have changed: every earlier
+        command is a cd, git add, git status, a cat here-document writer or a
+        read-only command, with no expansion and no redirection except to
+        /dev/null or another descriptor; nothing runs in the background; the
+        commands after it in its pipeline only read."""
+        segs = self.top_segs
+        for n, (idx, prev, ws, seg_hd, occs) in enumerate(segs):
+            if not occs or prev in ("|", "|&") or not plain_commit(_lead(ws)):
+                continue
+            if any(segs[m][1] == "&" for m in range(1, n + 1)):
+                continue
+            if not all(self._safe_before(toks, segs[m]) for m in range(n)):
+                continue
+            k, fine = n + 1, True
+            while k < len(segs) and segs[k][1] in ("|", "|&"):
+                fine = fine and self._reader(toks, segs[k])
+                k += 1
+            if not fine or (k < len(segs) and segs[k][1] == "&"):
+                continue
+            self.code_end = max(self.code_end, k)
+            for o in occs:
+                o["settled"] = True
+
+    @staticmethod
+    def _plain_words(toks, idx):
+        return all("$" not in toks[i][1] and "`" not in toks[i][1] for i in idx if toks[i][0] == "w")
+
+    def _reader(self, toks, seg):
+        idx, _prev, ws = seg[0], seg[1], _lead(seg[2])
+        return (self._plain_words(toks, idx) and not any(toks[i][0] == "o" for i in idx)
+                and ws[:1] and ws[0] in READERS)
+
+    def _safe_before(self, toks, seg):
+        idx, ws = seg[0], _lead(seg[2])
+        if not idx or not ws:
+            return True
+        if not self._plain_words(toks, idx):
+            return False
+        seq = [toks[i] for i in idx]
+        ops = [(j, w) for j, (k, w) in enumerate(seq) if k == "o"]
+        if ws[0] == "cat" and sorted(w for _j, w in ops) in (["<<", ">"], ["<<", ">|"]) and len(ws) == 3:
+            j = next(j for j, w in ops if w != "<<")
+            tgt = seq[j + 1][1] if j + 1 < len(seq) else ""
+            real = os.path.realpath(_at(tgt)) if tgt else ""
+            return bool(tgt) and ".git" not in tgt and "/.git/" not in real + "/"
+        for j, w in ops:
+            nxt = seq[j + 1][1] if j + 1 < len(seq) and seq[j + 1][0] == "w" else ""
+            if not ((w in (">", ">>") and nxt == "/dev/null") or (w == ">&" and (nxt.isdigit() or nxt == "-"))):
+                return False
+        if ws[0] == "cd" or ws[0] in READERS:
+            return True
+        if ws[0] != "git":
+            return False
+        rest = ws[1:]
+        if rest[:1] == ["-C"]:
+            rest = rest[2:]
+        return rest[:1] in (["add"], ["status"])
 
     @staticmethod
     def _fd_before(t, pos):
@@ -577,27 +634,6 @@ class _Sources:
                 return None
         return seg_hd[0]
 
-    def _foreign(self, before, word, env):
-        """Provably another program's option: a literal command that is not
-        defined on the line, and no word before the option that names git or
-        commit or may expand to anything (a variable counts only when the
-        walker is certain of its plain value)."""
-        if word is None or word in self.names or not _on_path(word):
-            return False  # an alias or function from the shell's start-up files is never on PATH
-
-        def value(m):
-            v = env.get(m.group(1) or m.group(2))
-            return v if v is not None and PLAIN_VALUE.match(v) else m.group(0)
-        for w, raw in before:
-            if "$" in raw:
-                raw = VAR_REF.sub(value, raw)
-                w = VAR_REF.sub(value, w) + " " + raw
-            low = w.lower()
-            if (GIT_PIECE.search(low) or "commit" in low or _unquoted_special(raw)
-                    or w in self.names):
-                return False
-        return True
-
     def _written(self, toks):
         """Item e: `cat > f <<'EOF'` then `git commit -F f` on a line of nothing
         else than that, `git add` and `git commit`, joined by `;`, `&&` or new
@@ -621,7 +657,7 @@ class _Sources:
             if j + 1 >= len(seq) or seq[j + 1][0] != "w":
                 return
             tgt = seq[j + 1][1]
-            if not tgt or tgt in STDIN_NAMES or tgt.startswith(("/dev/", "/proc/")):
+            if not tgt or tgt in STDIN_NAMES or tgt.startswith(("/dev/", "/proc/")) or re.search(r"[*?\[{~]", tgt):
                 return
             writer = (n, tgt)
         if writer is None:
@@ -632,42 +668,52 @@ class _Sources:
                     if o["value"] == writer[1]:
                         o["written"] = True
 
-    def ok(self, o, readable):
-        if o["owner"] == "other":
-            return True
+    def code(self):
+        """What the REDEFINE guard reads: the words of every command of the line
+        up to the end of the last commit pipeline a rule may accept (commands
+        after it run after the message is read). Here-document bodies are not
+        commands here: only a message body or a `cat` writer may come before."""
+        return " ".join(w for seg in self.top_segs[:self.code_end] for w in seg[2])
+
+    def ok(self, o, readable, glued):
+        if not o["settled"]:
+            return False
         if o["value"] in STDIN_NAMES:
             return o["body"] is not None
-        return o["written"] or readable(o["value"])
+        if o["written"]:
+            return True
+        # c: the name itself must be readable, and named nowhere else on the line
+        return glued and readable(o["value"]) and self.cmd.count(o["value"]) == len(self.by_value[o["value"]])
 
     def explains(self, flat, readable):
         """Is every unreadable flat value accounted for by places that are each
-        provably fine (a, b, c, e)? flat: the values in flat-scan order."""
+        provably fine (a, c, e)? flat: the values in flat-scan order. Linear in
+        the total length of the values."""
         if any(FILE_OPTION.search(x) for x in self.opaque):
             return False  # a text that could not be read names a file
-        pool = list(range(len(self.occ)))
+        left = {v: len(js) for v, js in self.by_value.items()}
         for v in flat:
-            cands = [j for j in range(len(self.occ)) if self._matches(v, self.occ[j]["value"])]
-            if not cands or not all(self.ok(self.occ[j], readable) for j in cands):
+            exact = v in self.by_value
+            keys = [v] if exact else []
+            keys += [v[:i] for i in range(1, len(v)) if v[i] in GLUE and v[:i] in self.by_value]
+            if not keys:
                 return False
-            use = next((j for j in pool if j in cands and self.occ[j]["value"] == v), None)
-            if use is None:
-                use = next((j for j in pool if j in cands), None)
+            for w in keys:
+                if not all(self.ok(self.occ[j], readable, w != v) for j in self.by_value[w]):
+                    return False
+            use = next((w for w in keys if left[w] > 0), None)
             if use is None:
                 return False
-            pool.remove(use)
+            left[use] -= 1
         return True
-
-    @staticmethod
-    def _matches(v, w):
-        return v == w or (w != "" and v.startswith(w) and v[len(w)] in GLUE)
 
     def texts(self, readable_text):
         """Extra texts to judge: every here-document body and the contents of
-        each readable file a commit names."""
+        each readable file named as a message file."""
         out = list(self.bodies)
-        for o in self.occ:
-            if o["owner"] == "commit" and o["value"] not in STDIN_NAMES:
-                out.append(readable_text(o["value"]))
+        for v in self.by_value:
+            if v not in STDIN_NAMES:
+                out.append(readable_text(v))
         return out
 
 
@@ -677,27 +723,31 @@ _SOURCE_TEXTS = []  # filled by message_reader: bodies and files to judge as wel
 def message_reader(cmd, toks):
     """The read function for the flat scan: file_contents (deny when unreadable)
     unless the line shows every unreadable or standard-input value to be one of
-    the cases a, b, c, e above."""
+    the cases a, c, e above. Bounded: linear in the line, which is at most
+    MAX_LINE long with at most MAX_VALUES message files."""
+    def regular(w):
+        """A regular file that can be opened; a FIFO, device or directory is
+        never opened here."""
+        try:
+            if not stat.S_ISREG(os.stat(_at(w)).st_mode):
+                return False
+            with open(_at(w), "rb"):
+                return True
+        except (OSError, ValueError):
+            return False
+
     def readable(w):
         if not os.path.isabs(w) and w not in _FILE_DIRS and DIR_CHANGE.search(cmd):
             return False  # the command may run in another directory
-        try:
-            with open(_at(w), encoding="utf-8", errors="replace") as f:
-                f.read(1)
-            return True
-        except OSError:
-            return False
+        return regular(w)
 
-    def opens(w):
-        try:
-            with open(_at(w), encoding="utf-8", errors="replace"):
-                return True
-        except OSError:
-            return False
-
+    if len(cmd) > MAX_LINE:
+        return None
     flat = []
     commit_texts(toks, lambda p: flat.append(p) or "")
-    pending = [p for p in flat if p in STDIN_NAMES or not opens(p)]
+    if len(flat) > MAX_VALUES:
+        return None
+    pending = [p for p in flat if p in STDIN_NAMES or not regular(p)]
     if not pending and "<<" not in cmd:
         return None
     try:
@@ -706,7 +756,7 @@ def message_reader(cmd, toks):
             return None
         src = _Sources(mod, cmd)
         _SOURCE_TEXTS.extend(src.texts(lambda w: optional_file_contents(w) if readable(w) else ""))
-        if not pending or not src.explains(pending, readable):
+        if not pending or REDEFINE.search(src.code()) or not src.explains(pending, readable):
             return None
     except Exception:
         return None  # any trouble: read the files exactly as before

@@ -307,9 +307,9 @@ check "-F - piped and here-document denied" deny "$mention" "$(pr "$(hd 'echo x 
 check "-F - unquoted here-document with a substitution denied" deny "$mention" "$(pr $'git commit -F - <<EOF\n$(cat x)\nEOF')"
 check "-F - here-document with an editor run denied" deny "$mention" "$(pr "$(hd 'git -c core.editor=true commit -e -F -' 'fix parser')")"
 check "-F - with no here-document denied" deny "$mention" "$(pr 'git commit -F -')"
-check "gh api -F body=@missing beside a commit allowed" allow "$mention_gh" "$(pr 'git commit -m "fix parser" && gh api -X PATCH repos/o/r/pulls/1 -F body=@/nonexistent/b.md')"
-check "awk -F beside a commit allowed" allow "$mention" "$(pr "awk -F'|' '{print \$1}' x; git commit -m 'fix parser'")"
-check "-F in a here-document body after no git word allowed" allow "$mention_gh" "$(pr "$(hd 'cat > notes.md' 'gh api x -F body=@b.md')
+check "gh api -F body=@missing beside a commit denied (as before)" deny "$mention_gh" "$(pr 'git commit -m "fix parser" && gh api -X PATCH repos/o/r/pulls/1 -F body=@/nonexistent/b.md')"
+check "awk -F beside a commit denied (as before)" deny "$mention" "$(pr "awk -F'|' '{print \$1}' x; git commit -m 'fix parser'")"
+check "-F in a here-document body denied (as before)" deny "$mention_gh" "$(pr "$(hd 'cat > notes.md' 'gh api x -F body=@b.md')
 git commit -m 'fix parser'")"
 check "-F after a prose word (not a program on PATH) denied" deny "$mention_gh" "$(pr "$(hd 'cat > notes.md' 'call gh api -F body=@b.md')
 git commit -m 'fix parser'")"
@@ -317,7 +317,7 @@ check "-F after a git word is still the commit's: denied" deny "$mention" "$(pr 
 check "-F of a function defined on the line denied" deny "$mention" "$(pr 'f() { git commit "$@"; }; f -F /nonexistent/m.txt')"
 check "-F after an unknown variable denied" deny "$mention" "$(pr 'git commit -m ok && ssh h $X -F /nonexistent/m.txt')"
 check "glued name in a brace group, clean file allowed" allow "$mention" "$(pr "{ git commit -F $HOME/body-ok.md; }")"
-check "glued name in a substitution, crediting file denied" deny "$mention" "$(pr "echo \$(git commit -F $HOME/body-bad.md)")"
+check "glued name in a substitution, crediting file denied (no longer resolved)" deny "$mention" "$(pr "echo \$(git commit -F $HOME/body-bad.md)")"
 check "escaped glued name is another file: denied" deny "$mention" "$(pr "git commit -F $HOME/body-ok.md\\;")"
 check "file written by cat here-document then committed, clean allowed" allow "$mention" "$(pr "$(hd 'cat > m.txt' 'fix parser')
 git commit -F m.txt")"
@@ -328,6 +328,39 @@ git checkout -- m.txt; git commit -F m.txt")"
 check "crediting --trailer denied" deny "$mention" "$(pr 'git commit -m "fix parser" --trailer "Co-authored-by: Claude <x@y.z>"')"
 check "crediting here-document body on a commit line denied" deny "$mention" "$(pr "$(hd 'cat > notes.md' 'Generated with Claude Code')
 git commit -m docs")"
+# lines that may redefine what a command runs: no new rule applies
+for pre in "eval 'f() { :; }'; " 'alias g=git; ' 'f() { :; }; ' 'hash -p /bin/true awk; ' '. ./defs.sh; ' 'source defs.sh; ' \
+  'export PATH=/tmp/x:/usr/bin; ' 'PATH=/tmp/x:/usr/bin; ' 'command -v git; ' 'builtin true; ' 'exec 3>&-; ' 'enable -n echo; ' \
+  'BASH_ENV=x; ' 'git config core.hooksPath h; ' 'GIT_EDITOR=x; '; do
+  check "redefining line keeps the old reading: $pre" deny "$mention" "$(pr "${pre}$(hd 'git commit -F -' 'fix parser')")"
+done
+check "a function named git keeps the old reading" deny "$mention" "$(pr "git() { command git \"\$@\"; }
+$(hd 'git commit -F -' 'fix parser')")"
+check "a git binary that is not the git on PATH keeps the old reading" deny "$mention" "$(pr "$(hd '/tmp/nonexistent/git commit -F -' 'fix parser')")"
+check "an earlier command that may write the hooks keeps the old reading" deny "$mention" "$(pr "cp x .git/ho''oks/commit-msg; $(hd 'git commit -F -' 'fix parser')")"
+check "cd and git add before the commit still allowed" allow "$mention" "$(pr $'cd /tmp && git add -A && git commit -q -F - <<\'EOF\' 2>&1 | tail -3\nfix parser\nEOF')"
+# bounds: a long line of repeated message files and a named pipe must be denied quickly
+timed() {  # timed NAME LIMIT-SECONDS PAYLOAD-FILE
+  local name="$1" limit="$2" file="$3" t0 t1 out
+  t0=$(date +%s%N); out="$(timeout 60 python3 "$pyhook" < "$file")"; t1=$(date +%s%N)
+  local ms=$(( (t1 - t0) / 1000000 ))
+  if grep -q '"permissionDecision": *"deny"' <<<"$out" && [ "$ms" -lt $((limit * 1000)) ]; then
+    pass=$((pass + 1)); echo "ok   - $name (${ms} ms)"
+  else fail=$((fail + 1)); echo "FAIL - $name (${ms} ms, limit ${limit}s, output: ${out:0:80})"; fi
+}
+big="$HOME/big.json"
+python3 - "$big" <<'PYEOF'
+import json, sys
+cmd = "git commit -m 'Generated with Claude Code' " + "-F x " * 20000
+json.dump({"tool_name": "Bash", "tool_input": {"command": cmd}}, open(sys.argv[1], "w"))
+PYEOF
+timed "100 KB of repeated -F denied within 5 s" 5 "$big"
+fifo_dir="$(mktemp -d)"; mkfifo "$fifo_dir/ff"
+jq -n --arg c "git commit -F ff;" --arg d "$fifo_dir" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}' > "$HOME/fifo.json"
+timed "named pipe with glued punctuation denied within 5 s, never opened" 5 "$HOME/fifo.json"
+jq -n --arg c "git commit -F $fifo_dir/ff" '{tool_name:"Bash",tool_input:{command:("cd /tmp; " + $c + ";")}}' > "$HOME/fifo2.json"
+timed "named pipe by absolute path with glued punctuation denied within 5 s" 5 "$HOME/fifo2.json"
+rm -rf "$fifo_dir"
 # the differential corpus against the pinned copy of the hook as it was on main
 diff_out="$(python3 "$here/no-agent-mention-diff.py" 2>&1)"; diff_rc=$?
 if [ "$diff_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - differential: $(grep '^corpus:' <<<"$diff_out")"

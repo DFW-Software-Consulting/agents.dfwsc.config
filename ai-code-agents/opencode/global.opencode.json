@@ -218,7 +218,7 @@
         "-y",
         "@supabase/mcp-server-supabase@latest",
         "--read-only",
-        "--project-ref=ojdjvnvtuhzolcpqdmju"
+        "--project-ref={env:SUPABASE_MCP_PROJECT_REF}"
       ],
       "environment": {
         "SUPABASE_ACCESS_TOKEN": "{env:SUPABASE_ACCESS_TOKEN}"
@@ -239,7 +239,7 @@
     "supabase-oauth": {
       "type": "remote",
       "enabled": false,
-      "url": "https://mcp.supabase.com/mcp?project_ref=ojdjvnvtuhzolcpqdmju&read_only=true",
+      "url": "https://mcp.supabase.com/mcp?project_ref={env:SUPABASE_MCP_PROJECT_REF}&read_only=true",
       "oauth": {}
     },
     "playwright": {
@@ -267,7 +267,7 @@
     },
     "brain": {
       "type": "remote",
-      "url": "https://brain.craftdigital.dev/api/mcp",
+      "url": "{env:BRAIN_MCP_URL}",
       "enabled": true,
       "oauth": {},
       "timeout": 90000

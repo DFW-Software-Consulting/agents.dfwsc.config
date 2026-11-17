@@ -72,6 +72,10 @@ Add your API keys to your shell profile (`~/.bashrc` or `~/.zshrc`):
 ```bash
 export OPENROUTER_API_KEY=your-key-here
 # If using OpenCode Zen, connect via /connect inside OpenCode
+# Supabase MCP entries in global.opencode.json read the project ref from this variable
+export SUPABASE_MCP_PROJECT_REF=<your-project-ref>
+# Remote Brain MCP URL used by the "brain" entry in global.opencode.json
+export BRAIN_MCP_URL=<https://your-brain-host/api/mcp>
 ```
 
 If you did not run `./setup-agent-configs.sh all`, install the plannotator binary separately for the plan review UI:

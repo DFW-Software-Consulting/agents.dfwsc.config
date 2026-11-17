@@ -11,6 +11,7 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 - `run-shared-db-tests.sh` : shared-db-write-gate and `_sql-write-check.py`.
 - `run-read-gate-tests.sh` : read-size-gate.
 - `run-clock-reminder-tests.sh` : clock-reminder.
+- `run-brain-hint-tests.sh` : brain-schema-hint and `_brain-schema-hint.py`; a synthetic card with made-up names in a temporary HOME, never the real card (column, relation, enum, type and unknown-column hints; silent cases for other tools, non-schema errors, missing card, bad input; both event shapes; duplicate suppression; run time under 100 ms).
 - `run-reply-cap-tests.sh` : enforce-response-cap and reply-cap-prompt.
 - `run-public-text-gate-tests.sh` : public-repo-text-gate and `_public-text-check.py` (368 passed when written: also glued substitutions and wrapper arguments in a public repository, also bodies on an over-budget line, a copy without `_cmd_dirs.py`, `-R=`, also unknown directories, `--repo` with an unknown directory, temporary directories, wrapper bodies, explicit git directories and text as data).
 - `run-checks-gate-tests.sh` : checks-gate; builds repos with a local bare origin and makes stamps with the real run-checks.sh.

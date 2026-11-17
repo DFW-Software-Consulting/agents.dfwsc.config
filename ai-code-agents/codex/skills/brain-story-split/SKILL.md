@@ -52,6 +52,8 @@ surface it and let them decide.
 
 ## Steps
 
+Before writing Brain SQL, check the private schema card at `~/.claude/local-docs/brain-schema-card.md` for exact column names (it lives outside this repository).
+
 ### 0. Resolve the project
 
 If `project_id` / `organization_id` for this repo isn't already known this

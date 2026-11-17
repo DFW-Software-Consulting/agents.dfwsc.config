@@ -293,6 +293,46 @@ for c in 'git commit -Fok.txt' 'git commit -aFok.txt' 'git commit -am "fix parse
 done
 check "attached -F unreadable file denied" deny "$mention" "$(prc "cd sub && git commit -Fmissing.txt" "$proj")"
 
+# --- message sources: here-document on standard input, another program's -F, glued names, same-line file ---
+hd() { printf "%s <<'EOF'\n%s\nEOF" "$1" "$2"; }
+stubbin="$HOME/stubbin"; mkdir -p "$stubbin"; printf '#!/bin/sh\nexit 0\n' > "$stubbin/gh"; chmod +x "$stubbin/gh"
+mention_gh="env PATH=$stubbin:$PATH python3 $pyhook"  # a gh on PATH, whatever the machine has
+check "-F - here-document, clean body allowed" allow "$mention" "$(pr "$(hd 'git commit -F -' 'fix parser')")"
+check "-F - here-document, crediting body denied" deny "$mention" "$(pr "$(hd 'git commit -F -' 'Generated with Claude Code')")"
+check "--file=- here-document after git add, clean allowed" allow "$mention" "$(pr "$(hd 'git add -A && git commit --file=-' 'fix parser')")"
+check "/dev/stdin here-document, crediting body denied" deny "$mention" "$(pr "$(hd 'git commit -F /dev/stdin' 'Co-Authored-By: Claude <x@y.z>')")"
+check "-F - here-document plus another input denied" deny "$mention" "$(pr "$(hd 'git commit -F - < /etc/hostname' 'fix parser')")"
+check "-F - here-document on fd 3 denied" deny "$mention" "$(pr $'git commit -F - 3<<\'EOF\'\nfix parser\nEOF')"
+check "-F - piped and here-document denied" deny "$mention" "$(pr "$(hd 'echo x | git commit -F -' 'fix parser')")"
+check "-F - unquoted here-document with a substitution denied" deny "$mention" "$(pr $'git commit -F - <<EOF\n$(cat x)\nEOF')"
+check "-F - here-document with an editor run denied" deny "$mention" "$(pr "$(hd 'git -c core.editor=true commit -e -F -' 'fix parser')")"
+check "-F - with no here-document denied" deny "$mention" "$(pr 'git commit -F -')"
+check "gh api -F body=@missing beside a commit allowed" allow "$mention_gh" "$(pr 'git commit -m "fix parser" && gh api -X PATCH repos/o/r/pulls/1 -F body=@/nonexistent/b.md')"
+check "awk -F beside a commit allowed" allow "$mention" "$(pr "awk -F'|' '{print \$1}' x; git commit -m 'fix parser'")"
+check "-F in a here-document body after no git word allowed" allow "$mention_gh" "$(pr "$(hd 'cat > notes.md' 'gh api x -F body=@b.md')
+git commit -m 'fix parser'")"
+check "-F after a prose word (not a program on PATH) denied" deny "$mention_gh" "$(pr "$(hd 'cat > notes.md' 'call gh api -F body=@b.md')
+git commit -m 'fix parser'")"
+check "-F after a git word is still the commit's: denied" deny "$mention" "$(pr 'echo commit | xargs -I{} git {} -F /nonexistent/m.txt')"
+check "-F of a function defined on the line denied" deny "$mention" "$(pr 'f() { git commit "$@"; }; f -F /nonexistent/m.txt')"
+check "-F after an unknown variable denied" deny "$mention" "$(pr 'git commit -m ok && ssh h $X -F /nonexistent/m.txt')"
+check "glued name in a brace group, clean file allowed" allow "$mention" "$(pr "{ git commit -F $HOME/body-ok.md; }")"
+check "glued name in a substitution, crediting file denied" deny "$mention" "$(pr "echo \$(git commit -F $HOME/body-bad.md)")"
+check "escaped glued name is another file: denied" deny "$mention" "$(pr "git commit -F $HOME/body-ok.md\\;")"
+check "file written by cat here-document then committed, clean allowed" allow "$mention" "$(pr "$(hd 'cat > m.txt' 'fix parser')
+git commit -F m.txt")"
+check "file written by cat here-document then committed, crediting denied" deny "$mention" "$(pr "$(hd 'cat > m.txt' 'Generated with Claude Code')
+git commit -F m.txt")"
+check "file written then changed on the line denied" deny "$mention" "$(pr "$(hd 'cat > m.txt' 'fix parser')
+git checkout -- m.txt; git commit -F m.txt")"
+check "crediting --trailer denied" deny "$mention" "$(pr 'git commit -m "fix parser" --trailer "Co-authored-by: Claude <x@y.z>"')"
+check "crediting here-document body on a commit line denied" deny "$mention" "$(pr "$(hd 'cat > notes.md' 'Generated with Claude Code')
+git commit -m docs")"
+# the differential corpus against the pinned copy of the hook as it was on main
+diff_out="$(python3 "$here/no-agent-mention-diff.py" 2>&1)"; diff_rc=$?
+if [ "$diff_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - differential: $(grep '^corpus:' <<<"$diff_out")"
+else fail=$((fail + 1)); echo "FAIL - differential against the pinned baseline hook"; grep -E 'FAIL|passed|^ ' <<<"$diff_out" | sed 's/^/       /'; fi
+
 # --- fallbacks say so on standard error, never on the hook's output ---
 # check_err NAME SCRIPT PAYLOAD STDOUT-EXPECT(exact) STDERR-REGEX (empty regex: stderr must be empty)
 check_err() {

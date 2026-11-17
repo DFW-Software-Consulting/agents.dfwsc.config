@@ -2,6 +2,36 @@
 
 Newest first. Check here before proposing a fix.
 
+## Merged skill or agent changes did not go live (live links, `setup-agent-configs.sh`)
+- Cause: the skills, agents and commands links in the Claude configuration directories pointed at the primary checkout, while merges and fast-forwards happen in the main worktree.
+- Fix: since 2026-11-17 those links are whole-directory links into the main worktree (hooks-shipping.md). Check with `readlink -f` which checkout a link serves. Two skills committed as absolute links still resolve through the primary checkout.
+- Date: 2026-11-17
+
+## Reply-length hook replaced a headless job's result with a short acknowledgement (enforce-response-cap.sh)
+- Cause: the Stop hook nagged every session, including scheduled `claude -p` runs that return their result as the final message; the forced apology turn became the output.
+- Fix: the hook skips a run whose entrypoint is exactly `sdk-cli` or `sdk-ts`, read from `CLAUDE_CODE_ENTRYPOINT`, else from the transcript where every value must be the same allowed one. Unknown, missing or mixed values stay capped.
+- Date: 2026-11-17
+
+## Pushing a long-lived local branch published commits never pushed before
+- Cause: the branch was reported as already pushed but was about 30 commits ahead of its remote; the push put local-only commits on this public repo, with identifiers in them.
+- Fix: before pushing any branch that did not start from `origin/main` in this session, run `git status -sb` and `git log origin/<branch>..HEAD`, check the ahead count and scan the unpushed diff for identifiers (classes of identifier, not a few patterns). Verify a "already pushed" report yourself. Land such a branch through a scrubbed squash.
+- Date: 2026-11-17
+
+## `gh pr edit` fails with "Projects (classic) is being deprecated"
+- Cause: `gh pr edit` queries the deprecated project cards through GraphQL and the call fails before editing.
+- Fix: patch through the API instead: `gh api -X PATCH repos/<owner>/<name>/pulls/<n> -f title=... -f body=...`.
+- Date: 2026-11-17
+
+## `gh pr merge` from an automated sub-session refused
+- Cause: the session's safety (auto) mode refuses to merge a pull request on a subagent's own say-so.
+- Fix: the person, or the main session after being asked in the person's own words, runs the merge with `--match-head-commit <sha>`.
+- Date: 2026-11-17
+
+## A refreshed token scope is missing in the shell or session that was already open
+- Cause: the shell exports `GITHUB_TOKEN` from `gh auth token` at startup, so refreshing the stored login (`gh auth refresh -s <scope>`) only reaches shells started afterwards.
+- Fix: open a new shell or restart the session; check with `gh auth status` in that shell.
+- Date: 2026-11-17
+
 ## Clean commits and commands that are not commits denied as "unreadable message file" (no-agent-mention.py)
 - Signature: "Cannot verify the commit-message file '-'" for `git commit -F - <<'EOF'` with a clean message; the same for `'body=@f'` from `gh api -F body=@f`, `'|'` from `awk -F'|'`, `'c'` from `pg_dump -Fc`, or a `-F` inside a here-document body, on any line that also holds the words git and commit; `'f;'`, `'f)'` or a name ending in a backtick for a readable file named inside a brace group, substitution, loop or conditional.
 - Cause: the flat scan reads every `-F` on the line as a commit message file, with shell punctuation glued to the name, and denies when it cannot read it; standard input is never readable at hook time.

@@ -46,3 +46,6 @@ HOME="$(mktemp -d)" TMPDIR=<scratch dir> PUBLIC_TEXT_GATE_NO_NETWORK=1 bash ai-c
 2. An independent probe: a few hundred hand-written commands or inputs aimed at false denials, misses, crashes and slow paths; note timing.
 3. When a shared scanner such as `_git-cmd-scan.py` or `_cmd_dirs.py` changes, run old and new versions over the same command and directory combinations and compare the output; existing callers must see no difference.
 4. List known limits in the pull request description.
+
+## Changing the commit-message hook
+`../hooks/no-agent-mention.py` is judged against a pinned copy of its previous version with a differential test: same payloads in, outputs compared. Two attempts that changed which lines are judged, or skipped commands by name, were rejected in review. Never change which lines are judged and never add a list of commands to skip; change only how the message source is resolved, and prove it with the differential test. A line holding anything that can redefine a command must behave exactly as before.

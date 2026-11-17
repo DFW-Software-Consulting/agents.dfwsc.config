@@ -1,0 +1,27 @@
+# Example config for commit-gate.sh and pr-gate.sh. Copy to
+# ~/.claude/git-gates.conf (or point CLAUDE_GIT_GATES_CONF at it) and replace the
+# fake values. KEY=value, parsed as data, never executed. Unknown keys are ignored.
+
+# commit-gate: globs (space-separated) exempt from the secret-file, conflict-marker
+# and secret-content rules. Matched against the repo-relative path and the file name.
+ALLOW_PATHS="tests/fixtures/* docs/examples/*"
+
+# pr-gate: globs on owner/repo for repositories that follow the team SOP.
+SOP_REPOS="owner-x/repo-y owner-x/team-*"
+
+# pr-gate: template files whose headings are required for SOP_REPOS that have no
+# template of their own (also supplies placeholders and an optional `<=N LOC` cap).
+SOP_PR_TEMPLATE=~/sop/pr-template.md
+SOP_ISSUE_TEMPLATE=~/sop/issue-template.md
+
+# pr-gate: heading texts that are never required (space-separated, quote to include spaces).
+OPTIONAL_HEADINGS="Screenshots 'Release notes'"
+
+# pr-gate: changed-line cap when the template has no `<=N LOC` line. SOP_REPOS fall
+# back to 200 when this is unset; other repos have no cap without it.
+LOC_CAP=400
+
+# pr-gate: warn (default) allows with a message; deny blocks the soft rules.
+PR_GATE_MODE=warn
+# Force deny from this date on, whatever PR_GATE_MODE says.
+PR_GATE_DENY_AFTER=2027-01-01

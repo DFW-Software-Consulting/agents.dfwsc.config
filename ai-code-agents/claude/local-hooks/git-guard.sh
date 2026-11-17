@@ -12,10 +12,17 @@
 #
 # Register on PreToolUse with matcher `Bash`.
 #
-# Judged per git command by the quote-aware scanner (_git-cmd-scan.py), in the
-# directory the command runs in (payload cwd, literal `cd`, `git -C`). Runs
-# only read-only git queries. Fails open: bad input, missing jq/python3, an
-# unparseable command, an undeterminable directory.
+# Judged per git command by the shared quote-aware walker (_cmd_dirs.py), in the
+# directory the command runs in (payload cwd, `cd`, `git -C`, `env -C`, plain
+# variable assignments certain to have run). Commands inside bash -c/sh -c/eval/
+# env -S bodies (3 levels, escaped quotes unescaped), behind prefixes such as
+# timeout/nice/stdbuf/setsid/ionice/doas/env -S, with GIT_DIR=/--git-dir and the
+# like, and in text fed to a shell (`x | bash`, a here-string or here-document)
+# are judged too. The rules that need no repository always apply; with an
+# unknown directory the default-branch rule denies a push naming main or
+# master or no destination. A line over the analysis budget keeps only the
+# rules that need no repository. Runs only read-only git queries. Fails open:
+# bad input, missing jq/python3, an unparseable top-level command.
 # Escape hatch: CLAUDE_GIT_GUARD=off, or touch ~/.claude/git-guard.off (path
 # overridable with CLAUDE_GIT_GUARD_OFF_FILE); the off-file expires after 12
 # hours (see _gate-common.sh). If _gate-common.sh is missing the guard stays ON.

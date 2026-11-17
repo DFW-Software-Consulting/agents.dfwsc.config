@@ -198,9 +198,159 @@ check "gh segment: other command's --body ignored" allow "$(bp 'curl --body fake
 # --- gh directory resolution ---
 check "cd public && gh pr create from private cwd denied" deny "$(bp "cd $work/pub && gh pr create --title fakehost-01 --body x" "$work/priv")"
 check "cd private && gh pr create from public cwd allowed" allow "$(bp "cd $work/priv && gh pr create --title fakehost-01 --body x" "$work/pub")"
-check "non-literal cd then gh allowed (undeterminable)" allow "$(bp 'cd $SOMEWHERE && gh pr create --title fakehost-01 --body x' "$work/pub")"
+check "non-literal cd then gh with a detector hit denied (repository cannot be established)" deny "$(bp 'cd $SOMEWHERE && gh pr create --title fakehost-01 --body x' "$work/pub")"
+check "non-literal cd then gh with clean text allowed" allow "$(bp 'cd $SOMEWHERE && gh pr create --title fix --body x' "$work/pub")"
 check "cd public && gh pr edit denied" deny "$(bp "cd $work/pub && gh pr edit 3 --body 10.9.9.9" "$plain")"
 check "--repo beats cd for gh" allow "$(bp "cd $work/pub && gh pr create --repo owner-x/private-z --title fakehost-01 --body x" "$plain")"
+
+# --- directory not written literally (shared walker: _cmd_dirs.py) ---
+reason_has() {  # NAME PAYLOAD REGEX: the deny reason matches
+  local r; r="$(printf '%s' "$2" | $gate 2>&1 | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')"
+  grep -Eq -- "$3" <<<"$r"; ok "$1" $?
+}
+PUB="$work/pub"; PRIV="$work/priv"
+# resolvable plain assignments are judged exactly like the literal path
+check "W=<public>; cd \"\$W\" && commit denied like the literal form" deny "$(bp "W=$PUB; cd \"\$W\" && git commit -m 'move to fakehost-01'" "$PRIV")"
+check "W=<private>; cd \"\$W\" && commit allowed like the literal form" allow "$(bp "W=$PRIV; cd \"\$W\" && git commit -m 'move to fakehost-01'" "$PUB")"
+check "W=<public>; git -C \"\$W\" commit denied" deny "$(bp "W=$PUB; git -C \"\$W\" commit -m 'move to fakehost-01'" "$PRIV")"
+check "W=<private>; git -C \"\$W\" commit allowed" allow "$(bp "W=$PRIV; git -C \"\$W\" commit -m 'move to fakehost-01'" "$PUB")"
+check "W=<public>; (cd \"\$W\" && commit) denied" deny "$(bp "W=$PUB; (cd \"\$W\" && git commit -m 'move to fakehost-01')" "$PRIV")"
+check "W=<public>; pushd \"\$W\" && commit denied" deny "$(bp "W=$PUB; pushd \"\$W\" >/dev/null && git commit -m 'move to fakehost-01'" "$PRIV")"
+check "W=<private>; pushd \"\$W\" && commit allowed" allow "$(bp "W=$PRIV; pushd \"\$W\" >/dev/null && git commit -m 'move to fakehost-01'" "$PUB")"
+check "W=<public>; cd \"\$W\" && gh pr create denied" deny "$(bp "W=$PUB; cd \"\$W\" && gh pr create --title fakehost-01 --body x" "$PRIV")"
+check "W=<private>; cd \"\$W\" && gh pr create allowed" allow "$(bp "W=$PRIV; cd \"\$W\" && gh pr create --title fakehost-01 --body x" "$PUB")"
+check "W=<public>; cd \"\$W\" && git tag -m denied" deny "$(bp "W=$PUB; cd \"\$W\" && git tag -a v9 -m 'on fakehost-01'" "$PRIV")"
+# command bodies are judged like the literal forms
+check "bash -c with a literal cd into the public repo denied" deny "$(bp "bash -c 'cd $PUB && git commit -m \"move to fakehost-01\"'" "$PRIV")"
+check "bash -c with a literal cd into the private repo allowed" allow "$(bp "bash -c 'cd $PRIV && git commit -m \"move to fakehost-01\"'" "$PUB")"
+check "bash -c in the public payload directory denied" deny "$(bp "bash -c 'git commit -m \"move to fakehost-01\"'" "$PUB")"
+check "sh -c with a resolvable assignment into the public repo denied" deny "$(bp "sh -c 'W=$PUB; cd \"\$W\" && gh pr create --title fakehost-01 --body x'" "$PRIV")"
+check "eval of a literal cd into the public repo denied" deny "$(bp "eval \"cd $PUB && git commit -m 'move to fakehost-01'\"" "$PRIV")"
+check "nested sh -c / bash -c into the public repo denied" deny "$(bp "sh -c \"bash -c 'cd $PUB && git commit -m fakehost-01'\"" "$PRIV")"
+check "env -C <public> commit denied" deny "$(bp "env -C $PUB git commit -m 'fakehost-01'" "$PRIV")"
+check "env -C <private> commit allowed" allow "$(bp "env -C $PRIV git commit -m 'fakehost-01'" "$PUB")"
+# explicit git directories are judged by their work tree
+check "GIT_DIR=<public>/.git commit denied" deny "$(bp "GIT_DIR=$PUB/.git git commit -m 'fakehost-01'" "$plain")"
+check "GIT_DIR=<private>/.git commit allowed" allow "$(bp "GIT_DIR=$PRIV/.git git commit -m 'fakehost-01'" "$PUB")"
+check "GIT_DIR=\$(pwd)/.git commit with a hit denied (substitution in the prefix)" deny "$(bp "GIT_DIR=\$(pwd)/.git git commit -m 'fakehost-01'" "$plain")"
+check "GIT_DIR=backtick commit with a hit denied" deny "$(bp "GIT_DIR=\`pwd\`/.git git commit -m 'fakehost-01'" "$plain")"
+check "env GIT_DIR=\$(pwd)/.git commit with a hit denied" deny "$(bp "env GIT_DIR=\$(pwd)/.git git commit -m 'fakehost-01'" "$plain")"
+check "bash -c with GIT_DIR=\$(pwd)/.git commit with a hit denied" deny "$(bp "bash -c 'GIT_DIR=\$(pwd)/.git git commit -m \"fakehost-01\"'" "$plain")"
+check "GIT_DIR=\$(pwd)/.git commit with a clean text allowed" allow "$(bp "GIT_DIR=\$(pwd)/.git git commit -m 'feat: x'" "$plain")"
+# a substitution glued to more text in an argument: the commit stays visible
+for form in 'git -C $(pwd)/a commit' 'git -C `pwd`/a commit' 'git -C pre$(pwd)post commit' \
+            'git --git-dir=$(pwd)/.git commit' 'git --work-tree=$(pwd)/a commit' 'eval git -C $(pwd)/a commit' \
+            'sudo -u root git -C $(pwd)/a commit'; do
+  check "substitution glued to an argument, text with a hit denied: $form" deny "$(bp "$form -m 'fakehost-01'" "$plain")"
+  check "substitution glued to an argument, clean text allowed: $form" allow "$(bp "$form -m 'feat: x'" "$plain")"
+done
+# a wrapper argument or a redirection before the subcommand no longer hides the commit (public repository)
+for form in 'timeout $(echo 5)s git commit' 'git 2>&1 commit' 'sudo -u $(id -un)x git commit'; do
+  check "wrapper argument or redirection before the subcommand, text with a hit denied: $form" deny "$(bp "$form -m 'fakehost-01'")"
+  check "wrapper argument or redirection before the subcommand, clean text allowed: $form" allow "$(bp "$form -m 'feat: x'")"
+done
+check "a term inside a substitution glued to the message is denied in a public repo" deny "$(bp 'git commit -m x$(echo "fakehost-01")y')"
+check "a clean substitution glued to the message is allowed in a public repo" allow "$(bp 'git commit -m x$(echo ok)y')"
+rep() { local i out=""; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+# round 2: the over-budget path
+PAD="$(rep 'git status; ' 400)"
+check "over the budget: a term inside a substitution is denied in a public repo" deny "$(bp "${PAD}echo \$(git commit -m 'fakehost-01')")"
+check "over the budget: a clean text inside a substitution is allowed in a public repo" allow "$(bp "${PAD}echo \$(git commit -m 'feat: x')")"
+check "--git-dir/--work-tree on the public repo denied" deny "$(bp "git --git-dir=$PUB/.git --work-tree=$PUB commit -m 'fakehost-01'" "$plain")"
+# a directory that cannot be established: a hit is denied, a clean text is silent
+for form in 'cd "$W" && git commit -m "TEXT"' \
+            'W=$(pwd) && cd "$W" && git commit -m "TEXT"' \
+            '(cd "$W" && git commit -m "TEXT")' \
+            'pushd "$W" >/dev/null && git commit -m "TEXT"' \
+            'git -C "$W" commit -m "TEXT"' \
+            'cd "$(pwd)" && git commit -m "TEXT"' \
+            'cd - && git commit -m "TEXT"' \
+            'GIT_DIR="$W" git commit -m "TEXT"' \
+            'git --git-dir="$W" commit -m "TEXT"' \
+            'env -C "$W" git commit -m "TEXT"' \
+            "bash -c 'cd \"\$W\" && git commit -m \"TEXT\"'" \
+            "sh -c 'cd \$W && git commit -m \"TEXT\"'" \
+            'cd "$W" && git tag -a v9 -m "TEXT"' \
+            'cd "$W" && gh pr create --title "TEXT" --body x' \
+            'cd "$W" && gh pr edit 3 --body "TEXT"' \
+            'cd "$W" && gh issue create --title t --body "TEXT"'; do
+  check "unknown directory, text trips a detector: denied: ${form//TEXT/...}" deny "$(bp "${form//TEXT/move to fakehost-01}" "$PRIV")"
+  check "unknown directory, text trips a detector, even from a public payload directory: ${form//TEXT/...}" deny "$(bp "${form//TEXT/box at 10.1.2.3}" "$PUB")"
+  check "unknown directory, clean text silent: ${form//TEXT/...}" allow "$(bp "${form//TEXT/fix the parser}" "$PUB")"
+done
+reason_has "unknown-directory denial says the repository could not be established" "$(bp 'cd "$W" && git commit -m "move to fakehost-01"' "$PRIV")" "could not establish which repository"
+reason_has "unknown-directory denial says to write the directory literally" "$(bp 'cd "$W" && git commit -m "move to fakehost-01"' "$PRIV")" "Write the directory literally"
+reason_has "unknown-directory denial says the text would be denied if the repository is public" "$(bp 'cd "$W" && git commit -m "move to fakehost-01"' "$PRIV")" "denied if the repository is public"
+reason_has "unknown-directory denial names the directory reason" "$(bp 'cd "$W" && git commit -m "move to fakehost-01"' "$PRIV")" "not written literally"
+reason_has "unknown-directory denial lists what was found" "$(bp 'cd "$W" && git commit -m "box at 10.1.2.3"' "$PRIV")" "10\\.1\\.2\\.3"
+check "unknown directory: built-in email detector denied" deny "$(bp 'cd "$W" && git commit -m "ask someone@mailhost.net"' "$PRIV")"
+check "unknown directory: built-in hostname detector denied" deny "$(bp 'cd "$W" && git commit -m "ssh to box.example-tail.ts.net"' "$PRIV")"
+check "unknown directory: configured pattern denied" deny "$(bp 'cd "$W" && git commit -m "acct fake-acct-123456"' "$PRIV")"
+check "unknown directory: ALLOW_TERMS still lets a term through" allow "$(bp 'cd "$W" && git commit -m "see fakehost-docs page"' "$PRIV")"
+check "unknown directory: documentation IP range silent" allow "$(bp 'cd "$W" && git commit -m "host 192.0.2.44"' "$PRIV")"
+check "unknown directory: -F absolute message file with a hit denied" deny "$(bp "cd \"\$W\" && git commit -F $work/log.txt" "$PRIV")"
+check "unknown directory: heredoc message with a hit denied" deny "$(bp $'cd "$W" && git commit -F - <<EOF\nmove to fakehost-01\nEOF' "$PRIV")"
+check "unknown directory: heredoc message clean silent" allow "$(bp $'cd "$W" && git commit -F - <<EOF\nfix parser\nEOF' "$PRIV")"
+check "unknown directory: unparseable body holding a commit and a hit denied" deny "$(bp "bash -c 'git commit -m \"fakehost-01 unterminated'" "$PRIV")"
+check "unknown directory: unparseable body holding a commit, clean, silent" allow "$(bp "bash -c 'git commit -m \"fix unterminated'" "$PRIV")"
+check "no payload cwd, plain commit with a hit stays silent" allow "$(jq -n '{tool_input:{command:"git commit -m \"fakehost-01\""}}')"
+many="$(for i in $(seq 1 320); do printf 'cd %s; ' "$PRIV"; done)"
+check "line over the analysis budget: a hit denied" deny "$(bp "${many}git commit -m 'move to fakehost-01'" "$PRIV")"
+check "line over the analysis budget: clean text silent" allow "$(bp "${many}git commit -m 'fix parser'" "$PRIV")"
+# --repo / -R names the repository whatever the directory
+check "unknown directory + --repo public: denied" deny "$(bp 'cd "$W" && gh pr create --repo owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+check "unknown directory + -R public: denied" deny "$(bp 'cd "$W" && gh pr create -R owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+check "unknown directory + --repo= public: denied" deny "$(bp 'cd "$W" && gh pr create --repo=owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+check "unknown directory + --repo private: silent" allow "$(bp 'cd "$W" && gh pr create --repo owner-x/private-z --title fakehost-01 --body x' "$PUB")"
+check "unknown directory + --repo public, clean text: silent" allow "$(bp 'cd "$W" && gh pr create --repo owner-x/repo-y --title t --body x' "$PRIV")"
+check "unknown directory + --repo public (gh pr edit): denied" deny "$(bp 'cd "$W" && gh pr edit 3 -R owner-x/repo-y --body 10.9.9.9' "$PRIV")"
+check "unknown directory + --repo naming an unknown-visibility repo: silent" allow "$(bp 'cd "$W" && gh pr create --repo owner-x/unknown-q --title fakehost-01 --body x' "$PRIV")"
+reason_has "--repo denial names the repository" "$(bp 'cd "$W" && gh pr create --repo owner-x/repo-y --title fakehost-01 --body x' "$PRIV")" "owner-x/repo-y is a PUBLIC repository"
+check "temporary directory + --repo public: denied" deny "$(bp 'cd "$(mktemp -d)" && gh pr create --repo owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+check "cd \"\$W\" + --repo from a public payload directory, --repo private: silent" allow "$(bp 'cd "$W" && gh pr create --repo owner-x/private-z --title fakehost-01 --body x' "$PUB")"
+# a directory made by a bare mktemp -d has no public remote
+check "cd \"\$(mktemp -d)\" && commit silent" allow "$(bp 'cd "$(mktemp -d)" && git init -q && git commit -q --allow-empty -m "move to fakehost-01"' "$PUB")"
+check "T=\$(mktemp -d); cd \"\$T\" && commit silent" allow "$(bp 'T=$(mktemp -d); cd "$T" && git init -q && git commit -q --allow-empty -m "move to fakehost-01"' "$PUB")"
+check "git -C \"\$(mktemp -d)\" commit silent" allow "$(bp 'git -C "$(mktemp -d)" commit --allow-empty -m "move to fakehost-01"' "$PUB")"
+check "cd \"\$(mktemp -d)\" && gh pr create silent" allow "$(bp 'cd "$(mktemp -d)" && gh pr create --title fakehost-01 --body x' "$PUB")"
+check "mktemp -d with -p is not a temporary directory: denied" deny "$(bp 'cd "$(mktemp -d -p /var/tmp)" && git commit -m "move to fakehost-01"' "$PRIV")"
+# text as data, read-only commands and dry runs
+check "echo of a git commit with an unknown directory is not a command" allow "$(bp 'cd "$W" && echo "git commit -m fakehost-01"' "$PRIV")"
+check "printf of gh pr create is not a command" allow "$(bp "printf '%s' 'gh pr create --title fakehost-01 --body x'" "$PRIV")"
+check "a message that mentions git commit, in an unknown directory, is not a command" allow "$(bp 'cd "$W" && grep -n "git commit" fakehost-01.txt' "$PRIV")"
+check "git status after an unknown cd allowed" allow "$(bp 'cd "$W" && git status # fakehost-01' "$PRIV")"
+check "git log after an unknown cd allowed" allow "$(bp 'cd "$W" && git log --grep=fakehost-01' "$PRIV")"
+check "gh pr view after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr view fakehost-01' "$PRIV")"
+check "gh pr list after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr list --search fakehost-01' "$PRIV")"
+check "gh pr checks after an unknown cd allowed" allow "$(bp 'cd "$W" && gh pr checks fakehost-01' "$PRIV")"
+check "git commit --dry-run after an unknown cd allowed" allow "$(bp 'cd "$W" && git commit --dry-run -m "move to fakehost-01"' "$PRIV")"
+
+# --- review round: bodies on an over-budget line, -R=, -h as a value, missing shared module ---
+for body in "bash -c 'git commit -m \"move to fakehost-01\"'" "sh -c 'git commit -m \"move to fakehost-01\"'" "eval 'git commit -m \"move to fakehost-01\"'" "env -S 'git commit -m \"move to fakehost-01\"'" "bash -c 'gh pr create --title \"fakehost-01\" --body x'"; do
+  check "over-budget line: a hit inside a body denied: $body" deny "$(bp "${many}$body" "$PRIV")"
+done
+check "over-budget line: a clean text inside a body silent" allow "$(bp "${many}bash -c 'git commit -m \"fix parser\"'" "$PRIV")"
+check "over-budget line: a body that is not a commit or gh command silent" allow "$(bp "${many}bash -c 'echo fakehost-01'" "$PRIV")"
+check "-R=owner/repo public: denied" deny "$(bp 'cd "$W" && gh pr create -R=owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+check "-R=owner/repo private: silent" allow "$(bp 'cd "$W" && gh pr create -R=owner-x/private-z --title fakehost-01 --body x' "$PUB")"
+check "-m -h is a message: a hit after it is judged" deny "$(bp 'git commit -m -h -m "move to fakehost-01"' "$PUB")"
+check "git commit -h is a help request: silent" allow "$(bp 'git commit -h -m "move to fakehost-01"' "$PUB")"
+# a name later assigned a backtick value is unknown (the stricter resolver), not the stale literal
+check "W=<private>; W=\`pwd\`; cd \"\$W\" && commit with a hit: unknown directory, denied" deny "$(bp 'W='"$PRIV"'; W=`pwd`; cd "$W" && git commit -m "move to fakehost-01"' "$PUB")"
+check "W=<private>; W=\`pwd\`; cd \"\$W\" && gh pr create with a hit: unknown directory, denied" deny "$(bp 'W='"$PRIV"'; W=`pwd`; cd "$W" && gh pr create --title fakehost-01 --body x' "$PUB")"
+# without _cmd_dirs.py the gate falls back to the literal-directory scan
+iso4="$(mktemp -d "$work/iso4.XXXXXX")"; cp -r "$hooks" "$iso4/local-hooks"; cp -r "$hooks/../hooks" "$iso4/hooks"; rm -f "$iso4/local-hooks/_cmd_dirs.py"
+isocheck() {  # NAME EXPECT PAYLOAD
+  local out; out="$(printf '%s' "$3" | bash "$iso4/local-hooks/public-repo-text-gate.sh" 2>/dev/null)"
+  { [ "$2" = deny ] && grep -q '"permissionDecision": *"deny"' <<<"$out"; } || { [ "$2" = allow ] && [ -z "$out" ]; }; ok "$1" $?
+}
+isocheck "without _cmd_dirs.py: a hit in a public literal directory denied" deny "$(bp 'git commit -m "move to fakehost-01"' "$PUB")"
+isocheck "without _cmd_dirs.py: --repo public denied" deny "$(bp 'gh pr create --repo owner-x/repo-y --title fakehost-01 --body x' "$PRIV")"
+isocheck "without _cmd_dirs.py: a private literal directory silent" allow "$(bp 'git commit -m "move to fakehost-01"' "$PRIV")"
+isocheck "without _cmd_dirs.py: an unknown directory is not judged (the old behaviour)" allow "$(bp 'cd "$W" && git commit -m "move to fakehost-01"' "$PRIV")"
+errout="$(CMD='git commit -m "move to fakehost-01"' CWD="$PUB" python3 -I "$iso4/local-hooks/_public-text-check.py" 2>&1 >/dev/null)"
+[ "$(wc -l <<<"$errout")" -eq 1 ] && grep -q '_cmd_dirs.py could not be loaded' <<<"$errout"; ok "without _cmd_dirs.py: one line on standard error" $?
+rm -rf "$iso4"
 
 # --- message on stdin ---
 check "git commit -F - heredoc denied" deny "$(bp $'git commit -F - <<EOF\nmove to fakehost-01\nEOF')"

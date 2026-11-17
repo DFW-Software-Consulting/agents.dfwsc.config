@@ -11,9 +11,22 @@ Text extraction reuses gh_pr_texts()/optional_file_contents() from
 `git commit` extraction inline in main(), so the commit forms (-m, --message,
 -F/--file, clustered and attached values) are parsed here the same way, only
 from the tokens of the `git commit|tag` segment itself. The directory of each
-git/gh command comes from _git-cmd-scan.py's helpers (cwd, `cd`, `-C`). A `-`
-file argument reads the heredoc bodies of the command. A command that cannot
-be tokenised is scanned as raw text against the payload cwd's repository.
+git/gh command comes from _cmd_dirs.py (the shared walker: cwd, `cd`, `pushd`,
+`-C`, `env -C`, plain variable assignments certain to have run, GIT_DIR/--git-dir
+by its work tree, and `bash -c`/`sh -c`/`eval`/`env -S` bodies 3 levels deep). A
+`gh --repo`/`-R owner/name` names the repository whatever the directory. When the
+directory cannot be established and no --repo is given (variable not certain,
+substitution, `cd -`, `popd`, a variable git directory, an unparseable wrapper
+body, a line over the analysis budget) the text is still scanned: a hit is denied
+with a message that the repository could not be established (the text would be
+denied if the repository is public); a clean text stays silent. A directory made
+by a bare `mktemp -d` is silent (a fresh repository has no public remote), and so
+is a payload without a cwd. A `-` file argument reads the heredoc bodies of the
+command. A command that cannot be tokenised is scanned as raw text against the
+payload cwd's repository. Without _cmd_dirs.py the previous literal-directory scan runs and one line goes to standard error.
+Not judged: GIT_DIR=<repo>/.git gh pr create against that repository; a cd that would fail or not run is
+still followed; nesting deeper than 3, lines over about 128 KB and text piped into a shell.
+Imported by checks-gate: only build_jobs/main changed.
 
 Config (data only, never sourced): ${CLAUDE_PUBLIC_TEXT_GATE_CONF:-~/.claude/public-text-gate.conf}
   PUBLIC_REPOS / PRIVATE_REPOS  space-separated globs on owner/repo
@@ -356,6 +369,38 @@ def commit_texts(toks, read_file):
     return msgs
 
 
+COMMIT_VALUE_SHORT = set("mFCct")
+COMMIT_VALUE_LONG = {"--message", "--file", "--reuse-message", "--reedit-message", "--template",
+                     "--author", "--date", "--cleanup", "--trailer", "--fixup", "--squash"}
+
+
+def commit_flags(args):
+    """The option words of `git commit` arguments that are in option position:
+    not the value of -m/-F/-C/... (so `-m -h` is a message), nothing after `--`.
+    Long options are returned without a `=value`."""
+    out, i = set(), 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            break
+        if a.startswith("--"):
+            name = a.split("=", 1)[0]
+            out.add(name)
+            if name in COMMIT_VALUE_LONG and "=" not in a:
+                i += 1
+        elif a.startswith("-") and len(a) > 1:
+            out.add(a)
+            for k, ch in enumerate(a[1:]):
+                if ch in "Su":
+                    break
+                if ch in COMMIT_VALUE_SHORT:
+                    if k == len(a) - 2:
+                        i += 1
+                    break
+        i += 1
+    return out
+
+
 def gh_repo_flag(args):
     repo, i = "", 0
     while i < len(args):
@@ -366,7 +411,7 @@ def gh_repo_flag(args):
             i += 1
             repo = args[i]
         elif t.startswith("-R") and not t.startswith("--") and len(t) > 2:
-            repo = t[2:]
+            repo = t[3:] if t[2:3] == "=" else t[2:]
         i += 1
     if re.match(r"^[a-z][a-z0-9+.-]*://|@", repo):
         return slug_from_url(repo)
@@ -442,6 +487,43 @@ def deny(slug, found):
     sys.exit(0)
 
 
+def deny_unknown(why, found):
+    lines = "; ".join(f"{kind}: {val}" for kind, val in found)
+    reason = (f"Public-repo text gate: could not establish which repository this command targets "
+              f"({why}), and its text contains infrastructure details ({lines}). The text would be "
+              f"denied if the repository is public. Write the directory literally (for example "
+              f"git -C <path> commit ... or cd <path> && gh pr create ...) or name the repository "
+              f"with --repo owner/name, and remove or generalise the details.")
+    note = os.environ.get("GATE_OFF_NOTE", "")
+    if note:
+        reason += " " + note
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }}))
+    sys.exit(0)
+
+
+def legacy_jobs(toks, cwd, nam, scan, read_file):
+    """The scan used before the shared walker (literal directories only); the
+    fallback when _cmd_dirs.py cannot be loaded."""
+    jobs = []
+    for kind, d, args in find_hits(toks, cwd, scan):
+        if kind == "git":
+            texts, slug = commit_texts(args, read_file), ""
+        else:
+            if len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in nam.GH_SUBCMDS:
+                continue
+            texts = nam.gh_pr_texts(["gh", "pr"] + args[1:])
+            slug = gh_repo_flag(args)
+        texts = [t for t in texts if t]
+        slug = slug or slug_from_dir(d)
+        if texts and slug:
+            jobs.append((slug, texts, None))
+    return jobs
+
+
 def build_jobs(cmd, cwd, nam, scan):
     stripped, bodies = split_heredocs(cmd)
     stdin_text = "\n".join(bodies)
@@ -458,21 +540,46 @@ def build_jobs(cmd, cwd, nam, scan):
     if toks is None:  # cannot tokenise: judge the raw text against the cwd repo
         if re.search(r"\bgit\s+(?:commit|tag)\b|\bgh\s+(?:pr|issue)\b", cmd):
             slug = slug_from_dir(cwd)
-            return [(slug, [cmd])] if slug else []
+            return [(slug, [cmd], None)] if slug else []
         return []
     jobs = []
-    for kind, d, args in find_hits(toks, cwd, scan):
-        if kind == "git":
-            texts, slug = commit_texts(args, read_file), ""
-        else:
+    try:
+        cdm = load("_cmd_dirs", os.path.join(_here, "_cmd_dirs.py"))
+    except Exception:
+        sys.stderr.write("public-repo-text-gate: _cmd_dirs.py could not be loaded; using the literal-directory scan\n")
+        return legacy_jobs(toks, cwd, nam, scan, read_file)
+    for e in cdm.gate_entries(cmd, cwd, home=os.environ.get("HOME", "")):
+        if e["kind"] == "body":
+            if cdm.body_guarded(e, "text") and e["text"].strip():
+                jobs.append((None, [e["text"]], e["why"]))
+            continue
+        if e["kind"] == "git":
+            if e["sub"] not in ("commit", "tag"):
+                continue
+            if e["sub"] == "commit" and commit_flags(e["args"]) & {"--dry-run", "-h", "--help"}:
+                continue
+            texts, flag = commit_texts(e["args"], read_file), ""
+        elif e["kind"] == "gh":
+            args = e["args"]
             if len(args) < 2 or args[0] not in ("pr", "issue") or args[1] not in nam.GH_SUBCMDS:
                 continue
             texts = nam.gh_pr_texts(["gh", "pr"] + args[1:])
-            slug = gh_repo_flag(args)
+            flag = gh_repo_flag(args)
+        else:
+            continue
         texts = [t for t in texts if t]
-        slug = slug or slug_from_dir(d)
-        if texts and slug:
-            jobs.append((slug, texts))
+        if not texts:
+            continue
+        status, dirs, why = cdm.gate_dirs(e)
+        if flag:
+            jobs.append((flag, texts, None))
+        elif status == "known":
+            for d in dirs:
+                slug = slug_from_dir(d)
+                if slug:
+                    jobs.append((slug, texts, None))
+        elif status == "unknown":
+            jobs.append((None, texts, why))
     return jobs
 
 
@@ -488,9 +595,13 @@ def main():
     conf = os.environ.get("CLAUDE_PUBLIC_TEXT_GATE_CONF") or \
         os.path.join(os.environ.get("HOME", ""), ".claude", "public-text-gate.conf")
     cfg = parse_config(conf)
-    for slug, texts in build_jobs(cmd, cwd, nam, scan):
+    for slug, texts, why in build_jobs(cmd, cwd, nam, scan):
         found = find_matches("\n".join(texts), cfg)
-        if found and is_public(slug, cfg):
+        if not found:
+            continue
+        if slug is None:
+            deny_unknown(why, found)
+        elif is_public(slug, cfg):
             deny(slug, found)
 
 

@@ -13,6 +13,15 @@
 # Code/diff/tool-output content is excluded from the count by stripping
 # fenced ``` code blocks before measuring length, per the cap's own rule.
 #
+# Headless runs are exempt: a session whose entrypoint is exactly "sdk-cli" or
+# "sdk-ts" (claude -p and the SDKs) has no reader to apologise to, and the
+# forced apology turn would become the job's output. The entrypoint is read from
+# CLAUDE_CODE_ENTRYPOINT in the hook's environment, else from the transcript:
+# every "entrypoint" value in it must be the same allowed one, so a session that
+# began headless and was resumed interactively (mixed values) keeps the cap. An
+# allow-list, never "anything but cli": null, numeric, cli, claude-desktop, claude-vscode, a
+# missing, unknown, mixed or unreadable value all keep the cap.
+#
 # Long-reply approvals (written by reply-cap-prompt.sh) are honoured: a one-shot
 # approval allows this reply and is removed (also when the reply was short); a
 # session-long approval allows and stays until "limit on".
@@ -35,6 +44,26 @@ if ! source "$_dir/_reply-cap-common.sh" 2>/dev/null; then
   reply_cap_state() { echo none; }
   reply_cap_clear() { :; }
 fi
+
+entrypoint="${CLAUDE_CODE_ENTRYPOINT:-}"
+if [ -z "$entrypoint" ]; then
+  _tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty | strings' 2>/dev/null)
+  if [ -n "$_tp" ] && [ -f "$_tp" ]; then
+    # Every distinct raw value of the key, whatever its type (string, null, number,
+    # object...); more than one (or none) is ambiguous: keep the cap. Only a lone
+    # quoted string becomes the entrypoint, so null or a number is a non-allowed value.
+    _eps=$(grep -oE '"entrypoint"[[:space:]]*:[[:space:]]*[^,}]*' "$_tp" 2>/dev/null | sed -E 's/^"entrypoint"[[:space:]]*:[[:space:]]*//; s/[[:space:]]+$//' | sort -u)
+    if [ "$(printf '%s\n' "$_eps" | grep -c .)" -eq 1 ]; then
+      case "$_eps" in
+        \"sdk-cli\") entrypoint=sdk-cli ;;
+        \"sdk-ts\") entrypoint=sdk-ts ;;
+      esac
+    fi
+  fi
+fi
+case "$entrypoint" in
+  sdk-cli|sdk-ts) exit 0 ;;
+esac
 
 sid=$(printf '%s' "$input" | jq -r '.session_id // empty | strings' 2>/dev/null)
 sdir=$(printf '%s' "$input" | jq -r '.scratchpad_dir // empty | strings' 2>/dev/null)

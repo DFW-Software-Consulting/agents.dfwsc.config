@@ -130,8 +130,11 @@ Each tool has its own quirks, permission model, and evolving feature set. This R
 | `biome-linter` | Lint/format with Biome, apply safe fixes, summarize remaining issues | Claude Code, OpenCode |
 | `codebase-research` | Map codebase structure using structural analysis (ast-grep) | Claude Code, OpenCode |
 | `deep-review-workflow` | Detect and fix security, bug, and code smell issues autonomously | Claude Code, OpenCode |
+| `firm` | Deliver a task through a selectively staffed virtual engineering firm | Claude Code, OpenCode |
 | `git-workflow` | Safe commit/push/PR/issue creation with pre-hook enforcement | Claude Code, OpenCode |
 | `new-skill` | Scaffold reusable skills and mirror them across agent tools | OpenCode |
+| `resume-refresh` | Refresh and tailor resumes using defensible accomplishments and Danny Thompson guidance | Codex |
+| `remote-pr-review` | Review remotely through gh without checkout and post a structured PR comment | Claude Code, OpenCode |
 | `worktree-hygiene` | Prevent branch contamination in git worktrees | Claude Code, OpenCode |
 
 Shared skills are mirrored in `claude/skills/<name>/SKILL.md` and `opencode/skills/<name>/SKILL.md` when both tools are listed in the table.

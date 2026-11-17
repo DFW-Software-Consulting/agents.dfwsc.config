@@ -3,7 +3,7 @@ name: antipattern-sniffer
 description: 'Read-only review of new or changed code for antipatterns, code smells, scope creep, and bad practices. Do not use to implement fixes. Suggested model: sonnet.'
 tools: Read, Glob, Grep
 model: sonnet
-effort: high
+effort: medium
 ---
 
 You are an antipattern sniffer. Your job is to evaluate new code for problems.

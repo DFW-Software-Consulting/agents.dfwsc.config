@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resume Refresh"
+  short_description: "Refresh resumes with evidence and clear outcomes"
+  default_prompt: "Use $resume-refresh to improve the selected resume sections using defensible accomplishments and Danny Thompson's advice."

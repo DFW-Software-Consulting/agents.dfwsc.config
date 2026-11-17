@@ -1,6 +1,7 @@
 name = "antipattern-sniffer"
 description = "Read-only review of new or changed code for antipatterns, code smells, scope creep, and bad practices. Do not use to implement fixes."
-model_reasoning_effort = "low"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
 developer_instructions = '''
 You are an antipattern sniffer. Your job is to evaluate new code for problems.
 

@@ -5,6 +5,8 @@ permission:
   edit: deny
   bash:
     "*": deny
+    "git cherry-pick*": allow
+    "git ls-remote*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow
@@ -14,6 +16,16 @@ permission:
     "git add*": allow
     "git commit*": allow
     "git push*": allow
+    "git -C * status*": allow
+    "git -C * diff*": allow
+    "git -C * log*": allow
+    "git -C * show*": allow
+    "git -C * branch*": allow
+    "git -C * remote*": allow
+    "git -C * rev-parse*": allow
+    "git -C * add*": allow
+    "git -C * commit*": allow
+    "git -C * push*": allow
     "gh auth status*": allow
     "gh pr *": allow
     "gh issue *": allow
@@ -26,6 +38,12 @@ permission:
     "gh workflow view*": allow
     "git reset*": deny
     "git rebase*": deny
+    "git worktree add*": allow
+    "git worktree remove*": allow
+    "git worktree prune*": allow
+    "git worktree list*": allow
+    "git worktree remove --force*": deny
+    "git worktree remove -f*": deny
     "git merge*": deny
     "git checkout*": deny
     "git switch*": deny
@@ -52,6 +70,35 @@ permission:
     "git replace*": deny
     "git update-ref*": deny
     "git reflog expire*": deny
+    "git fetch*": allow
+    "git rev-parse*": allow
+    "git symbolic-ref*": allow
+    "git merge-base*": allow
+    "git ls-files*": allow
+    "git describe*": allow
+    "git checkout -b *": allow
+    "git switch -c *": allow
+    "git switch *": allow
+    "git pull --ff-only*": allow
+    "git switch -f*": deny
+    "git switch --force*": deny
+    "git switch --discard-changes*": deny
+    "git switch -d*": deny
+    "git switch --detach*": deny
+    "git restore*": deny
+    "git -C * commit* --amend*": deny
+    "git -C * commit* -C HEAD*": deny
+    "git -C * commit* -c HEAD*": deny
+    "git -C * push -f*": deny
+    "git -C * push -d*": deny
+    "git -C * push * -d*": deny
+    "git -C * push *:*": deny
+    "git -C * push *+*": deny
+    "git -C * push *--mirror*": deny
+    "git -C * push *--force*": deny
+    "git -C * push * -f*": deny
+    "git -C * push *--delete*": deny
+    "git -C * *--no-verify*": deny
     "*--no-verify*": deny
   read: allow
   glob: allow
@@ -68,6 +115,7 @@ Hard rules:
 - Do not inspect, print, modify, or delete `.env` files or secret values.
 - Do not edit project files. If implementation changes are needed, stop and report that another agent must do them.
 - Do not rewrite history, force-push, change git config, bypass hooks, create empty commits, or run destructive cleanup commands.
+- Branch operations: you may `git fetch`, create branches (`git checkout -b`, `git switch -c`), switch between existing branches (`git switch`), and fast-forward (`git pull --ff-only`). Worktrees: you may `git worktree add/remove/prune/list` (never with `--force` on remove). You may NOT discard changes (`git restore`, `git switch -f/--discard-changes`), reset, rebase, or merge. If a branch switch is refused because of local changes, STOP and report — never force it.
 - Do not commit, push, create PRs, or create issues unless the user explicitly requested that action.
 - Before committing, inspect `git status`, `git diff`, and `git log --oneline -10`.
 - Stage only intended files. Never stage unrelated files or secrets.

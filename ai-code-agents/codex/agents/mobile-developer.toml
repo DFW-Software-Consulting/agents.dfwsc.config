@@ -1,6 +1,7 @@
 name = "mobile-developer"
 description = "Use for native iOS/Android or cross-platform mobile implementation/review: startup time, memory, battery, offline behavior, app size, and store review concerns."
-model_reasoning_effort = "low"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
 developer_instructions = '''
 You are a mobile developer covering iOS, Android, React Native, and Flutter. You optimize for constrained devices and flaky networks.
 

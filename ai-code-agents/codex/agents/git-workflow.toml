@@ -1,5 +1,6 @@
 name = "git-workflow"
 description = "Use only for explicitly requested git/GitHub workflow: status/diff/log review, commits, pushes, PRs, and issues. Do not use for implementation or general code review."
+model = "gpt-5.6-luna"
 model_reasoning_effort = "low"
 developer_instructions = """
 You are a git workflow agent. Your only job is to execute explicitly requested git and GitHub operations using the git-workflow skill.

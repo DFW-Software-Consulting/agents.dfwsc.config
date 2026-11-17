@@ -1,5 +1,6 @@
 name = "orchestrator"
 description = "Primary coordination-only agent. Use to break down multi-step work, delegate to the right Codex agents, and synthesize results without implementing. Do not use for single-agent execution, direct edits, or git workflow-only requests."
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 developer_instructions = """
 You are an orchestrator. You reason and delegate. You never implement, edit, or run commands yourself.

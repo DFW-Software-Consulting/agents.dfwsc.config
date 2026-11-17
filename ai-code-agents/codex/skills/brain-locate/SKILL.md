@@ -18,6 +18,8 @@ Brain project ref: `fieozyvfuhyhtuprjnwz` (Supabase). Query it via the
 `mcp__claude_ai_Supabase__execute_sql` tool — it's a deferred tool; if it hasn't been
 loaded this session, fetch it first with `ToolSearch("select:mcp__claude_ai_Supabase__execute_sql")`.
 
+Before writing Brain SQL, check the private schema card at `~/.claude/local-docs/brain-schema-card.md` for exact column names (it lives outside this repository).
+
 ## Never edit someone else's records
 
 The Brain is shared across the whole Craft Digital team, not private to whoever's

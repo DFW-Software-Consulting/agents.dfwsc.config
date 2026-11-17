@@ -16,10 +16,11 @@
 # Headless runs are exempt: a session whose entrypoint is exactly "sdk-cli" or
 # "sdk-ts" (claude -p and the SDKs) has no reader to apologise to, and the
 # forced apology turn would become the job's output. The entrypoint is read from
-# CLAUDE_CODE_ENTRYPOINT in the hook's environment, else from the first records
-# of the transcript (each carries an "entrypoint" field). An allow-list, never
-# "anything but cli": cli, claude-desktop, claude-vscode, a missing or an
-# unknown value all keep the cap.
+# CLAUDE_CODE_ENTRYPOINT in the hook's environment, else from the transcript:
+# every "entrypoint" value in it must be the same allowed one, so a session that
+# began headless and was resumed interactively (mixed values) keeps the cap. An
+# allow-list, never "anything but cli": cli, claude-desktop, claude-vscode, a
+# missing, unknown, mixed or unreadable value all keep the cap.
 #
 # Long-reply approvals (written by reply-cap-prompt.sh) are honoured: a one-shot
 # approval allows this reply and is removed (also when the reply was short); a
@@ -48,7 +49,9 @@ entrypoint="${CLAUDE_CODE_ENTRYPOINT:-}"
 if [ -z "$entrypoint" ]; then
   _tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty | strings' 2>/dev/null)
   if [ -n "$_tp" ] && [ -f "$_tp" ]; then
-    entrypoint=$(head -n 40 "$_tp" 2>/dev/null | jq -R -r 'try (fromjson | select(type=="object") | .entrypoint // empty | strings) catch empty' 2>/dev/null | head -n 1)
+    # Every distinct value; more than one (or none) is ambiguous: keep the cap.
+    _eps=$(grep -oE '"entrypoint"[[:space:]]*:[[:space:]]*"[^"]*"' "$_tp" 2>/dev/null | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' | sort -u)
+    [ "$(printf '%s\n' "$_eps" | grep -c .)" -eq 1 ] && entrypoint="$_eps"
   fi
 fi
 case "$entrypoint" in

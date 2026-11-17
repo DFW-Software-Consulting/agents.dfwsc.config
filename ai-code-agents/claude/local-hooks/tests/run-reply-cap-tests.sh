@@ -227,6 +227,18 @@ for e in sdk-cli sdk-ts; do mk_ep "$tr_dir/ep-$e.jsonl" "$e"; ep_expect "transcr
 for e in cli claude-desktop; do mk_ep "$tr_dir/ep-$e.jsonl" "$e"; ep_expect "transcript entrypoint $e capped" "" "$(fb "$tr_dir/ep-$e.jsonl" "f-$e-$run")" block; done
 mk_ep "$tr_dir/ep-none.jsonl" ""; ep_expect "transcript without entrypoint capped" "" "$(fb "$tr_dir/ep-none.jsonl" "f-none-$run")" block
 mk_ep "$tr_dir/ep-env.jsonl" "sdk-cli"; ep_expect "env cli wins over transcript sdk-cli" cli "$(fb "$tr_dir/ep-env.jsonl" "f-env-$run")" block
+# every entrypoint in the transcript must be the same allowed value: mixed or later interactive keeps the cap
+mk_ep "$tr_dir/ep-mixed.jsonl" "sdk-cli"; jq -nc '{type:"user",entrypoint:"cli",message:{content:"resumed"}}' >>"$tr_dir/ep-mixed.jsonl"
+ep_expect "transcript sdk-cli then resumed cli capped" "" "$(fb "$tr_dir/ep-mixed.jsonl" "f-mixed-$run")" block
+mk_ep "$tr_dir/ep-late.jsonl" "sdk-cli"; for i in $(seq 1 60); do jq -nc '{type:"progress"}' >>"$tr_dir/ep-late.jsonl"; done
+jq -nc '{type:"user",entrypoint:"cli",message:{content:"resumed"}}' >>"$tr_dir/ep-late.jsonl"
+ep_expect "transcript sdk-cli, cli after record 40 capped" "" "$(fb "$tr_dir/ep-late.jsonl" "f-late-$run")" block
+mk_ep "$tr_dir/ep-two.jsonl" "sdk-ts"; jq -nc '{type:"user",entrypoint:"sdk-cli",message:{content:"x"}}' >>"$tr_dir/ep-two.jsonl"
+ep_expect "transcript sdk-ts and sdk-cli mixed capped" "" "$(fb "$tr_dir/ep-two.jsonl" "f-two-$run")" block
+mk_ep "$tr_dir/ep-same.jsonl" "sdk-cli"; jq -nc '{type:"user",entrypoint:"sdk-cli",message:{content:"again"}}' >>"$tr_dir/ep-same.jsonl"
+ep_expect "transcript sdk-cli in every record skipped" "" "$(fb "$tr_dir/ep-same.jsonl" "f-same-$run")" none
+mk_ep "$tr_dir/ep-text.jsonl" "cli"; jq -nc '{type:"user",message:{content:"{\"entrypoint\":\"sdk-cli\"}"}}' >>"$tr_dir/ep-text.jsonl"
+ep_expect "transcript cli with sdk-cli only inside message text capped" "" "$(fb "$tr_dir/ep-text.jsonl" "f-text-$run")" block
 # last_assistant_message payload plus transcript entrypoint (the real Stop shape)
 ep_expect "message field + transcript sdk-ts skipped" "" "$(stop "$long" "f-both-$run" | jq --arg t "$tr_dir/ep-sdk-ts.jsonl" '.transcript_path=$t')" none
 

@@ -37,15 +37,28 @@ one line to standard error; malformed input is allowed with a line on standard
 error too. `-F` with the file attached (`-Fmsg.txt`, `-aFmsg.txt`) is read as a
 file (it used to be read as a message).
 
-Commit detection and `-F -`:
-- only a real `git commit` command counts as a commit (git in command position,
-  global options such as `-C dir` skipped, subcommand `commit`), and only the
-  words of that command are read for messages. A command that merely holds the
-  words git and commit (an `echo`, a `grep`, a path) is not judged as a commit.
-- `git commit -F - <<'EOF' ... EOF` is judged on the here-document body, split
-  off with the same rule as local-hooks/_public-text-check.py split_heredocs. `-F -`
-  with no here-document on the line (a pipe, a file written earlier) is still
-  unreadable and denied: ask for -m. Read-only.
+Commit detection (fails closed) and `-F -`:
+- the line is split into simple commands at ; & | && || ( ) and line breaks
+  (a backslash-newline joins lines), with every substitution ($( ), backticks,
+  <( ), >( )) analysed as a command line of its own. A command whose first word
+  only prints or searches text (echo, grep, cat, ls, ...), a gh command and git
+  with a subcommand that records no message (log, show, add, push, ...) are
+  provably not commits and are not judged. git with any other subcommand, and
+  any other command holding the word `commit` (sudo, timeout, xargs, a brace
+  group, a variable or alias for git, an unknown wrapper), is treated as a
+  commit; a quoted word holding `commit` in such a command (bash -c, ssh,
+  watch) is analysed as a command line too. On a commit line, the message
+  words of every command that is not provably inert are judged, and text that
+  cannot be lexed is judged whole.
+- `git commit -F - <<'EOF' ... EOF` (also /dev/stdin) is judged on the
+  here-document bodies, split off with the same rule as
+  local-hooks/_public-text-check.py split_heredocs (a test pins the copies). A
+  standard-input message file is readable only when every one on the line sits
+  in a pipeline that carries a here-document and every here-document operator
+  had its body split off; otherwise (a pipe, a here-string, two commits, two
+  operators on a line) it is unreadable and denied: ask for -m. When one is
+  read, every body on the line is judged, so a wrong pairing never decides.
+  The words of a body are message text, not options. Read-only.
 """
 import json
 import os
@@ -135,14 +148,29 @@ def split_heredocs(cmd):
     return "\n".join(out), bodies
 
 
-# Text of the here-document bodies of the command being judged, filled by
-# main(); what `-F -` reads when the line carries one (None: no here-document).
+# What a commit reads as its message file when it names standard input.
+STDIN_PATHS = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
+
+# Filled by main(): the text of the line's here-document bodies, and whether
+# every standard-input message file on the line is fed by one (see
+# _analyze); when it is not, a standard-input message file is unreadable.
 _STDIN_TEXT = None
+_STDIN_OK = False
+
+
+def _stdin_text(path, strict):
+    """Text for a standard-input message file: the here-document bodies when
+    paired, else unreadable (deny when strict, empty otherwise)."""
+    if _STDIN_OK:
+        return _STDIN_TEXT or ""
+    if strict:
+        deny(DENY_FILE.format(path))
+    return ""
 
 
 def file_contents(path):
-    if path == "-" and _STDIN_TEXT is not None:
-        return _STDIN_TEXT
+    if path in STDIN_PATHS:
+        return _stdin_text(path, True)
     try:
         with open(_at(path), encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -222,47 +250,213 @@ def commit_texts(toks, read=None):
     return msgs
 
 
-_WRAPPERS = {"sudo", "env", "command", "exec", "time", "nohup", "nice", "then", "do", "else", "!"}
+# ---------- what counts as a commit (fails closed) ----------
+# The line is split into simple commands (separators: ; & | && || ( ) and a
+# line break; a backslash-newline joins lines), substitutions ($( ), backticks,
+# <( ), >( ) outside single quotes) are cut out and analysed as commands of
+# their own, and each simple command is classed:
+#   inert  - its first word (after VAR=value and !, {, if, then, do, else,
+#            elif, while, until, time) is a command that only prints or
+#            searches text (INERT), gh, or git with a subcommand that cannot
+#            record a commit message (GIT_NON_COMMIT). Not judged.
+#   commit - git with any other subcommand (commit, an alias, a variable), or
+#            any other command holding the word `commit` (sudo, timeout, xargs,
+#            a brace group, a variable holding git, an unknown wrapper).
+#   other  - judged for messages too when the line holds a commit.
+# A quoted word holding the word commit in a command that is not inert (bash
+# -c, su -c, ssh, watch ...) is analysed as a command line of its own.
+# Anything that cannot be lexed is judged on its flat words, else as raw text.
+INERT = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "ag", "ack", "cat",
+         "head", "tail", "wc", "less", "more", "jq", "gh", "ls", "test", "[",
+         "true", "false", ":", "sort", "uniq", "cut", "tr", "diff", "pwd"}
+GIT_NON_COMMIT = {
+    "log", "show", "grep", "diff", "status", "add", "push", "pull", "fetch",
+    "branch", "checkout", "switch", "restore", "rev-parse", "rev-list",
+    "remote", "ls-files", "ls-remote", "blame", "describe", "shortlog",
+    "reflog", "worktree", "clone", "init", "mv", "rm", "diff-tree", "cat-file",
+    "for-each-ref", "show-ref", "symbolic-ref", "config", "help", "version",
+    "bisect", "clean", "gc", "fsck", "archive", "format-patch", "show-branch",
+    "name-rev", "whatchanged", "range-diff", "cherry", "count-objects", "var",
+    "check-ignore", "merge-base", "",
+}
 _GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix", "--config-env"}
+_LEAD = {"!", "{", "if", "then", "do", "else", "elif", "while", "until", "time"}
+_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SEP = re.compile(r"^[;&|()\n]+$")
+_PIPE = {"|", "|&"}
+_COMMIT_WORD = re.compile(r"(?<![\w-])commit(?![\w-])")
+_PH = re.compile(r"\x00(\d+)\x00")
+_MAX_DEPTH = 8
 
 
-def _command_position(toks, i):
-    if i == 0:
-        return True
-    prev = toks[i - 1]
-    if prev in SEGMENT_END or prev in _WRAPPERS:
-        return True
-    if prev.endswith((";", "&", "|", "(")) and not prev.startswith("-"):
-        return True
-    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", prev):  # VAR=value git commit
-        return True
-    # `env -C dir git commit`, `sudo -u x git commit`: the first word of the
-    # segment (after assignments) is a wrapper, so git is the command it runs.
-    k = i - 1
-    while k > 0 and toks[k - 1] not in SEGMENT_END and not toks[k - 1].endswith((";", "&", "|", "(")):
-        k -= 1
-    while k < i and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[k]):
-        k += 1
-    return k < i and os.path.basename(toks[k]) in _WRAPPERS
-
-
-def commit_arg_lists(toks):
-    """The argument words (after `commit`, up to the end of the command) of every
-    real `git commit` in toks."""
-    found = []
-    for i, t in enumerate(toks):
-        if os.path.basename(t.lstrip("({")) != "git" or not _command_position(toks, i):
+def _cut_substitutions(text):
+    """(text with each outermost substitution outside single quotes replaced
+    by a placeholder word, [(original span, inner text)])."""
+    out, subs = [], []
+    i, n, dq = 0, len(text), False
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            out.append(text[i:i + 2])
+            i += 2
             continue
-        j = i + 1
-        while j < len(toks) and toks[j].startswith("-") and toks[j] not in SEGMENT_END:
-            j += 2 if toks[j] in _GIT_VALUE_OPTS else 1
-        if j < len(toks) and toks[j] == "commit":
-            k = j + 1
-            while k < len(toks) and toks[k] not in SEGMENT_END and not toks[k].endswith(";"):
-                k += 1
-            end = k + 1 if k < len(toks) and toks[k].endswith(";") and toks[k] not in SEGMENT_END else k
-            found.append(toks[j + 1:end])
-    return found
+        if c == "'" and not dq:
+            j = text.find("'", i + 1)
+            j = n if j < 0 else j + 1
+            out.append(text[i:j])
+            i = j
+            continue
+        if c == '"':
+            dq = not dq
+            out.append(c)
+            i += 1
+            continue
+        if c == "`":
+            j = i + 1
+            while j < n and text[j] != "`":
+                j += 2 if text[j] == "\\" else 1
+            subs.append((text[i:j + 1], text[i + 1:j]))
+            out.append("\x00%d\x00" % (len(subs) - 1))
+            i = j + 1
+            continue
+        if text.startswith(("$(", "<(", ">("), i):
+            depth, j, q = 1, i + 2, None
+            while j < n and depth:
+                d = text[j]
+                if d == "\\":
+                    j += 2
+                    continue
+                if q:
+                    if d == q:
+                        q = None
+                elif d in "'\"":
+                    q = d
+                elif d == "(":
+                    depth += 1
+                elif d == ")":
+                    depth -= 1
+                j += 1
+            inner = text[i + 2:j - 1] if depth == 0 else text[i + 2:]
+            subs.append((text[i:j], inner))
+            out.append("\x00%d\x00" % (len(subs) - 1))
+            i = j
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out), subs
+
+
+def _lex(text):
+    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    lex.commenters = ""
+    return list(lex)
+
+
+def _kind(words):
+    k = 0
+    while k < len(words) and (words[k] in _LEAD or _ASSIGN.match(words[k])):
+        k += 1
+    if k >= len(words):
+        return "inert"
+    first = os.path.basename(words[k])
+    if first == "git":
+        j = k + 1
+        while j < len(words) and words[j].startswith("-"):
+            j += 2 if words[j] in _GIT_VALUE_OPTS else 1
+        return "inert" if (words[j] if j < len(words) else "") in GIT_NON_COMMIT else "commit"
+    if first in INERT:
+        return "inert"
+    if any(_COMMIT_WORD.fullmatch(w.strip("\"'`;(){}&|")) for w in words[k:]):
+        return "commit"
+    return "other"
+
+
+class _Acc:
+    def __init__(self):
+        self.commit = False   # a commit (or something that may be one) was seen
+        self.judged = []      # (word list, strict) read for messages
+        self.raw = []         # texts that could not be lexed at all
+        self.stdin = []       # per standard-input message file: fed by a here-document?
+        self.ops = 0          # here-document operators seen
+
+
+def _analyze(text, acc, depth=0, strict=True):
+    """Fill acc from one command line (see the block comment above). Words
+    from inside a quoted word are not strict: an unreadable message file there
+    is left to the shared walker, which knows the body's directory."""
+    if depth > _MAX_DEPTH:
+        acc.commit = True
+        acc.raw.append(text)
+        return
+    text = text.replace("\\\n", " ")
+    cut, subs = _cut_substitutions(text)
+    for _span, inner in subs:
+        _analyze(inner, acc, depth + 1, strict)
+    try:
+        toks = _lex(cut)
+    except ValueError:
+        try:
+            flat = shlex.split(text)
+        except ValueError:
+            if _COMMIT_WORD.search(text):
+                acc.commit = True
+            acc.raw.append(text)
+            return
+        if _COMMIT_WORD.search(text):
+            acc.commit = True
+        acc.judged.append((flat, strict))
+        acc.stdin += [False] * _stdin_uses(flat)
+        return
+    restore = lambda w: _PH.sub(lambda m: subs[int(m.group(1))][0], w)
+    segs, cur, pipe_hd = [], [], False
+    for t in toks + [";"]:
+        if not _SEP.match(t):
+            cur.append(t)
+            continue
+        if cur:
+            pipe_hd = pipe_hd or any("<<" in w and "<<<" not in w for w in cur)
+            acc.ops += sum(1 for w in cur if "<<" in w and "<<<" not in w)
+            segs.append((cur, pipe_hd))
+            cur = []
+        if t not in _PIPE:
+            pipe_hd = False
+    for words, fed in segs:
+        kind = _kind(words)
+        if kind == "inert":
+            continue
+        if kind == "commit":
+            acc.commit = True
+        words = [restore(w) for w in words]
+        acc.judged.append((words, strict))
+        acc.stdin += [fed] * _stdin_uses(words)
+        for w in words:
+            if re.search(r"\s", w) and _COMMIT_WORD.search(w):
+                _analyze(w, acc, depth + 1, False)
+
+
+def _stdin_uses(words):
+    rec = []
+    commit_texts(words, lambda p: rec.append(p) or "")
+    return sum(1 for p in rec if p in STDIN_PATHS)
+
+
+def _heredoc_headers(cmd):
+    """The line that opens each here-document, in the order split_heredocs()
+    returns the bodies (same line walk)."""
+    heads, delim, strip_tabs = [], None, False
+    for line in cmd.split("\n"):
+        if delim is not None:
+            if (line.lstrip("\t") if strip_tabs else line) == delim:
+                delim = None
+            continue
+        m = re.search(r"(?<!<)<<(?!<)(-?)\s*(?:\\?(\w+)|'([^']*)'|\"([^\"]*)\")", line)
+        if m:
+            strip_tabs = m.group(1) == "-"
+            delim = next(g for g in m.groups()[1:] if g is not None)
+            heads.append(line)
+    return heads
 
 
 # Cheap test: does the line need the walker at all (a directory change, a
@@ -334,7 +528,7 @@ def walked_texts(cmd, cwd):
             else:
                 gh_pr_texts(["gh"] + e["args"], note)
             for p in rec:
-                if p != "-" and not os.path.isabs(p):
+                if p not in STDIN_PATHS and not os.path.isabs(p):
                     dirs.setdefault(p, set()).add(where)
             if args == e["args"]:
                 continue
@@ -356,8 +550,8 @@ def walked_texts(cmd, cwd):
 
 
 def _read(q, is_commit, shown):
-    if shown == "-" and _STDIN_TEXT is not None:
-        return _STDIN_TEXT
+    if shown in STDIN_PATHS:
+        return _stdin_text(shown, is_commit)
     try:
         with open(q, encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -377,61 +571,114 @@ def main():
     except (ValueError, AttributeError):
         note("malformed hook input; allowing")
         allow()  # malformed input: fail open (this used to end in a traceback)
-    global _STDIN_TEXT
+    global _STDIN_TEXT, _STDIN_OK
     maybe_commit = "git" in cmd and "commit" in cmd
     is_pr = "gh" in cmd and "pr" in cmd
     if not maybe_commit and not is_pr:
         allow()
     stripped, bodies = split_heredocs(cmd)
-    if bodies:
-        _STDIN_TEXT = "\n".join(bodies)
-    # Tokens: the whole line; with a here-document and no substitution, the line
-    # without the bodies (words inside a body must not be read as options, and an
-    # apostrophe in a body must not break the quoting).
-    toks = None
-    attempts = [cmd]
-    if bodies and "$(" not in cmd and "`" not in cmd:
-        attempts.insert(0, stripped.replace("\n", " ; "))
-    for text in attempts:
-        try:
-            toks = shlex.split(text)
-            break
-        except ValueError:
-            continue
-    if toks is None:
-        allow()  # fail open on unparseable shell, as before
 
-    extra = []
-    if NEEDS_WALK.search(cmd):
+    def flat(text):
         try:
-            extra = walked_texts(cmd, cwd)
-        except Exception:
-            note("shared walker failed; using the checks without variable, directory and command-body resolution")
-            extra = []  # any trouble with the walker: the old behaviour
+            return shlex.split(text)
+        except ValueError:
+            return None
+
+    # Flat words of the line, for the gh checks: without the here-document
+    # bodies and as written (the bodies' words included, as before).
+    flats = [t for t in (flat(stripped), flat(cmd) if bodies else None) if t is not None]
 
     def hit(texts):
         return any(pat.search(m or "") for m in texts for pat in ATTRIBUTION)
 
-    commits = commit_arg_lists(toks) if maybe_commit else []
-    is_commit = bool(commits) or bool(_WALK_FOUND_COMMIT)
-
-    if not is_commit:
-        if hit(gh_pr_texts(toks)):
-            deny(DENY_MENTION_PR)
+    if not maybe_commit:
+        extra = run_walker(cmd, cwd)
+        for toks in flats:
+            if hit(gh_pr_texts(toks)):
+                deny(DENY_MENTION_PR)
         if hit(m for k, m in extra if k == "pr"):
             deny(DENY_MENTION_PR)
         allow()
 
-    for args in commits:
-        if hit(commit_texts(args)):
+    # The line without here-document bodies decides what is judged and pairs
+    # each standard-input message file with a here-document; the line as
+    # written (bodies included) is analysed too, so a body that is run as
+    # commands, or a here-document misread by the line rule, cannot hide one.
+    acc = _Acc()
+    _analyze(stripped, acc)
+    acc_full = _Acc()
+    if bodies:
+        _analyze(cmd, acc_full)
+    _STDIN_TEXT = "\n".join(bodies)
+    # Fed only when every standard-input message file sits in a pipeline that
+    # carries a here-document and every operator found is one whose body was
+    # split off; anything else is unreadable (deny, ask for -m).
+    _STDIN_OK = bool(bodies) and all(acc.stdin) and acc.ops == len(bodies)
+    extra = run_walker(cmd, cwd)
+    is_commit = acc.commit or acc_full.commit or bool(_WALK_FOUND_COMMIT)
+
+    if not is_commit:
+        for toks in flats:
+            if hit(gh_pr_texts(toks)):
+                deny(DENY_MENTION_PR)
+        if hit(m for k, m in extra if k == "pr"):
+            deny(DENY_MENTION_PR)
+        allow()
+
+    # Message words of every command that is not inert; an unreadable message
+    # file denies, as before.
+    for words, strict in acc.judged:
+        if hit(commit_texts(words, None if strict else optional_message_file)):
             deny(DENY_MENTION)
-    if hit(gh_pr_texts(toks)):
-        deny(DENY_MENTION_PR)
+    # Unlexable text: judged whole (the line as written is only read for
+    # words: an apostrophe in a body makes it unlexable, as it did before).
+    if hit(acc.raw):
+        deny(DENY_MENTION)
+    # The line as written: credits found in its words are denied (the words of
+    # a here-document body are message text, so a file name among them is not
+    # read as a message file, and standard input is what the bodies hold).
+    for words, _strict in acc_full.judged:
+        if hit(commit_texts(words, optional_message_file)):
+            deny(DENY_MENTION)
+    # Here-document bodies: every one when the line reads a message from
+    # standard input (so a wrong pairing never decides), else those opened on
+    # a line that holds a commit (a `-m "$(cat <<EOF ...)"` message).
+    heads = _heredoc_headers(cmd)
+    for i, body in enumerate(bodies):
+        if acc.stdin or i >= len(heads) or _line_commits(heads[i]):
+            if hit([body]):
+                deny(DENY_MENTION)
+    for toks in flats:
+        if hit(gh_pr_texts(toks)):
+            deny(DENY_MENTION_PR)
     if hit(m for k, m in extra if k == "commit"):
         deny(DENY_MENTION)
     if hit(m for k, m in extra if k == "pr"):
         deny(DENY_MENTION_PR)
     allow()
+
+
+def _line_commits(line):
+    a = _Acc()
+    _analyze(line, a)
+    return a.commit or bool(a.raw)
+
+
+def optional_message_file(path):
+    if path in STDIN_PATHS:
+        return _stdin_text(path, False)
+    return optional_file_contents(path)
+
+
+def run_walker(cmd, cwd):
+    """walked_texts(), or [] when the line does not need it or it fails."""
+    if not NEEDS_WALK.search(cmd):
+        return []
+    try:
+        return walked_texts(cmd, cwd)
+    except Exception:
+        note("shared walker failed; using the checks without variable, directory and command-body resolution")
+        return []  # any trouble with the walker: the old behaviour
 
 
 if __name__ == "__main__":

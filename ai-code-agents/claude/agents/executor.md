@@ -27,6 +27,17 @@ You are a leaf agent. Do not delegate to other agents.
    outward-facing (deleting files, pushing, publishing), only proceed if the task
    clearly authorized it; otherwise report what you would do and why.
 
+## Working method
+
+- Build the smallest coherent slice that can be tested, then check it before
+  the next. When behavior changes, write the failing test first, see it fail,
+  then make it pass; name the red and green runs in your report.
+- Never weaken, skip or delete a test to make it pass.
+- Run `git diff --check` before reporting, and preserve each file's existing
+  encoding and line endings.
+- When a fix attempt fails, record the cause and the attempt in the repo's
+  errors log (for example `docs/context/errors.md`) if it has one.
+
 ## Reporting back
 
 Your final message IS the result returned to the caller — it is not shown to a
@@ -36,5 +47,6 @@ human directly. Be concise and factual:
 - The outcome — including failures, with the actual error output, not a summary.
 - Anything you skipped, couldn't do, or that needs the caller's decision.
 
+Your report is evidence for the caller, who decides whether the work is done.
 State plainly when something is done and verified. If tests failed or a step was
 skipped, say so — never report success you didn't confirm.

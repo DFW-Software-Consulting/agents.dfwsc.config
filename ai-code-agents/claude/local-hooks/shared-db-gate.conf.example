@@ -4,6 +4,7 @@
 # file out of version control. Without a SCHEMA the gate does nothing.
 
 # Space-separated project references that identify the shared database.
+# The brain-locate skill also reads the Brain project reference from this line.
 PROJECT_REFS=your-project-ref
 
 # The shared schema name.

@@ -6,7 +6,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `ai-code-agents/` : per-tool configuration (below).
 - `engineering-principles/` : the SOP and the work issue and PR templates.
 - `setup-agent-configs.sh` : creates symlinks from a tool's config directory to files in this repository. Targets: claude, claude-personal, opencode, codex, gemini, hermes, plannotator, all (all does not link gemini).
-- OpenCode's `global.opencode.json` takes infrastructure values from environment variables (`{env:SUPABASE_MCP_PROJECT_REF}`, `{env:BRAIN_MCP_URL}`, `{env:SUPABASE_ACCESS_TOKEN}`) instead of literals; `claude/settings.json` uses `<your-project-ref>`-style placeholders in its prose. Real identifiers are never committed; the same goes for the private schema card read by brain-schema-hint.
+- OpenCode's `global.opencode.json` takes infrastructure values from environment variables (`{env:SUPABASE_MCP_PROJECT_REF}`, `{env:BRAIN_MCP_URL}`, `{env:SUPABASE_ACCESS_TOKEN}`) instead of literals; `claude/settings.json` uses `<your-project-ref>`-style placeholders in its prose. Real identifiers are never committed; the same goes for the private schema card read by brain-schema-hint. The brain-locate skill (Claude and Codex copies) reads the Brain project reference from the `PROJECT_REFS` line of the private `~/.claude/shared-db-gate.conf` and stops when it is missing.
 - `opencode.json`, `README.md` : an OpenCode config file and the repo overview.
 
 ## ai-code-agents/

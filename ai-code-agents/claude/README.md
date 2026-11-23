@@ -46,7 +46,7 @@ Before launching Claude, make sure GitHub MCP can authenticate in one of these w
 | `agents/` | Subagents — delegated tasks that run in isolated context |
 | `commands/` | Slash commands (`/qa`, `/git`, `/smallwins`, etc.) |
 | `skills/` | Reusable instruction sets loaded into agent context |
-| `CLAUDE.md` | Global instructions loaded into every Claude session |
+| `CLAUDE.md` | Short pointer note linked as the global instructions file; personal instructions are kept privately and are not versioned here |
 | `settings.json` | Global settings (effort level, small model, theme) |
 
 ## Agents

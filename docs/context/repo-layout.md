@@ -20,7 +20,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - Each tool directory under `ai-code-agents/` (claude, opencode, codex, gemini, cline, hermes) and `skills/` has a `README.md` with that tool's setup steps; read it before changing the tool's config.
 
 ## What the setup script links
-- `claude` links `CLAUDE.md`, `settings.json`, `agents`, `commands` and `skills` from `ai-code-agents/claude/` into `~/.claude/`.
+- `claude` links `CLAUDE.md` (a short pointer note only; personal global instructions are private and not versioned here), `settings.json`, `agents`, `commands` and `skills` from `ai-code-agents/claude/` into `~/.claude/`.
 - `claude-personal` links `agents`, `commands` and `skills` into `~/.claude-personal/`.
 - `opencode`, `codex` and `gemini` link their own files into the matching tool directories.
 - `hermes` links nothing; it prints the `skills.external_dirs` entry to add.

@@ -1,0 +1,2 @@
+# Checks run by run-checks.sh before a push or pull request from this repo.
+bash ai-code-agents/claude/local-hooks/tests/run-tests.sh

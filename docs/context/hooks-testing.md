@@ -26,6 +26,9 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 
 Known gap: `behavior-doc-reminder.sh` and `personal-hooks/sync-memory.sh` have no suite.
 
+## Checks gate coverage
+This repo declares `bash ai-code-agents/claude/local-hooks/tests/run-tests.sh` in `.claude/git-checks`, so `run-checks.sh` (and the checks gate behind it) runs that suite before a push from here, about 35 seconds. Only `run-tests.sh` is declared; the other `run-*-tests.sh` suites still run by hand. Without the declaration the runner records `none_detected` and the gate passes any commit. `run-checks-tests.sh` asserts the declaration.
+
 ## How to run
 From the repository or worktree root, one suite at a time:
 

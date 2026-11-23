@@ -594,7 +594,7 @@ CORPUS3 = {
 
 # Corpus 4: the spellings from the review of the message-source change ({M} the
 # message in both runs; the work directory also holds `clean.txt;` with a
-# crediting text, c.txt, link.txt -> credit.txt and sub/; nofile.txt is absent).
+# crediting text, c.txt, link.txt -> credit.txt and sub/; nofile.txt is absent; sub/ is empty, so a case that changes into it must not find c.txt there: never point a case at a shared directory such as /tmp).
 CORPUS4 = {
     'r1:b-wrap env': 'env git commit -F nofile.txt',
     'r1:b-wrap command': 'command git commit -F nofile.txt',
@@ -764,7 +764,7 @@ CORPUS4 = {
     'r1:c-clean-semi-credit': 'git commit -F clean.txt; ',
     'r1:c-dot': 'git commit -F clean.txt.',
     'r1:c-comma': 'git commit -F clean.txt,',
-    'r1:c-cd': 'cd /tmp; git commit -F c.txt;',
+    'r1:c-cd': 'cd sub; git commit -F c.txt;',
     'r1:c-gluedbefore': 'x;git commit -Fc.txt;',
     'r1:c-multi': 'git commit -F c.txt; git commit -F nofile.txt;',
     'r1:e-plain': "cat > m.txt <<'EOF'\n{M}\nEOF\ngit commit -F m.txt",

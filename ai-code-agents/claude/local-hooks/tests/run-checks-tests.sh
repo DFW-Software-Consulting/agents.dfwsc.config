@@ -335,6 +335,10 @@ r="$(mkrepo asfile 'true')"; echo x > "$r/.git/claude-checks"
 out="$(run --dir "$r")"; rc=$?
 eq "claude-checks is a file: error" "$(jq -r .status <<<"$out")" error; eq "  exit 2" "$rc" 2
 
+# --- this repository's own declaration ---
+repo_root="$(cd "$hooks/../../.." && pwd)"
+eq "this repo declares run-tests.sh as its check" "$(detect "$repo_root" False)" '["bash ai-code-agents/claude/local-hooks/tests/run-tests.sh"]'
+
 # --- usage ---
 out="$(run --bogus)"; rc=$?; eq "unknown argument exits 2" "$rc" 2
 r="$(mkrepo buildflag 'true')"; out="$(run --dir "$r" --build)"; eq "--build accepted" "$(jq -r .status <<<"$out")" passed

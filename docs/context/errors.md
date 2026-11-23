@@ -2,6 +2,13 @@
 
 Newest first. Before proposing a fix, search here for the failure's signature; an entry whose Status is not fixed, or with a `Tried and failed` line, changes the theory before another attempt. Entry fields: Signature (optional, the stable searchable part of the message or symptom), Cause, Fix, Tried and failed (optional, what was attempted that did not work and why), Guard (optional, the test, check or hook that now prevents a repeat), Status (optional: open, fixed or worked around; none means fixed), Date.
 
+## Differential suite failed only on some machines (`4:r1:c-cd`); checks gate recorded none_detected for this repo
+- Signature: `FAIL - 4:r1:c-cd [credit]: baseline denies, current allows (not a listed exception)` on `cd /tmp; git commit -F c.txt;`, 2 failed of 1964.
+- Cause: the case read `c.txt` in the shared `/tmp`; a stray `/tmp/c.txt` on the machine was found by the current hook (which resolves the message file) but not by the baseline, so the result depended on the machine. Separately, the repo had no `.claude/git-checks`, so `run-checks.sh` detected nothing and the checks gate passed any commit.
+- Fix: the case changes into the corpus work directory's empty `sub/` instead of `/tmp`; `.claude/git-checks` runs `run-tests.sh`.
+- Guard: `run-checks-tests.sh` asserts the declaration.
+- Date: 2026-11-23
+
 ## Merged skill or agent changes did not go live (live links, `setup-agent-configs.sh`)
 - Cause: the skills, agents and commands links in the Claude configuration directories pointed at the primary checkout, while merges and fast-forwards happen in the main worktree.
 - Fix: since 2026-11-17 those links are whole-directory links into the main worktree (hooks-shipping.md). Check with `readlink -f` which checkout a link serves. Two skills committed as absolute links still resolve through the primary checkout.

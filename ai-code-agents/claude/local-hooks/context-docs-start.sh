@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart / SubagentStart hook. Injects docs/context/INDEX.md when the repo
 # at cwd has opted in, and on SubagentStart adds standing instructions for
-# non-exempt agent types (read context docs, update them, acceptance check).
+# non-exempt agent types (read context docs, update them, acceptance check with evidence per criterion).
 # Fails open: any error, missing tool or bad input means no output, exit 0.
 set -uo pipefail
 payload="$(cat 2>/dev/null)" || exit 0
@@ -32,7 +32,7 @@ if [ -n "$cwd" ] && [ -d "$cwd" ] && command -v git >/dev/null 2>&1; then
     if [ -n "$idx" ]; then
       note=""
       if [ "${#idx}" -gt 3000 ]; then idx="${idx:0:3000}"; note=$'\n[INDEX.md truncated at 3000 characters; read docs/context/INDEX.md for the rest]'; fi
-      ctx="This repo keeps context docs in docs/context/. Read the docs relevant to your task before starting, and check docs/context/errors.md before proposing a fix. Index:"$'\n\n'"$idx$note"
+      ctx="This repo keeps context docs in docs/context/. Read the docs relevant to your task before starting, and check docs/context/errors.md before proposing a fix, including its 'Tried and failed' notes so a known dead end is not retried. Index:"$'\n\n'"$idx$note"
     fi
   fi
 fi
@@ -40,7 +40,7 @@ fi
 if [ "$event" = "SubagentStart" ] && ! handback_is_exempt "$agent_type"; then
   add="Context docs: if the repo you work in has docs/context/INDEX.md, read it and the docs it marks relevant first. Before handing back, update those docs for what you changed. End your report with a line 'Context docs: updated <files>' or 'Context docs: no change needed, <reason>' or 'Context docs: none in this repo'."
   if ! acceptance_gate_is_off; then
-    add="$add"$'\n\n'"Acceptance: before handing back, check every acceptance criterion from your brief against what you actually did, run the checks, and fix what fails. Include a section headed 'Acceptance check' with one line per criterion: '<criterion> : met | not met : <evidence>'."
+    add="$add"$'\n\n'"Acceptance: before handing back, check every acceptance criterion from your brief against what you actually did, run the checks, and fix what fails. Include a section headed 'Acceptance check' with one line per criterion: '<criterion> : met | not met : <evidence>'. Evidence is required on every line: what you ran or inspected and the result, for example '- tests pass : met : npm run test:unit -- foo, 14 passed'. A bare met, done, yes or checkmark is sent back. If a criterion is not met or could not be verified, say so and give the reason; a not verified line with no reason is sent back too."
   fi
   if [ -n "$ctx" ]; then ctx="$ctx"$'\n\n'"$add"; else ctx="$add"; fi
 fi

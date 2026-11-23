@@ -3,8 +3,9 @@
 # hook_event_name:
 #   PreToolUse (matcher SubagentHandback): inspects tool_input.message, denies.
 #   SubagentStop: inspects last_assistant_message, blocks.
-# A report must have an "Acceptance check" section with no "not met" line, and a
-# "Context docs:" line. Each agent is sent back at most HANDBACK_SEND_BACK_CAP
+# A report must have an "Acceptance check" section with no "not met" line, whose
+# "met" criterion lines each carry evidence (what was run or inspected and the
+# result, not a bare met/done/yes/checkmark), and a "Context docs:" line. Each agent is sent back at most HANDBACK_SEND_BACK_CAP
 # times; after that the report goes through as is. For every agent type, exempt
 # ones included, a report longer than handback_max_chars (default 4000, env
 # CLAUDE_HANDBACK_MAX_CHARS) is also sent back. Fails open on any error.
@@ -84,7 +85,8 @@ case "$text_len" in ''|*[!0-9]*) text_len=0 ;; esac
 if [ "$text_len" -gt "$max_chars" ]; then
   problems+=("Your report is ${text_len} characters; the limit is ${max_chars} (a report of exactly ${max_chars} is fine). Shorten it by dropping detail and keeping the conclusions. If you can write files, put the detail in a file and give its path in the report.")
 fi
-# Parse the report. Prints NOSECTION, UNMET or OK.
+# Parse the report. Prints NOSECTION, UNMET, NOEVIDENCE (then the first offending
+# line) or OK.
 verdict=SKIP
 if [ "$exempt" -eq 0 ]; then verdict="$(awk '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
@@ -109,6 +111,35 @@ function status(line,   t, n, f, i, w, nw, a, x, k) {
   }
   return ""
 }
+# Evidence check for a criterion line already judged "met" (or a bare positive
+# such as done/yes/a checkmark, or a "not verified" / "unverified" / "not checked"
+# line, which needs its reason). Returns 1 when the line has no evidence text:
+# the criterion is followed by a bare positive token and nothing else. Evidence
+# may follow the status ("X : met : ran suite, 14 passed") or precede it
+# ("X : ran suite : met"). Not-met lines are not checked here (UNMET handles them).
+function noevidence(line, st,   t, x, n, f, i, k, m, seg, pos, nev, ne) {
+  t = tolower(line)
+  sub(/^[ \t]*(>[ \t]*)?([-*+]|[0-9]+[.)]|✓|✔|✗|✘|✅|❌|☑|☐)?[ \t]*/, "", t)
+  x = t
+  gsub(/ - |—|–|\||:|\(/, "\001", x)
+  n = split(x, f, "\001"); m = 0
+  for (i = 1; i <= n; i++) {
+    k = f[i]; gsub(/\*\*|__|`/, "", k); k = trim(k); sub(/[.,;)]+$/, "", k); k = trim(k)
+    if (k != "") seg[++m] = k
+  }
+  pos = 0
+  for (i = 1; i <= m; i++) {
+    if (seg[i] ~ /^(met|not verified|unverified|not checked)$/ || (i >= 2 && seg[i] ~ /^(done|yes|y|pass|passed|true|✓|✔|✅|☑)$/)) { pos = i; break }
+  }
+  if (pos == 0) {
+    if (st != "met") return 0
+    return (m < 2 && split(t, f, " ") < 5)
+  }
+  if (pos - 1 >= 2) return 0
+  ne = 0
+  for (i = pos + 1; i <= m; i++) if (seg[i] !~ /^(met|not verified|unverified|not checked|done|yes|y|pass|passed|true|✓|✔|✅|☑|n\/a|none|-)$/) ne++
+  return (ne == 0)
+}
 {
   low = tolower($0)
   if (!on) {
@@ -129,13 +160,26 @@ END {
     if (anycrit && !crit[i]) continue
     if (status(lines[i]) == "not") { print "UNMET"; exit }
   }
+  for (i = 1; i <= nl; i++) {
+    if (anycrit && !crit[i]) continue
+    st = status(lines[i])
+    if ((st == "met" || st == "") && noevidence(lines[i], st)) { print "NOEVIDENCE"; print substr(trim(lines[i]), 1, 120); exit }
+  }
   print "OK"
 }' <<<"$text")"; fi
-case "$verdict" in
+bad_line="${verdict#*$'\n'}"; [ "$bad_line" = "$verdict" ] && bad_line=""
+case "${verdict%%$'\n'*}" in
   NOSECTION)
     problems+=("Your report has no 'Acceptance check' section. Check every acceptance criterion from your brief against what you actually did, run the checks, fix what fails, and add a section headed 'Acceptance check' with one line per criterion: '<criterion> : met | not met : <evidence>'.") ;;
   UNMET)
     problems+=("Your Acceptance check has criteria marked 'not met'. Fix the unmet criteria, or if you are truly blocked say what blocks it, then hand back again.") ;;
+  NOEVIDENCE)
+    case "$bad_line" in
+    *[Nn]ot\ verified*|*[Uu]nverified*|*[Nn]ot\ checked*)
+    problems+=("Your Acceptance check has a 'not verified' criterion with no reason (\"$bad_line\"). A reason is required: say why it could not be verified. For example: '- e2e flow : not verified : needs a seeded stage DB, not available here'.") ;;
+    *)
+    problems+=("Your Acceptance check has a criterion with no evidence${bad_line:+ (\"$bad_line\")}. Every criterion line must say what you ran or inspected and what the result was, not just met, done, yes or a checkmark. For example: '- tests pass : met : npm run test:unit -- foo, 14 passed'. If a criterion is not met or could not be verified, say so and give the reason, for example '- e2e passes : not verified : no browser in this sandbox'.") ;;
+    esac ;;
 esac
 if [ "$exempt" -eq 0 ] && ! grep -qiE '^[[:space:]]*(>[[:space:]]*)?([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)?(\*\*|__)?context docs(\*\*|__)?[[:space:]]*(:|-|–|—)' <<<"$text"; then
   problems+=("Your report has no 'Context docs:' line. End it with 'Context docs: updated <files>', 'Context docs: no change needed, <reason>' or 'Context docs: none in this repo' (update docs/context first if the repo has it).")

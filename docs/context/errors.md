@@ -1,6 +1,6 @@
 # Error log
 
-Newest first. Check here before proposing a fix.
+Newest first. Check here before proposing a fix, including any `Tried and failed` line, so a known dead end is not retried. Entry fields: Cause, Fix, Tried and failed (optional, what was attempted that did not work and why), Date.
 
 ## Merged skill or agent changes did not go live (live links, `setup-agent-configs.sh`)
 - Cause: the skills, agents and commands links in the Claude configuration directories pointed at the primary checkout, while merges and fast-forwards happen in the main worktree.

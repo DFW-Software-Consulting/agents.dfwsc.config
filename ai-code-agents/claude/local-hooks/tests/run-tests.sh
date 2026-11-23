@@ -366,6 +366,11 @@ diff_out="$(python3 "$here/no-agent-mention-diff.py" 2>&1)"; diff_rc=$?
 if [ "$diff_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - differential: $(grep '^corpus:' <<<"$diff_out")"
 else fail=$((fail + 1)); echo "FAIL - differential against the pinned baseline hook"; grep -E 'FAIL|passed|^ ' <<<"$diff_out" | sed 's/^/       /'; fi
 
+# the completion gate suite (its own script; counted here as one result)
+cg_out="$(bash "$here/run-completion-gate-tests.sh" 2>&1)"; cg_rc=$?
+if [ "$cg_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - completion-gate suite: $(grep '^passed:' <<<"$cg_out")"
+else fail=$((fail + 1)); echo "FAIL - completion-gate suite"; grep -E '^FAIL|^passed' <<<"$cg_out" | sed 's/^/       /'; fi
+
 # --- fallbacks say so on standard error, never on the hook's output ---
 # check_err NAME SCRIPT PAYLOAD STDOUT-EXPECT(exact) STDERR-REGEX (empty regex: stderr must be empty)
 check_err() {

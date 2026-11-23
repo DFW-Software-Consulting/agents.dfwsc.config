@@ -1,0 +1,4 @@
+# ~/.claude/completion-gate.conf  (read as data, never executed)
+# MODE: deny (default) blocks the final reply once, asking for a verification
+# statement; warn only shows a notice and never blocks.
+MODE=deny

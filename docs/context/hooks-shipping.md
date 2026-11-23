@@ -22,7 +22,7 @@ Two skills are committed as absolute links and still resolve through the primary
 ## Adding a new hook: checklist
 - Header comment stating the event, the matcher, what it enforces and the off switch if it has one (a couple of older scripts, such as delegate-reminder.sh and clock-reminder.sh, predate this).
 - Fails open on malformed input and missing tools; deny output built with jq or Python.
-- An environment off switch. A gate that enforces a workflow rule a person may deliberately need to step around also honours a 12-hour off-file through `_gate-common.sh`; today those are delegate-gate, require-agent-model, read-size-gate, worktree-gate, git-guard, public-repo-text-gate, shared-db-write-gate, require-acceptance-criteria and handback-gate (the last two share one acceptance off-file).
+- An environment off switch. A gate that enforces a workflow rule a person may deliberately need to step around also honours a 12-hour off-file through `_gate-common.sh`; today those are delegate-gate, require-agent-model, read-size-gate, worktree-gate, git-guard, public-repo-text-gate, shared-db-write-gate, require-acceptance-criteria, handback-gate (the last two share one acceptance off-file) and completion-gate.
 - A `tests/run-<name>-tests.sh` suite beside the others, with allow and deny payloads, using a throwaway HOME and no network.
 - Environment-specific values in a local config file read as data, with a fake-valued `*.conf.example` committed.
 - Add it to hooks-overview.md and hooks-testing.md.

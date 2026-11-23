@@ -8,3 +8,4 @@
 - [errors.md](errors.md) : read before proposing a fix for a hook, test, git or command-header problem; it lists past failures with fixes
 - [history/2026-11-15-hooks-buildout.md](history/2026-11-15-hooks-buildout.md) : read when you want the reason a hook exists or the lessons from building them
 - [history/2026-11-17-live-config-and-hooks.md](history/2026-11-17-live-config-and-hooks.md) : read when you want the reason live skills and agents are served from the main worktree, or the lessons from the headless cap, commit-message check and schema hint
+- [history/2026-11-23-completion-gate.md](history/2026-11-23-completion-gate.md) : read when you want the reason the completion gate exists or its known false positives and negatives

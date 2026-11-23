@@ -62,6 +62,19 @@ c="$(ctx_of)"; grep -q 'read when changing auth' <<<"$c" && ! grep -q 'Acceptanc
 expect "SubagentStart Explore plain repo silent" "$start" "$(sa "$plain" Explore)" none
 expect "SubagentStart Explore non-repo silent" "$start" "$(sa "$nonrepo" Explore)" none
 c="$(ctx_of)"; grep -q 'Tried and failed' <<<"$(call "$start" "$(sa "$opted" executor)"; ctx_of)" && grep -q 'bare met' <<<"$(call "$start" "$(sa "$plain" executor)"; ctx_of)" && ok "start text mentions Tried and failed and evidence rule" || bad "start text"
+# error-ledger fields: Signature, Status, Guard (start text, skill template, repo header)
+c="$(call "$start" "$(sa "$opted" executor)"; ctx_of)"
+grep -q 'Signature' <<<"$c" && grep -q 'Status' <<<"$c" && ok "start text names Signature and Status" || bad "start text Signature/Status"
+c="$(call "$start" "$(sa "$opted" Explore)"; ctx_of)"
+grep -q 'Signature' <<<"$c" && ok "session-style start text (Explore) names Signature" || bad "Explore start text Signature"
+skill="$here/../../skills/context-docs/SKILL.md"
+repo_errors="$here/../../../../docs/context/errors.md"
+tpl="$(awk '/^## Error log entry/{f=1} f' "$skill")"
+grep -q '^- Signature:' <<<"$tpl" && grep -q '^- Status:' <<<"$tpl" && grep -q '^- Guard:' <<<"$tpl" && ok "skill template has Signature, Status, Guard lines" || bad "skill template fields"
+grep -qi 'optional' <<<"$(grep -i 'Signature' <<<"$tpl")" && ok "skill marks the new fields optional" || bad "skill optional wording"
+grep -qi 'search' <<<"$tpl" && grep -qi 'not fixed' <<<"$tpl" && ok "skill states the search-first usage rule" || bad "skill usage rule"
+grep -q 'Signature' <<<"$(sed -n '/^## Scaffold/,/^## Add or update/p' "$skill")" && ok "skill scaffold step lists the new fields" || bad "skill scaffold step"
+grep -q 'Signature' <<<"$(sed -n 3p "$repo_errors")" && grep -q 'Guard' <<<"$(sed -n 3p "$repo_errors")" && ok "repo errors.md header lists the new fields" || bad "repo errors.md header"
 CLAUDE_ACCEPTANCE_GATE=off call "$start" "$(sa "$plain" executor)"
 c="$(ctx_of)"; grep -q 'Context docs: updated' <<<"$c" && ! grep -q 'Acceptance check' <<<"$c" && ok "gate off drops acceptance instruction" || bad "gate off start"
 

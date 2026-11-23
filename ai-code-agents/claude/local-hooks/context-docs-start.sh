@@ -32,7 +32,7 @@ if [ -n "$cwd" ] && [ -d "$cwd" ] && command -v git >/dev/null 2>&1; then
     if [ -n "$idx" ]; then
       note=""
       if [ "${#idx}" -gt 3000 ]; then idx="${idx:0:3000}"; note=$'\n[INDEX.md truncated at 3000 characters; read docs/context/INDEX.md for the rest]'; fi
-      ctx="This repo keeps context docs in docs/context/. Read the docs relevant to your task before starting, and check docs/context/errors.md before proposing a fix, including its 'Tried and failed' notes so a known dead end is not retried. Index:"$'\n\n'"$idx$note"
+      ctx="This repo keeps context docs in docs/context/. Read the docs relevant to your task before starting, and check docs/context/errors.md before proposing a fix, searching it for the failure's Signature. An entry whose Status is not fixed, or that lists 'Tried and failed' attempts, means rethink the theory before another attempt. Index:"$'\n\n'"$idx$note"
     fi
   fi
 fi

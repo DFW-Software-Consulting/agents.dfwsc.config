@@ -61,6 +61,7 @@ expect "SubagentStart Explore opted-in gets INDEX" "$start" "$(sa "$opted" Explo
 c="$(ctx_of)"; grep -q 'read when changing auth' <<<"$c" && ! grep -q 'Acceptance check' <<<"$c" && ! grep -q 'Context docs: updated' <<<"$c" && ok "Explore gets only INDEX content" || bad "Explore content"
 expect "SubagentStart Explore plain repo silent" "$start" "$(sa "$plain" Explore)" none
 expect "SubagentStart Explore non-repo silent" "$start" "$(sa "$nonrepo" Explore)" none
+c="$(ctx_of)"; grep -q 'Tried and failed' <<<"$(call "$start" "$(sa "$opted" executor)"; ctx_of)" && grep -q 'bare met' <<<"$(call "$start" "$(sa "$plain" executor)"; ctx_of)" && ok "start text mentions Tried and failed and evidence rule" || bad "start text"
 CLAUDE_ACCEPTANCE_GATE=off call "$start" "$(sa "$plain" executor)"
 c="$(ctx_of)"; grep -q 'Context docs: updated' <<<"$c" && ! grep -q 'Acceptance check' <<<"$c" && ok "gate off drops acceptance instruction" || bad "gate off start"
 
@@ -143,7 +144,7 @@ st "table row met allowed" '| X | met | ok |' none
 st "table row not met sent back" '| X | not met | fail |' deny
 st "em dash separators met" '- X — met — fine' none
 st "fallback whole-word: not met sent back" '- X was not met' deny
-st "fallback whole-word: met allowed" '- X was met' none
+st "fallback whole-word: met allowed" '- X was met : ran it' none
 st "check mark line met" '✓ X : met : ok' none
 st "cross mark line unmet" '✗ X : unmet : no' deny
 st "template line met | not met ignored" '- X : met | not met : e' none
@@ -240,6 +241,52 @@ expect "size attempt 2 sent back" "$hb" "$(pre "$lm" "$id" Explore)" deny
 expect "size attempt 3 passes by the cap" "$hb" "$(pre "$lm" "$id" Explore)" none
 CLAUDE_ACCEPTANCE_GATE=off call "$hb" "$(pre "$lm" "szoff-$run" Explore)"; [ -z "$out" ] && [ "$rc" -eq 0 ] && ok "off switch disables the size check" || bad "off switch size" "$out"
 CLAUDE_ACCEPTANCE_GATE=off call "$hb" "$(pre "$longgood" "szoff2-$run")"; [ -z "$out" ] && [ "$rc" -eq 0 ] && ok "off switch disables size check for gated type" || bad "off switch size gated" "$out"
+
+# --- evidence per criterion ---
+n=0
+ev() { n=$((n + 1)); expect "$1" "$hb" "$(pre $'Acceptance check\n'"$2"$'\n\nContext docs: none' "ev$n-$run")" "$3"; }
+evr() { jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out"; }
+ev "evidence: bare 'met' line sent back" '- tests pass : met' deny
+r="$(evr)"; grep -q 'evidence' <<<"$r" && grep -q 'tests pass' <<<"$r" && grep -q 'example' <<<"$r" && grep -q 'npm run test:unit' <<<"$r" && ok "evidence reason names the line and shows an example" || bad "evidence reason" "$r"
+ev "evidence: trailing separator with no text sent back" '- tests pass : met :' deny
+ev "evidence: bold bare met sent back" '- tests pass : **met**' deny
+ev "evidence: bare 'done' sent back" '- tests pass : done' deny
+ev "evidence: bare 'yes' sent back" '- tests pass : yes' deny
+ev "evidence: checkmark status sent back" '- tests pass : ✓' deny
+ev "evidence: table row bare met sent back" '| tests pass | met |' deny
+ev "evidence: one bare line among evidenced lines sent back" $'- a : met : ran it, ok\n- b : met' deny
+ev "evidence: evidenced line allowed" '- tests pass : met : npm run test:unit -- foo, 14 passed' none
+ev "evidence: dash-separated evidence allowed" '- tests pass - met - ran suite, 14 passed' none
+ev "evidence: parenthesised evidence allowed" '- tests pass : met (ran suite, 14 passed)' none
+ev "evidence: table row with evidence allowed" '| tests pass | met | ran suite |' none
+ev "evidence: evidence before the status allowed" '- tests pass : ran suite, 14 passed : met' none
+ev "evidence: 'done' with evidence allowed" '- tests pass : done : ran suite, 14 passed' none
+ev "evidence: explicit not-met with reason is not an evidence problem" '- tests pass : not met : suite fails on foo' deny
+r="$(evr)"; grep -q 'blocks' <<<"$r" && ! grep -q 'no evidence' <<<"$r" && ok "not-met line asks what blocks, not for evidence" || bad "not-met reason" "$r"
+ev "evidence: not verified with a reason allowed" '- tests pass : not verified : no database in this sandbox' none
+ev "evidence: bare 'not verified' sent back" '- e2e flow : not verified' deny
+r="$(evr)"; grep -q 'reason' <<<"$r" && grep -q 'e2e flow' <<<"$r" && grep -q 'not verified :' <<<"$r" && ok "not-verified reason names the line and asks for a reason" || bad "not-verified reason" "$r"
+ev "evidence: bare 'unverified' sent back" '- e2e flow : unverified' deny
+ev "evidence: bare 'not checked' with trailing separator sent back" '- e2e flow : not checked :' deny
+ev "evidence: bold bare not verified sent back" '- e2e flow : **not verified**' deny
+ev "evidence: dash-separated bare not verified sent back" '- e2e flow - not verified' deny
+ev "evidence: table row bare not verified sent back" '| e2e flow | not verified |' deny
+ev "evidence: not verified with reason in parens allowed" '- e2e flow : not verified (needs a seeded stage DB)' none
+ev "evidence: unverified with reason allowed" '- e2e flow : unverified : no browser here' none
+ev "evidence: not checked with reason allowed" '- e2e flow : not checked : needs a seeded stage DB, not available here' none
+# gating still applies: off switch, exempt type, cap
+CLAUDE_ACCEPTANCE_GATE=off call "$hb" "$(pre $'Acceptance check\n- a : met\n\nContext docs: none' "evoff-$run")"; [ -z "$out" ] && [ "$rc" -eq 0 ] && ok "evidence: off switch allows bare met" || bad "evidence off switch" "$out"
+mkoff() { rm -f "$1"; touch -d "$2" "$1"; }
+export CLAUDE_ACCEPTANCE_GATE_OFF_FILE="$HOME/ev-acceptance-gate.off"; mkoff "$CLAUDE_ACCEPTANCE_GATE_OFF_FILE" "1 hour ago"
+expect "evidence: fresh off-file allows bare met" "$hb" "$(pre $'Acceptance check\n- a : met\n\nContext docs: none' "evoff2-$run")" none
+rm -f "$CLAUDE_ACCEPTANCE_GATE_OFF_FILE"; unset CLAUDE_ACCEPTANCE_GATE_OFF_FILE
+expect "evidence: exempt type with bare met allowed" "$hb" "$(pre $'Acceptance check\n- a : met' "evex-$run" Explore)" none
+expect "evidence: SubagentStop bare met blocked" "$hb" "$(stp $'Acceptance check\n- a : met\n\nContext docs: none' "evs-$run")" block
+id="evcap-$run"; bare=$'Acceptance check\n- a : met\n\nContext docs: none'
+expect "evidence: attempt 1 sent back" "$hb" "$(pre "$bare" "$id")" deny
+expect "evidence: attempt 2 sent back" "$hb" "$(pre "$bare" "$id")" deny
+expect "evidence: attempt 3 passes by the cap" "$hb" "$(pre "$bare" "$id")" none
+expect "evidence: evidenced report passes first time" "$hb" "$(pre $'Acceptance check\n- a : met : ran x, ok\n\nContext docs: none' "evok-$run")" none
 
 # --- fail open: malformed and empty stdin, every script ---
 for s in "$start" "$req" "$hb"; do

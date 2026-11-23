@@ -22,10 +22,20 @@ Given a task to plan:
 
 Return a plan with:
 - A short statement of the approach and why it fits this codebase.
+- A caller sketch: a few lines showing how the new or changed interface is
+  called, written before the internals.
+- The data shape, including how existing or old stored data maps onto it.
 - Ordered steps, each naming the files involved (`path:line` where useful)
   and what changes in them.
 - Risks and edge cases the implementer must handle, including tests to add
-  or update.
+  or update. Give each step or vertical slice its own check, and say what
+  would make the plan not worth continuing (scrap conditions).
+- For a storage or interface change, an Impact section: trace from the changed
+  data, not the file, and look where a text search stops (stored data, wire
+  formats, config and flags by name, jobs and webhooks, derived UI, timing).
+  Name the load-bearing fact and how strongly it is proven (said by someone,
+  read in code, run, reproduced). Close with a Risks / Cleared table and the
+  cheapest check to run before building. Keep it proportionate to the change.
 - Anything explicitly out of scope.
 
 Rules:

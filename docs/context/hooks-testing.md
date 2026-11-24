@@ -22,7 +22,7 @@ Suites are in `ai-code-agents/claude/local-hooks/tests/`, named `run-<name>-test
 
 - `run-repo-hygiene-tests.sh` : fails when a tracked file under `docs/` or any tracked Markdown file contains a leftover conflict marker line (`<<<<<<< ` or `>>>>>>> `); proves itself on a scratch repository; optional argument is a repository root.
 - `run-git-facts-tests.sh` : git-facts.sh and `_git_facts.py`; throwaway repos with local bare remotes, no network.
-- `run-agent-skills-tests.sh` : checks each skill in the `skills:` list of `agents/git-workflow.md` exists with a matching `name` and is preloadable; optional argument is another agent file.
+- `run-agent-skills-tests.sh` : checks each skill in the `skills:` list of `agents/git-workflow.md` exists with a matching `name` and is preloadable; optional argument is another agent file. Also asserts the Claude and Codex brain-locate skills carry no literal project reference and read it from `PROJECT_REFS` in the private conf, stopping when unset.
 
 Known gap: `behavior-doc-reminder.sh` and `personal-hooks/sync-memory.sh` have no suite.
 

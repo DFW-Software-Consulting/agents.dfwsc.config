@@ -32,5 +32,20 @@ for n in $names; do
     bad "$n: sets disable-model-invocation"
   else ok "$n: preloadable"; fi
 done
+
+# brain-locate (Claude and Codex copies) must read the project reference from
+# private configuration, never carry a literal one. Asserts on the lookup
+# wording and on the absence of any backticked 20-letter token on the
+# reference line; no real value is needed here.
+for f in "$skills_dir/brain-locate/SKILL.md" "$skills_dir/../../codex/skills/brain-locate/SKILL.md"; do
+  label="brain-locate ($(basename "$(dirname "$(dirname "$(dirname "$f")")")"))"
+  if [ ! -f "$f" ]; then bad "$label: no $f"; continue; fi
+  if grep -E '^Brain project ref' "$f" | grep -qE '`[a-z]{20}`'; then bad "$label: literal project reference on the reference line"
+  else ok "$label: no literal project reference"; fi
+  if grep -q 'PROJECT_REFS' "$f" && grep -q 'shared-db-gate.conf' "$f"; then ok "$label: reads reference from private config"
+  else bad "$label: does not point at PROJECT_REFS in shared-db-gate.conf"; fi
+  if grep -qi 'not configured' "$f"; then ok "$label: stops when unconfigured"
+  else bad "$label: no stop-when-unconfigured wording"; fi
+done
 echo; echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

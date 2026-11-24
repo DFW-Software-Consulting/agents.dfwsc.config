@@ -14,7 +14,13 @@ that will replace this later. Until that exists, this skill does the resolution 
 hand and — importantly — **writes the answer back into the database** so the lookup
 gets easier over time instead of staying a one-off guess.
 
-Brain project ref: `fieozyvfuhyhtuprjnwz` (Supabase). Query it via the
+Brain project ref: read it from private configuration, never from memory. It is the
+`PROJECT_REFS` line of `~/.claude/shared-db-gate.conf` (or the file named by
+`CLAUDE_SHARED_DB_GATE_CONF`), a plain `PROJECT_REFS=<ref>` line; read the file as data.
+If the file or the line is missing or empty, the Brain project ref is not configured:
+tell the user so plainly (they need to add `PROJECT_REFS=<ref>` to that file) and stop;
+do not guess or recall a value. If the line lists more than one ref, ask which one is the
+Brain. Query it via the
 `mcp__claude_ai_Supabase__execute_sql` tool — it's a deferred tool; if it hasn't been
 loaded this session, fetch it first with `ToolSearch("select:mcp__claude_ai_Supabase__execute_sql")`.
 

@@ -135,6 +135,7 @@ Each tool has its own quirks, permission model, and evolving feature set. This R
 | `new-skill` | Scaffold reusable skills and mirror them across agent tools | OpenCode |
 | `resume-refresh` | Refresh and tailor resumes using defensible accomplishments and Danny Thompson guidance | Codex |
 | `remote-pr-review` | Review remotely through gh without checkout and post a structured PR comment | Claude Code, OpenCode |
+| `rigor` | Force the full route (spec, scout, challenge, delegated build, checks, fresh review, evidence) for one task via `/rigor` | Claude Code |
 | `worktree-hygiene` | Prevent branch contamination in git worktrees | Claude Code, OpenCode |
 
 Shared skills are mirrored in `claude/skills/<name>/SKILL.md` and `opencode/skills/<name>/SKILL.md` when both tools are listed in the table.

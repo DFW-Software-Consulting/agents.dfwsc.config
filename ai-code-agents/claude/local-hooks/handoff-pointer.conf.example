@@ -1,0 +1,11 @@
+# Copy to ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/handoff-pointer.conf (outside the repo).
+# Read as data by handoff-pointer.sh; never sourced. Values here are made up.
+
+# Directory holding hand-off notes named YYYY-MM-DD_HH-MM-SS_<name>.md.
+# Absolute path (a leading ~ means the home directory); only the characters
+# A-Z a-z 0-9 / . _ ~ - are accepted, anything else disables the hook.
+HANDOFF_DIR=~/notes/handoff
+
+# Ignore notes whose file modification time is older than this many hours.
+# Integer 1 to 720; any other value falls back to the default of 48.
+MAX_AGE_HOURS=48

@@ -26,3 +26,6 @@ Two skills are committed as absolute links and still resolve through the primary
 - A `tests/run-<name>-tests.sh` suite beside the others, with allow and deny payloads, using a throwaway HOME and no network.
 - Environment-specific values in a local config file read as data, with a fake-valued `*.conf.example` committed.
 - Add it to hooks-overview.md and hooks-testing.md.
+
+## Registering handoff-pointer.sh (not registered by its change)
+Safe order: merge and update the live checkout first; create the conf from `handoff-pointer.conf.example`; pipe a sample payload to the live script and check the output; only then add, identically in every settings file, a `SessionStart` group with matcher `startup|clear`, a command of the form `bash <path to the hook> 2>/dev/null || true` and a 5 second timeout; then start one session in a repository and one in the home directory.

@@ -406,6 +406,11 @@ btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
 if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
 else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
 
+# the handoff-pointer hook suite (its own script; counted here as one result)
+hp_out="$(bash "$here/run-handoff-pointer-tests.sh" 2>&1)"; hp_rc=$?
+if [ "$hp_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - handoff-pointer suite: $(tail -1 <<<"$hp_out")"
+else fail=$((fail + 1)); echo "FAIL - handoff-pointer suite"; grep -E '^FAIL|passed' <<<"$hp_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

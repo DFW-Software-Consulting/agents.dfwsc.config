@@ -137,6 +137,22 @@ printf '#!/usr/bin/env bash\nexec sleep 5\n' > "$tmp/gh-hang"; chmod +x "$tmp/gh
 out="$(BRAIN_TASK_SYNC_GH_TIMEOUT=1 GHSTUB="$tmp/gh-hang" run "$tmp/d")"
 has "$out" "gh=timeout" && has "$out" "rc=0" && ok "gh timeout reported, exit 0" || bad "gh timeout" "$out"
 
+# no `timeout` program (macOS default): the call is still bounded, by a watchdog
+mkdir -p "$tmp/bin-nt"
+for t in git bash env sleep; do ln -sf "$(command -v "$t")" "$tmp/bin-nt/$t"; done
+[ -e "$tmp/bin-nt/timeout" ] && bad "test PATH has no timeout program"
+t0=$SECONDS
+out="$(PATH="$tmp/bin-nt" BRAIN_TASK_SYNC_GH_TIMEOUT=1 GHSTUB="$tmp/gh-hang" run "$tmp/d")"
+has "$out" "gh=timeout" && has "$out" "rc=0" && [ $((SECONDS - t0)) -lt 4 ] && ok "no timeout program: hanging gh bounded by the watchdog, exit 0" || bad "watchdog timeout" "$out"
+out="$(PATH="$tmp/bin-nt" GHSTUB="$tmp/gh-stub" run "$tmp/d")"
+has "$out" "gh=ok" && has "$out" "rc=0" && ok "no timeout program: a fast gh is read normally" || bad "watchdog fast gh" "$out"
+out="$(PATH="$tmp/bin-nt" GHSTUB="$tmp/gh-fail" run "$tmp/d")"
+has "$out" "gh=no-pr" && has "$out" "rc=0" && ok "no timeout program: failing gh is no-pr, exit 0" || bad "watchdog failing gh" "$out"
+# neither timeout nor sleep: the optional PR lookup is skipped with a reason, never unbounded
+mkdir -p "$tmp/bin-nb"
+for t in git bash env; do ln -sf "$(command -v "$t")" "$tmp/bin-nb/$t"; done
+out="$(PATH="$tmp/bin-nb" GHSTUB="$tmp/gh-hang" run "$tmp/d")"
+has "$out" "gh=no-timeout" && has "$out" "rc=0" && ok "no timeout and no sleep: PR lookup skipped as gh=no-timeout, exit 0" || bad "no bounding mechanism" "$out"
 
 # --- saved task per branch (brain-task.sh) ---
 btr() { bash "$bt" "$@" 2>&1; echo "rc=$?"; }
@@ -163,6 +179,21 @@ has "$out" "task=0b6c1c3e-1111-4222-8333-444455556666" && ok "uuid saved lowerca
 out="$(btr "$tmp/s" bogus)"; has "$out" "rc=0" && bad "bad invocation fails" "$out" || ok "bad invocation fails"
 out="$(btr "$tmp/s" clear)"; has "$out" "task=none" && has "$out" "rc=0" && ok "clear" || bad "clear" "$out"
 out="$(btr "$tmp/s" get)"; has "$out" "task=none" && ok "get after clear" || bad "get after clear" "$out"
+out="$(btr "$tmp/s" clear)"; has "$out" "task=none" && has "$out" "rc=0" && ok "clearing an already-absent task is a clean clear" || bad "clear absent" "$out"
+btr "$tmp/s" set 2334 >/dev/null
+touch "$tmp/s/.git/config.lock"
+out="$(btr "$tmp/s" clear)"
+if has "$out" "task=none"; then bad "failed clear (config locked) must not print task=none" "$out"; else ok "failed clear does not claim task=none"; fi
+has "$out" "error=config-write-failed" && has "$out" "rc=0" && ok "failed clear reports config-write-failed, exit 0" || bad "failed clear error line" "$out"
+rm -f "$tmp/s/.git/config.lock"
+btr "$tmp/s" project set 0b6c1c3e-1111-4222-8333-444455556666 >/dev/null
+touch "$tmp/s/.git/config.lock"
+out="$(btr "$tmp/s" project clear)"
+if has "$out" "project=none"; then bad "failed project clear must not print project=none" "$out"; else ok "failed project clear does not claim project=none"; fi
+has "$out" "error=config-write-failed" && has "$out" "rc=0" && ok "failed project clear reports config-write-failed, exit 0" || bad "failed project clear error" "$out"
+rm -f "$tmp/s/.git/config.lock"
+out="$(btr "$tmp/s" get)"; has "$out" "task=2334" && ok "saved task survives the failed clear" || bad "task kept after failed clear" "$out"
+btr "$tmp/s" clear >/dev/null; btr "$tmp/s" project clear >/dev/null
 btr "$tmp/s" set 2334 >/dev/null
 git -C "$tmp/s" checkout -q main
 git -C "$tmp/s" worktree add -q "$tmp/s-wt" topic
@@ -250,6 +281,11 @@ mkrepo "$tmp/ng" git@github.com:acme/widgets.git topic "This does not fix #5" "D
 out="$(run "$tmp/ng")"
 for n in 5 6 7; do has "$out" "ref=acme/widgets#$n source=commit strength=weak" && ok "negated keyword makes #$n weak" || bad "negation #$n" "$out"; done
 for n in 8 9; do has "$out" "ref=acme/widgets#$n source=commit strength=strong" && ok "#$n stays strong" || bad "strong #$n" "$out"; done
+# negation is judged on the original text, not on text left after an earlier match was consumed
+mkrepo "$tmp/ng2" git@github.com:acme/widgets.git topic "This does not fix #5, close #6" "Never fixes #7, fixes #8 and resolves #9" "Fixes #10, closes #11"
+out="$(run "$tmp/ng2")"
+for n in 5 6 7 8; do has "$out" "ref=acme/widgets#$n source=commit strength=weak" && ok "negation reaches back over an earlier closing ref: #$n weak" || bad "negation over earlier ref #$n" "$out"; done
+for n in 9 10 11; do has "$out" "ref=acme/widgets#$n source=commit strength=strong" && ok "affirmative, outside the three-word window: #$n strong" || bad "affirmative pair #$n" "$out"; done
 
 # --- odd characters ---
 mkrepo "$tmp/w" git@github.com:acme/widgets.git topic $'Weird\n\nbody\twith tab\r\nctrl \001 star * qmark ? caf\u00e9 \u2014 Fixes #7'

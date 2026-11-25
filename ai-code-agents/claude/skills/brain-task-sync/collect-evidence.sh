@@ -2,7 +2,7 @@
 # Read-only evidence for the brain-task-sync skill. Prints key=value lines:
 #   repo=owner/repo  branch=  head=  default_branch=  commits=<n> | commits=skipped reason=<why>
 #   project=<uuid> source=saved (only when saved: git config brain.project-id)
-#   gh=ok|no-pr|missing|timeout|bad-output   pr_repo= pr_number= pr_url= pr_state= pr_title=
+#   gh=ok|no-pr|missing|timeout|no-timeout|bad-output   pr_repo= pr_number= pr_url= pr_state= pr_title=
 #   ref=<owner/repo>#<n> source=<branch|commit|pr-number|pr-body|pr-closes> strength=strong|weak
 #   task=<short_id|uuid> source=<saved|branch|commit|pr-body> strength=strong|weak
 # strong: a number in the branch name, the PR's own number and closing references (only while
@@ -18,7 +18,9 @@
 # Usage: collect-evidence.sh <repo-dir>
 # BRAIN_TASK_SYNC_GH names the gh executable (default gh); BRAIN_TASK_SYNC_GH_TIMEOUT is
 # its time limit in seconds (default 10). Tests use both. Needs bash 4 and git; gh and
-# timeout are optional. Never writes to the repository.
+# timeout are optional. Without `timeout` the gh call is bounded by a background watchdog
+# (needs `sleep`); with neither, the optional PR lookup is skipped (gh=no-timeout). Never writes
+# to the repository.
 dir="${1:-.}"
 GH="${BRAIN_TASK_SYNC_GH:-gh}"
 GH_TIMEOUT="${BRAIN_TASK_SYNC_GH_TIMEOUT:-10}"
@@ -67,21 +69,24 @@ add_task() { tasks+=("${1,,} $2 ${3:-strong}"); }
 CAP=""    # set to weak while scanning text of a PR that is not OPEN
 
 # consume TEXT REGEX RESTORE : leftmost matches of REGEX. MATCHES holds each match as
-# "m0<US>group1<US>group2..."; REST is the text with the matches blanked. With RESTORE=1 the
-# last group is a one-character trailing boundary, put back so adjacent refs (#1,#2) both match.
+# "m0<US>group1<US>group2..."; REST is the text with the matches blanked; PRES[i] is the text of
+# the ORIGINAL string before match i (earlier matches included, so a negation word in front of an
+# earlier ref is still seen). With RESTORE=1 the last group is a one-character trailing boundary,
+# put back so adjacent refs (#1,#2) both match.
 US=$'\037'
 consume() {
-  local t="$1" re="$2" restore="${3:-0}" m pre i out tail
+  local t="$1" re="$2" restore="${3:-0}" m pre i out tail seen=""
   MATCHES=(); PRES=(); REST=""
   while [[ "$t" =~ $re ]]; do
     m="${BASH_REMATCH[0]}"
     pre="${t%%"$m"*}"
     out="$m"; for ((i = 1; i < ${#BASH_REMATCH[@]}; i++)); do out+="$US${BASH_REMATCH[i]}"; done
-    MATCHES+=("$out"); PRES+=("$pre")
+    MATCHES+=("$out"); PRES+=("$seen$pre")
     tail="${BASH_REMATCH[${#BASH_REMATCH[@]}-1]}"
     REST+="$pre "
+    seen+="$pre$m"
     t="${t#*"$m"}"
-    if [ "$restore" = 1 ] && [ "${#tail}" -eq 1 ]; then t="$tail$t"; fi
+    if [ "$restore" = 1 ] && [ "${#tail}" -eq 1 ]; then t="$tail$t"; seen="${seen%"$tail"}"; fi
   done
   REST+="$t"
 }
@@ -239,9 +244,29 @@ if [ -n "$branch" ] && [ -n "$repo" ] && command -v "$GH" >/dev/null 2>&1; then
   gh_state=no-pr
   jq_expr='[.url, .state, (.closingIssuesReferences | map("\(.repository.owner.login)/\(.repository.name)#\(.number)") | join(",")), .title, .body] | join("\u001f")'
   cmd=("$GH" pr view "$branch" --repo "$repo" --json url,state,closingIssuesReferences,title,body --jq "$jq_expr")
-  if command -v timeout >/dev/null 2>&1; then cmd=(timeout "$GH_TIMEOUT" "${cmd[@]}"); fi
-  out="$(cd "$dir" 2>/dev/null && "${cmd[@]}" 2>/dev/null)"; rc=$?
-  if [ "$rc" -eq 124 ]; then
+  [[ "$GH_TIMEOUT" =~ ^[1-9][0-9]{0,3}$ ]] || GH_TIMEOUT=10
+  out=""; rc=1
+  if command -v timeout >/dev/null 2>&1; then
+    out="$(cd "$dir" 2>/dev/null && timeout "$GH_TIMEOUT" "${cmd[@]}" 2>/dev/null)"; rc=$?
+  elif command -v sleep >/dev/null 2>&1; then
+    # no `timeout` program (macOS): a watchdog kills gh after GH_TIMEOUT seconds. Its output is
+    # redirected so the command substitution never waits on it; exit 143 means it fired.
+    out="$(
+      cd "$dir" 2>/dev/null || exit 1
+      "${cmd[@]}" 2>/dev/null &
+      gpid=$!
+      { sleep "$GH_TIMEOUT" && kill "$gpid"; } >/dev/null 2>&1 &
+      wpid=$!
+      wait "$gpid"; r=$?
+      kill "$wpid" >/dev/null 2>&1
+      exit "$r"
+    )"; rc=$?
+  else
+    gh_state=no-timeout   # nothing can bound the call, so the optional lookup is skipped
+  fi
+  if [ "$gh_state" = no-timeout ]; then
+    :
+  elif [ "$rc" -eq 124 ] || [ "$rc" -eq 143 ]; then
     gh_state=timeout
   elif [ "$rc" -eq 0 ] && [ -n "$out" ]; then
     splitm "$out"

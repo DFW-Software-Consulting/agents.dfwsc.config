@@ -105,7 +105,7 @@ run "$(payload 'git push origin feat/x' "$r")"; says "saved task wins over owner
 off="$HOME/.claude/brain-task-reminder.off"
 touch "$off"
 run "$(payload 'git push origin feat/x' "$r")"; silent "fresh off-file silences"
-touch -d '13 hours ago' "$off"
+python3 -c 'import os, sys, time; t = time.time() - 13 * 3600; os.utime(sys.argv[1], (t, t))' "$off"
 run "$(payload 'git push origin feat/x' "$r")"; says "stale off-file (older than 12h) is ignored" "Brain task 4821"
 rm -f "$off"
 out="$(printf '%s' "$(payload 'git push origin feat/x' "$r")" | CLAUDE_BRAIN_TASK_REMINDER=off bash "$hook" 2>&1)"; rc=$?; silent "CLAUDE_BRAIN_TASK_REMINDER=off"
@@ -204,6 +204,84 @@ run "$(payload 'cd notrepo && git push' "$rs")"; silent "relative cd into a non-
 mkdir "$off"; run "$(payload 'git push' "$r")"; says "off-file that is a directory does not silence" "Brain task 4821"; rmdir "$off"
 ln -s "$tmp/nowhere" "$off"; run "$(payload 'git push' "$r")"; says "dangling off-file link does not silence" "Brain task 4821"; rm -f "$off"
 touch "$tmp/realoff"; ln -s "$tmp/realoff" "$off"; run "$(payload 'git push' "$r")"; silent "link to a fresh regular file silences (shared helper rule)"; rm -f "$off"
+
+# --- review round: effective push configuration, branch switches, web PRs, GIT_DIR, hosts, candidates ---
+# A push with no refspec goes where the push configuration says, not necessarily to the checked-out branch.
+rc1="$tmp/rc1"; mkrepo "$rc1" feat/x git@github.com:acme/widgets.git; git -C "$rc1" config branch.feat/x.brain-task 4821
+git -C "$rc1" config remote.origin.push refs/heads/release:refs/heads/release
+run "$(payload 'git push origin' "$rc1")"; silent "remote.origin.push names another branch: git push origin silent"
+run "$(payload 'git push' "$rc1")"; silent "remote.origin.push names another branch: bare git push silent"
+run "$(payload 'git push -u origin' "$rc1")"; silent "remote.origin.push names another branch: git push -u origin silent"
+git -C "$rc1" config --replace-all remote.origin.push 'refs/heads/feat/x:refs/heads/other'
+run "$(payload 'git push origin' "$rc1")"; silent "remote.origin.push maps to another name: silent"
+git -C "$rc1" config --replace-all remote.origin.push HEAD
+run "$(payload 'git push origin' "$rc1")"; says "remote.origin.push = HEAD still reminds" "Brain task 4821"
+git -C "$rc1" config --replace-all remote.origin.push 'refs/heads/*:refs/heads/*'
+run "$(payload 'git push origin' "$rc1")"; says "remote.origin.push = same-name pattern still reminds" "Brain task 4821"
+git -C "$rc1" config --replace-all remote.origin.push '+refs/heads/feat/x:refs/heads/feat/x'
+run "$(payload 'git push' "$rc1")"; says "remote.origin.push = own branch (forced) still reminds" "Brain task 4821"
+git -C "$rc1" config --add remote.origin.push 'refs/heads/release:refs/heads/release'
+run "$(payload 'git push' "$rc1")"; silent "several push refspecs, one is another branch: silent"
+git -C "$rc1" config --unset-all remote.origin.push
+git -C "$rc1" config remote.up.url git@github.com:acme/up.git
+git -C "$rc1" config remote.up.push 'refs/heads/release:refs/heads/release'
+run "$(payload 'git push up' "$rc1")"; silent "push config of the named remote (up) applies"
+run "$(payload 'git push origin' "$rc1")"; says "push config of another remote does not apply" "Brain task 4821"
+git -C "$rc1" config branch.feat/x.pushRemote up
+run "$(payload 'git push' "$rc1")"; silent "branch pushRemote selects the remote whose config applies"
+git -C "$rc1" config --unset branch.feat/x.pushRemote
+git -C "$rc1" config push.default upstream; git -C "$rc1" config branch.feat/x.merge refs/heads/trunk
+run "$(payload 'git push origin' "$rc1")"; silent "push.default=upstream with a differently named upstream: silent"
+git -C "$rc1" config branch.feat/x.merge refs/heads/feat/x
+run "$(payload 'git push origin' "$rc1")"; says "push.default=upstream, upstream has the same name: reminds" "Brain task 4821"
+git -C "$rc1" config push.default matching
+run "$(payload 'git push origin' "$rc1")"; silent "push.default=matching: silent"
+git -C "$rc1" config push.default nothing
+run "$(payload 'git push origin' "$rc1")"; silent "push.default=nothing: silent"
+git -C "$rc1" config push.default current
+run "$(payload 'git push origin' "$rc1")"; says "push.default=current reminds" "Brain task 4821"
+git -C "$rc1" config push.default simple
+run "$(payload 'git push origin' "$rc1")"; says "push.default=simple reminds" "Brain task 4821"
+git -C "$rc1" config remote.origin.push refs/heads/release:refs/heads/release
+run "$(payload 'git push origin feat/x' "$rc1")"; says "an explicit refspec overrides remote.origin.push" "Brain task 4821"
+git -C "$rc1" config --unset-all remote.origin.push
+
+# The hook runs after the whole command: a later branch switch means the checkout is not the pushed branch.
+run "$(payload 'git push && git switch main' "$r")"; silent "push then git switch: silent"
+run "$(payload 'git push origin; git checkout -b other' "$r")"; silent "push then git checkout: silent"
+run "$(payload 'git push && git -C '"'$r'"' rebase main' "$r")"; silent "push then git rebase: silent"
+run "$(payload 'gh pr create --fill && git switch main' "$r")"; silent "gh pr create then git switch: silent"
+run "$(payload 'git switch feat/x && git push' "$r")"; says "git switch then push: reminds" "Brain task 4821"
+run "$(payload 'git status && git push' "$r")"; says "push after unrelated git commands reminds" "Brain task 4821"
+
+# gh pr create --web opens a browser form: no PR exists yet
+run "$(payload 'gh pr create --web' "$r")"; silent "gh pr create --web silent"
+run "$(payload 'gh pr create -w --title t' "$r")"; silent "gh pr create -w silent"
+run "$(payload 'gh pr create --web=true' "$r")"; silent "gh pr create --web=true silent"
+
+# a Git directory or work-tree override makes gh read another repository
+run "$(payload 'env GIT_DIR=/elsewhere/.git gh pr create --fill' "$r")"; silent "GIT_DIR override on gh pr create: silent"
+run "$(payload 'GIT_WORK_TREE=/elsewhere gh pr create --fill' "$r")"; silent "GIT_WORK_TREE override on gh pr create: silent"
+
+# --repo with a host: github.com/acme/widgets names origin; another host does not
+run "$(payload 'gh pr create --repo github.com/acme/widgets --fill' "$r")"; says "--repo github.com/acme/widgets reminds" "feat/x"
+run "$(payload 'gh pr create --repo https://github.com/acme/widgets --fill' "$r")"; says "--repo https://github.com/acme/widgets reminds" "feat/x"
+run "$(payload 'gh pr create --repo ghe.example.com/acme/widgets --fill' "$r")"; silent "--repo on another host: silent"
+run "$(payload 'gh pr create --repo github.com/other/widgets --fill' "$r")"; silent "--repo github.com/other/widgets: silent"
+
+# several pushes in one command: the first eligible one counts, not just the first one
+run "$(payload 'git push origin release && git push origin feat/x' "$r")"; says "ineligible push first, eligible push second: reminds" "Brain task 4821"
+run "$(payload 'git push origin release && git push origin other' "$r")"; silent "two ineligible pushes: silent"
+run "$(payload 'git push origin feat/x && git push origin release' "$r")"; says "eligible push first: reminds" "Brain task 4821"
+
+# off-file on a host whose stat has no -c (BSD/macOS): only `stat -f %m` works
+bsd="$tmp/bsdbin"; mkdir -p "$bsd"; real_stat="$(command -v stat)"
+printf '#!/bin/sh\ncase "$*" in *" -c "*|"-c "*|*"-L -c"*) exit 1 ;; esac\nif [ "$1" = -L ]; then shift; fi\nif [ "$1" = -f ] && [ "$2" = %%m ]; then exec "%s" -c %%Y "$3"; fi\nexit 1\n' "$real_stat" > "$bsd/stat"; chmod +x "$bsd/stat"
+touch "$off"
+out="$(printf '%s' "$(payload 'git push origin feat/x' "$r")" | PATH="$bsd:$PATH" bash "$hook" 2>&1)"; rc=$?; silent "fresh off-file silences where stat has only the BSD form"
+python3 -c 'import os, sys, time; t = time.time() - 13 * 3600; os.utime(sys.argv[1], (t, t))' "$off"
+out="$(printf '%s' "$(payload 'git push origin feat/x' "$r")" | PATH="$bsd:$PATH" bash "$hook" 2>&1)"; rc=$?; says "stale off-file still ignored where stat has only the BSD form" "Brain task 4821"
+rm -f "$off"
 
 # --- bad input ---
 run ''; silent "empty input"

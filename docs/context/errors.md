@@ -2,6 +2,14 @@
 
 Newest first. Before proposing a fix, search here for the failure's signature; an entry whose Status is not fixed, or with a `Tried and failed` line, changes the theory before another attempt. Entry fields: Signature (optional, the stable searchable part of the message or symptom), Cause, Fix, Tried and failed (optional, what was attempted that did not work and why), Guard (optional, the test, check or hook that now prevents a repeat), Status (optional: open, fixed or worked around; none means fixed), Date.
 
+## A skill's loop read two ways after each wording fix (pr-converge review, fix, push, wait)
+- Signature: review findings such as "review after a push is described three times in different places" or "the overnight prompt has no review cap and never waits for checks".
+- Cause: the loop was described in fragments across several numbered steps and restated a second time in the overnight template, so each sentence fix moved the contradiction to another fragment.
+- Fix: one canonical loop in `pr-converge/SKILL.md` (steps A to E, each naming its successor; reviews start only in B, fixes only in D, the one wait only in E, the cap checked before any review or fix); templates and docs point at it instead of restating the order. A second waiting command with different exit meanings was removed.
+- Tried and failed: rewording single sentences (count every review, bound the wait, reorder push and review); rewriting the overnight flow as its own a to d list plus a wait-outcome paragraph.
+- Guard: `run-pr-skills-tests.sh` asserts the step markers appear once each in order, the single-entry sentences appear once, the wait command appears once inside step E, each exit code maps to its successor with a numeric boundary, and the templates carry no second statement of the order.
+- Date: 2026-11-25
+
 ## Differential suite failed only on some machines (`4:r1:c-cd`); checks gate recorded none_detected for this repo
 - Signature: `FAIL - 4:r1:c-cd [credit]: baseline denies, current allows (not a listed exception)` on `cd /tmp; git commit -F c.txt;`, 2 failed of 1964.
 - Cause: the case read `c.txt` in the shared `/tmp`; a stray `/tmp/c.txt` on the machine was found by the current hook (which resolves the message file) but not by the baseline, so the result depended on the machine. Separately, the repo had no `.claude/git-checks`, so `run-checks.sh` detected nothing and the checks gate passed any commit.

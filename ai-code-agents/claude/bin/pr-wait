@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# pr-wait: wait in the background for a pull request's checks, then exit once.
+# Read-only: only calls `gh pr view`; writes no files; never merges, comments,
+# pushes or re-runs checks.
+#
+# Usage: pr-wait <owner/repo> <pr> [--sha <head>] [--timeout 90m] [--interval 30s]
+# Durations take s, m or h (a bare number is seconds).
+# Env: PR_WAIT_GRACE_SECS  seconds to tolerate an empty check list (default 120).
+#
+# stdout: one line per state change; the last line is always
+#   PR-WAIT <repo>#<n> <result> sha=<sha> mins=<n>
+# result: green | failed:<check> | timeout | head-changed | closed | no-checks | error:<class>
+# exit:   0 green, 1 failed, 2 timeout, 3 head-changed, 4 closed or merged,
+#         5 no-checks, 10 usage error or three consecutive gh errors.
+set -uo pipefail
+
+usage() {
+  echo "usage: pr-wait <owner/repo> <pr> [--sha <head>] [--timeout 90m] [--interval 30s]" >&2
+}
+
+repo="${1:-?}"; pr="${2:-?}"; sha_seen="-"
+usage_fail() {
+  [ -n "${1:-}" ] && echo "pr-wait: $1" >&2
+  usage
+  echo "PR-WAIT ${repo}#${pr} error:usage sha=- mins=0"
+  exit 10
+}
+
+to_secs() {  # 90m -> 5400 ; empty output on a bad value
+  local v="$1" n u
+  [[ "$v" =~ ^([0-9]+)([smh]?)$ ]] || return 1
+  n="${BASH_REMATCH[1]}"; u="${BASH_REMATCH[2]}"
+  case "$u" in m) echo $((n * 60)) ;; h) echo $((n * 3600)) ;; *) echo "$n" ;; esac
+}
+
+pin=""; timeout_s=5400; interval_s=30
+args=("$@")
+[ "${#args[@]}" -ge 2 ] || usage_fail "need <owner/repo> and <pr>"
+[[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || usage_fail "bad repo: $repo"
+[[ "$pr" =~ ^[0-9]+$ ]] || usage_fail "bad PR number: $pr"
+i=2
+while [ "$i" -lt "${#args[@]}" ]; do
+  flag="${args[$i]}"
+  case "$flag" in
+    --sha|--timeout|--interval)
+      [ $((i + 1)) -lt "${#args[@]}" ] || usage_fail "$flag needs a value"
+      val="${args[$((i + 1))]}"
+      case "$flag" in
+        --sha) [[ "$val" =~ ^[0-9a-fA-F]{4,40}$ ]] || usage_fail "bad sha: $val"; pin="$val" ;;
+        --timeout) timeout_s="$(to_secs "$val")" || usage_fail "bad duration: $val" ;;
+        --interval) interval_s="$(to_secs "$val")" || usage_fail "bad duration: $val" ;;
+      esac
+      i=$((i + 2)) ;;
+    *) usage_fail "unexpected argument: $flag" ;;
+  esac
+done
+grace_s="${PR_WAIT_GRACE_SECS:-120}"
+[[ "$grace_s" =~ ^[0-9]+$ ]] || usage_fail "bad PR_WAIT_GRACE_SECS: $grace_s"
+command -v gh >/dev/null 2>&1 || usage_fail "gh not found"
+command -v jq >/dev/null 2>&1 || usage_fail "jq not found"
+
+start=$SECONDS
+finish() {  # RESULT EXIT
+  echo "PR-WAIT ${repo}#${pr} $1 sha=${sha_seen} mins=$(( (SECONDS - start) / 60 ))"
+  exit "$2"
+}
+mask() {  # strip token-shaped strings from text we echo
+  sed -E \
+    -e 's/gh[pousr]_[A-Za-z0-9_]+/[masked]/g' \
+    -e 's/github_pat_[A-Za-z0-9_]+/[masked]/g' \
+    -e 's/([Bb]earer|[Tt]oken|[Bb]asic)[ :=]+[A-Za-z0-9._~+\/=-]{12,}/\1 [masked]/g' \
+    -e 's/[A-Za-z0-9_-]{40,}/[masked]/g'
+}
+err_class() {
+  case "$1" in
+    *401*|*403*|*[Cc]redential*|*[Aa]uth*|*[Tt]oken*|*login*) echo auth ;;
+    *404*|*"Could not resolve"*|*"not found"*) echo notfound ;;
+    *) echo gh ;;
+  esac
+}
+
+# jq: classify the rollup -> "<n_total> <n_pending> <first_failed_name>"
+# shellcheck disable=SC2016  # jq program, not shell
+classify='
+  (.statusCheckRollup // []) as $r
+  | [$r[] | {n: (.name // .context // "unknown"),
+      c: (if has("state") and (has("status")|not) then
+            (if .state=="SUCCESS" then "g" elif (.state=="PENDING" or .state=="EXPECTED") then "p" else "f" end)
+          elif .status != "COMPLETED" then "p"
+          elif (.conclusion=="SUCCESS" or .conclusion=="NEUTRAL" or .conclusion=="SKIPPED") then "g"
+          else "f" end)}] as $c
+  | "\($c|length) \([$c[]|select(.c=="p")]|length) \([$c[]|select(.c=="f")]|first // {n:""}|.n)"'
+
+errs=0; last_status=""; first_head=""
+emit() { if [ "$1" != "$last_status" ]; then echo "$1"; last_status="$1"; fi; }
+
+while :; do
+  elapsed=$((SECONDS - start))
+  if resp="$(gh pr view "$pr" -R "$repo" --json state,headRefOid,statusCheckRollup 2>&1)" \
+     && jq -e . >/dev/null 2>&1 <<<"$resp"; then
+    errs=0
+    state="$(jq -r '.state // ""' <<<"$resp")"
+    head="$(jq -r '.headRefOid // ""' <<<"$resp")"
+    [ -n "$head" ] && sha_seen="$head"
+    [ -n "$first_head" ] || first_head="$head"
+
+    if [ "$state" != "OPEN" ]; then
+      emit "state=$state"; finish closed 4
+    fi
+    ref="${pin:-$first_head}"
+    if [ -n "$ref" ] && [ -n "$head" ] && [[ "$head" != "$ref"* && "$ref" != "$head"* ]]; then
+      emit "head changed: ${ref:0:7} -> ${head:0:7}"; finish head-changed 3
+    fi
+
+    read -r total pending failed <<<"$(jq -r "$classify" <<<"$resp")"
+    if [ -n "$failed" ]; then
+      emit "failed: $failed"; finish "failed:$failed" 1
+    fi
+    if [ "${total:-0}" -eq 0 ]; then
+      emit "head=${head:0:7} checks=0"
+      if [ "$elapsed" -ge "$grace_s" ]; then finish no-checks 5; fi
+    else
+      emit "head=${head:0:7} checks=$total pending=$pending"
+      if [ "$pending" -eq 0 ]; then finish green 0; fi
+    fi
+  else
+    errs=$((errs + 1))
+    text="$(mask <<<"$resp" | head -n1 | cut -c1-200)"
+    emit "gh error ($errs): $text"
+    last_status=""
+    if [ "$errs" -ge 3 ]; then
+      finish "error:$(err_class "$resp")" 10
+    fi
+  fi
+
+  if [ $((SECONDS - start)) -ge "$timeout_s" ]; then finish timeout 2; fi
+  sleep "$interval_s"
+done

@@ -32,6 +32,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `agents/` includes same-named shadows of built-in agents (for example `Explore`, `Plan`, `general-purpose`).
 - `skills/` holds one directory per skill, each with a `SKILL.md`. `skills/context-docs/SKILL.md` defines the `docs/context/` convention; `skills/git-verify/SKILL.md` runs `local-hooks/run-checks.sh`.
 - `commands/` holds slash commands. Command headers use `allowed-tools`, which pre-approves tools and does not restrict them (see errors.md).
+- `bin/` holds versioned helper scripts that are run by name, not hooks; `bin/pr-wait` waits in the background for a PR's checks (read-only, calls only `gh pr view`). Nothing links it into a PATH directory yet.
 
 ## Work convention
 All work happens in a git worktree branched from the default branch, never in the primary checkout. A hook (`local-hooks/worktree-gate.sh`) denies edits and HEAD-changing git commands in a primary checkout.

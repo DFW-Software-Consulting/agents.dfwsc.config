@@ -31,6 +31,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 ## Claude directory notes
 - `agents/` includes same-named shadows of built-in agents (for example `Explore`, `Plan`, `general-purpose`).
 - `skills/` holds one directory per skill, each with a `SKILL.md`. `skills/context-docs/SKILL.md` defines the `docs/context/` convention; `skills/git-verify/SKILL.md` runs `local-hooks/run-checks.sh`.
+- `bin/pr-land` : notify-only pull request watch (never merges); `bin/systemd/` holds its sweep service and timer, installed by hand (git-workflow-skills.md).
 - `commands/` holds slash commands. Command headers use `allowed-tools`, which pre-approves tools and does not restrict them (see errors.md).
 
 ## Work convention

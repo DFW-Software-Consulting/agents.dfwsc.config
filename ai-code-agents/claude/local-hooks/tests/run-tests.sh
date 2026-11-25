@@ -406,6 +406,11 @@ btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
 if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
 else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
 
+# the pr-land suite (its own script; counted here as one result)
+pl_out="$(bash "$here/run-pr-land-tests.sh" 2>&1)"; pl_rc=$?
+if [ "$pl_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - pr-land suite: $(tail -1 <<<"$pl_out")"
+else fail=$((fail + 1)); echo "FAIL - pr-land suite"; grep -E '^FAIL|passed' <<<"$pl_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

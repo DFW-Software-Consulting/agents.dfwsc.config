@@ -333,6 +333,8 @@ REDEFINE = re.compile(
     r"\b(?:eval|source|alias|aliases|unalias|function|functions|hash|command|builtin|exec|enable"
     r"|PATH|BASH_ENV|ENV|export|config|hooks|hooksPath|EDITOR|VISUAL|HOME|XDG_CONFIG_HOME)\b"
     r"|\bGIT_\w|\(\s*\)|(?:^|[\s;&|({`])\.(?=[\s;&|)]|$)")
+# A directory word that is certainly one plain path: no leading dash, space, quote, glob, = or :.
+PLAIN = re.compile(r"[A-Za-z0-9._/~+][A-Za-z0-9._/~+-]*")
 _CMD_DIRS = []
 
 
@@ -417,6 +419,29 @@ def plain_commit(ws):
     return not any(re.match(r"^-[a-zA-Z]*[ectC]", w)
                    or w.startswith(("--e", "--t", "--c", "--r", "--fix", "--sq"))
                    for w in ws[i + 1:])
+
+
+def _unpathed(ws):
+    """The words of a segment, less a plain path given to `cd` (exactly one
+    argument) or to `-C` among a real git's global options (the walk of `plain_commit`,
+    stopping at the subcommand)."""
+    lead = _lead(ws)
+    base = len(ws) - len(lead)
+    drop = set()
+    if len(lead) == 2 and lead[0] == "cd" and PLAIN.fullmatch(lead[1]):
+        drop.add(base + 1)
+    elif lead and _real_git(lead[0]):
+        i = 1
+        while i < len(lead):
+            if lead[i] == "-C" and i + 1 < len(lead):
+                if PLAIN.fullmatch(lead[i + 1]):
+                    drop.add(base + i + 1)
+                i += 2
+            elif lead[i] in SAFE_GIT_OPTS or lead[i].startswith(("--git-dir=", "--work-tree=")):
+                i += 1
+            else:
+                break
+    return [w for k, w in enumerate(ws) if k not in drop]
 
 
 READERS = {"head", "tail", "cat", "grep", "wc", "echo", "true", "pwd", "ls"}
@@ -673,7 +698,7 @@ class _Sources:
         up to the end of the last commit pipeline a rule may accept (commands
         after it run after the message is read). Here-document bodies are not
         commands here: only a message body or a `cat` writer may come before."""
-        return " ".join(w for seg in self.top_segs[:self.code_end] for w in seg[2])
+        return " ".join(w for seg in self.top_segs[:self.code_end] for w in _unpathed(seg[2]))
 
     def ok(self, o, readable, glued):
         if not o["settled"]:

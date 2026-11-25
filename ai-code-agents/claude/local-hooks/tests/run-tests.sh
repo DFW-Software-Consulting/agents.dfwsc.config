@@ -339,6 +339,58 @@ $(hd 'git commit -F -' 'fix parser')")"
 check "a git binary that is not the git on PATH keeps the old reading" deny "$mention" "$(pr "$(hd '/tmp/nonexistent/git commit -F -' 'fix parser')")"
 check "an earlier command that may write the hooks keeps the old reading" deny "$mention" "$(pr "cp x .git/ho''oks/commit-msg; $(hd 'git commit -F -' 'fix parser')")"
 check "cd and git add before the commit still allowed" allow "$mention" "$(pr $'cd /tmp && git add -A && git commit -q -F - <<\'EOF\' 2>&1 | tail -3\nfix parser\nEOF')"
+# plain directory words (a path holding a redefine-list word) after -C, cd or pushd
+check "path word: git -C /tmp/config-x commit allowed" allow "$mention" "$(pr "$(hd 'git -C /tmp/config-x commit -F -' 'fix typo')")"
+check "path word: cd /tmp/config-x then commit allowed" allow "$mention" "$(pr "$(hd 'cd /tmp/config-x && git commit -F -' 'fix typo')")"
+check "pre-existing, not part of this fix: pushd /tmp/hooks-x then commit denied" deny "$mention" "$(pr "$(hd 'pushd /tmp/hooks-x && git commit -F -' 'fix typo')")"
+check "pre-existing, not part of this fix: pushd /tmp/x then commit denied (the path word is not the reason)" deny "$mention" "$(pr "$(hd 'pushd /tmp/x && git commit -F -' 'fix typo')")"
+check "path word: two -C, second holds a word, allowed" allow "$mention" "$(pr "$(hd 'git -C /a -C /tmp/config-x commit -F -' 'fix typo')")"
+check "path word: cd and -C both hold a word, allowed" allow "$mention" "$(pr "$(hd 'cd /tmp/config-x && git -C /tmp/hooks-y commit -F -' 'fix typo')")"
+check "path word: -C dir, crediting body denied" deny "$mention" "$(pr "$(hd 'git -C /tmp/config-x commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')")"
+check "path word: cd dir, crediting body denied" deny "$mention" "$(pr "$(hd 'cd /tmp/config-x && git commit -F -' 'fix typo
+
+Generated with Claude Code')")"
+check "path word: -C with a space in the dir still denied" deny "$mention" "$(pr "$(hd 'git -C "/tmp/a export" commit -F -' 'fix typo')")"
+check "path word: -C dir holding ; and export still denied" deny "$mention" "$(pr "$(hd "git -C '/tmp/a;export PATH=x' commit -F -" 'fix typo')")"
+check "pre-existing, not part of this fix: -C -c clean body allowed" allow "$mention" "$(pr "$(hd 'git -C -c commit -F -' 'fix typo')")"
+check "pre-existing, not part of this fix: -C -c crediting body denied" deny "$mention" "$(pr "$(hd 'git -C -c commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')")"
+check "path word: -C x then -c alias still denied" deny "$mention" "$(pr "$(hd 'git -C x -c alias.commit=y commit -F -' 'fix typo')")"
+check "path word: git config before the commit still denied" deny "$mention" "$(pr "$(hd 'git -C x config user.name a; git commit -F -' 'fix typo')")"
+check "path word: cd with a substitution still denied" deny "$mention" "$(pr "$(hd 'cd "$(git config core.hooksPath)" && git commit -F -' 'fix typo')")"
+check "path word: cd x then export still denied" deny "$mention" "$(pr "$(hd 'cd x; export PATH=/y; git commit -F -' 'fix typo')")"
+check "path word: cd with a second word still denied" deny "$mention" "$(pr "$(hd 'cd x export && git commit -F -' 'fix typo')")"
+check "path word: cd -P dir still denied" deny "$mention" "$(pr "$(hd 'cd -P /tmp/config-x && git commit -F -' 'fix typo')")"
+check "path word: --git-dir= value still denied" deny "$mention" "$(pr "$(hd 'git --git-dir=/tmp/config-x/.git commit -F -' 'fix typo')")"
+check "path word: pathspec after -- still denied" deny "$mention" "$(pr "$(hd 'git commit -F - -- docs/hooks.md' 'fix typo')")"
+check "path word: attached -Cx still denied" deny "$mention" "$(pr "$(hd 'git -Cx commit -F -' 'fix typo')")"
+check "path word: env -C dir before git still denied" deny "$mention" "$(pr "$(hd 'env -C /tmp/config-x git commit -F -' 'fix typo')")"
+check "path word: -C after the commit word still denied" deny "$mention" "$(pr "$(hd 'git -C /tmp/x commit -F - -C HEAD' 'fix typo')")"
+check "path word: git add -- -C config then commit still denied" deny "$mention" "$(pr "$(hd 'git add -- -C config; git commit -F -' 'fix typo')")"
+check "path word: git add -C config then commit still denied" deny "$mention" "$(pr "$(hd 'git add -C config; git commit -F -' 'fix typo')")"
+check "path word: -C dir on add and on commit, allowed (fixed with this change)" allow "$mention" "$(pr "$(hd 'git -C /tmp/config-x add f.txt && git -C /tmp/config-x commit -F -' 'fix typo')")"
+check "path word: -C dir on add and on commit, crediting body denied" deny "$mention" "$(pr "$(hd 'git -C /tmp/config-x add f.txt && git -C /tmp/config-x commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')")"
+check "path word: if cd /tmp/config-x then commit, allowed (as with /tmp/x)" allow "$mention" "$(pr "$(hd 'if cd /tmp/config-x; then git commit -F -' 'fix typo')"$'\nfi')"
+check "path word: if cd /tmp/config-x then commit, crediting body denied" deny "$mention" "$(pr "$(hd 'if cd /tmp/config-x; then git commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')"$'\nfi')"
+check "path word: cd . then commit allowed (a bare dot is a plain word)" allow "$mention" "$(pr "$(hd 'cd . && git commit -F -' 'fix typo')")"
+check "path word: cd . then commit, crediting body denied" deny "$mention" "$(pr "$(hd 'cd . && git commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')")"
+check "path word: git -C . commit allowed (a bare dot is a plain word)" allow "$mention" "$(pr "$(hd 'git -C . commit -F -' 'fix typo')")"
+check "path word: git -C . commit, crediting body denied" deny "$mention" "$(pr "$(hd 'git -C . commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')")"
+check "pre-existing, not part of this fix: git -C commit commit clean body allowed" allow "$mention" "$(pr "$(hd 'git -C commit commit -F -' 'fix typo')")"
+check "pre-existing, not part of this fix: git -C commit commit crediting body denied" deny "$mention" "$(pr "$(hd 'git -C commit commit -F -' 'fix typo
+
+Co-Authored-By: Claude <x@y.z>')")"
 # bounds: a long line of repeated message files and a named pipe must be denied quickly
 timed() {  # timed NAME LIMIT-SECONDS PAYLOAD-FILE
   local name="$1" limit="$2" file="$3" t0 t1 out

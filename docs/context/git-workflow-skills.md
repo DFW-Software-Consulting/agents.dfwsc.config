@@ -81,3 +81,6 @@ Writes go only to `brain.task_events` (note), `brain.task_external_links` (PR li
 - A saved project id with no row, or whose `github_repo` differs from origin, is cleared and re-resolved; the fallback is brain-locate's own queries (steps 2 and 3), and the skill never runs its step 5 UPDATE.
 - git-pr puts `Brain-Task:` in its own paragraph. The agent reads `brain-task.sh get` at report time even when the chain stopped.
 - Known limits: `git branch -c` copies the saved task to the new name and a deleted branch can leave an entry behind; the recheck and the report line surface a stale one (characterised in the suite).
+
+## pr-review reviewed-head marker
+`pr-review` (PR mode) ends its single review comment with one hidden line, `<!-- reviewed-head: <40-hex sha> -->`, holding the PR head (`headRefOid` from `gh pr view --json`, not a checkout) the review was made against. It is the only writer; a repeat review amends the same comment and replaces the line, never adding a second. A later reader (for example a converge loop or a land check) treats a comment with no marker, or a marker differing from the current head, as "not reviewed at this head" and runs a re-review. `--local` mode posts nothing and writes no marker. Only the Claude copy has it; the opencode copy needs a parity change later. `local-hooks/tests/run-pr-skills-tests.sh` asserts it statically.

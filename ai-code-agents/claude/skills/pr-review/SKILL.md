@@ -47,8 +47,10 @@ Invocation with an unambiguous request to run and post this review authorizes wr
 Fetch metadata exactly with:
 
 ```sh
-gh pr view <PR_NUMBER> -R <OWNER/REPO> --json title,body,files,author,headRefName,isCrossRepository
+gh pr view <PR_NUMBER> -R <OWNER/REPO> --json title,body,files,author,headRefName,headRefOid,isCrossRepository
 ```
+
+`headRefOid` is the PR head commit the review is made against; take it from here, never from a local checkout.
 
 Fetch the patch with:
 
@@ -124,6 +126,8 @@ Only amend a comment confirmed to be a prior review in this exact format. Never 
 ```sh
 gh pr comment <PR_NUMBER> -R <OWNER/REPO> --body-file ./pr_review_<PR_NUMBER>.md
 ```
+
+**Reviewed-head marker.** The comment ends with one hidden last line, `<!-- reviewed-head: <40-hex sha> -->`, holding the `headRefOid` fetched above. Add it to `./pr_review_<PR_NUMBER>.md` before posting or amending. A repeat review replaces that line with the current head and never adds a second one. A reader treats a comment with no marker, or a marker that differs from the current head, as "not reviewed at this head". Local mode posts no comment, so it gets no marker.
 
 Verify either way using `gh pr view` comments or, if necessary, `gh api`. For a new post, reliably identify it by comparing pre-post IDs and confirming author, body, and creation time. For an amend, confirm the same comment ID now carries the new body (an updated `updatedAt`/edited body on that id, not a new id in the list).
 

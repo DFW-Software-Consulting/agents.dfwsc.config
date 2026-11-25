@@ -5,7 +5,9 @@
 #
 # Usage: pr-wait <owner/repo> <pr> [--sha <head>] [--timeout 90m] [--interval 30s]
 # Durations take s, m or h (a bare number is seconds).
+# A zero --interval or --timeout is a usage error (a zero interval would poll without pause).
 # Env: PR_WAIT_GRACE_SECS  seconds to tolerate an empty check list (default 120).
+#      PR_WAIT_ALLOW_ZERO_INTERVAL  set to any value to allow --interval 0 (test suites only).
 #
 # stdout: one line per state change; the last line is always
 #   PR-WAIT <repo>#<n> <result> sha=<sha> mins=<n>
@@ -47,8 +49,11 @@ while [ "$i" -lt "${#args[@]}" ]; do
       val="${args[$((i + 1))]}"
       case "$flag" in
         --sha) [[ "$val" =~ ^[0-9a-fA-F]{4,40}$ ]] || usage_fail "bad sha: $val"; pin="$val" ;;
-        --timeout) timeout_s="$(to_secs "$val")" || usage_fail "bad duration: $val" ;;
-        --interval) interval_s="$(to_secs "$val")" || usage_fail "bad duration: $val" ;;
+        --timeout) timeout_s="$(to_secs "$val")" || usage_fail "bad duration: $val"
+          [ "$timeout_s" -gt 0 ] || usage_fail "--timeout must be greater than zero" ;;
+        --interval) interval_s="$(to_secs "$val")" || usage_fail "bad duration: $val"
+          [ "$interval_s" -gt 0 ] || [ -n "${PR_WAIT_ALLOW_ZERO_INTERVAL:-}" ] \
+            || usage_fail "--interval must be greater than zero" ;;
       esac
       i=$((i + 2)) ;;
     *) usage_fail "unexpected argument: $flag" ;;
@@ -79,41 +84,53 @@ err_class() {
   esac
 }
 
-# jq: classify the rollup -> "<n_total> <n_pending> <first_failed_name>"
+# jq: classify the rollup -> "<n_total> <n_pending> <n_failed> <first_failed_name>"
+# A check is green only when positively recognised as passed; anything else is failed
+# (or pending). The verdict is decided from the counts, never from the names. The name is
+# only for display: control bytes removed, capped, "unknown" when nothing is left.
 # shellcheck disable=SC2016  # jq program, not shell
 classify='
   (.statusCheckRollup // []) as $r
-  | [$r[] | {n: (.name // .context // "unknown"),
+  | [$r[] | {n: ((.name // .context // "") | tostring
+                 | gsub("[\u0000-\u001f\u007f-\u009f]"; "") | .[0:100]
+                 | if . == "" then "unknown" else . end),
       c: (if has("state") and (has("status")|not) then
             (if .state=="SUCCESS" then "g" elif (.state=="PENDING" or .state=="EXPECTED") then "p" else "f" end)
           elif .status != "COMPLETED" then "p"
           elif (.conclusion=="SUCCESS" or .conclusion=="NEUTRAL" or .conclusion=="SKIPPED") then "g"
           else "f" end)}] as $c
-  | "\($c|length) \([$c[]|select(.c=="p")]|length) \([$c[]|select(.c=="f")]|first // {n:""}|.n)"'
+  | [$c[]|select(.c=="f")] as $f
+  | "\($c|length) \([$c[]|select(.c=="p")]|length) \($f|length) \($f|first // {n:""}|.n)"'
 
 errs=0; last_status=""; first_head=""
 emit() { if [ "$1" != "$last_status" ]; then echo "$1"; last_status="$1"; fi; }
 
 while :; do
   elapsed=$((SECONDS - start))
+  ok=0
   if resp="$(gh pr view "$pr" -R "$repo" --json state,headRefOid,statusCheckRollup 2>&1)" \
      && jq -e . >/dev/null 2>&1 <<<"$resp"; then
+    # fail closed: without a head commit id the pin cannot be checked
+    if jq -e '(.headRefOid | type) == "string" and .headRefOid != ""' >/dev/null 2>&1 <<<"$resp"; then ok=1
+    else resp="response has no head commit id"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
     errs=0
     state="$(jq -r '.state // ""' <<<"$resp")"
     head="$(jq -r '.headRefOid // ""' <<<"$resp")"
-    [ -n "$head" ] && sha_seen="$head"
+    sha_seen="$head"
     [ -n "$first_head" ] || first_head="$head"
 
     if [ "$state" != "OPEN" ]; then
       emit "state=$state"; finish closed 4
     fi
     ref="${pin:-$first_head}"
-    if [ -n "$ref" ] && [ -n "$head" ] && [[ "$head" != "$ref"* && "$ref" != "$head"* ]]; then
+    if [ -n "$ref" ] && [[ "$head" != "$ref"* && "$ref" != "$head"* ]]; then
       emit "head changed: ${ref:0:7} -> ${head:0:7}"; finish head-changed 3
     fi
 
-    read -r total pending failed <<<"$(jq -r "$classify" <<<"$resp")"
-    if [ -n "$failed" ]; then
+    read -r total pending nfailed failed <<<"$(jq -r "$classify" <<<"$resp")"
+    if [ "${nfailed:-0}" -gt 0 ]; then
       emit "failed: $failed"; finish "failed:$failed" 1
     fi
     if [ "${total:-0}" -eq 0 ]; then

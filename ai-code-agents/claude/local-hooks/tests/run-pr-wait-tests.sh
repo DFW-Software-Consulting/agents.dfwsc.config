@@ -10,6 +10,9 @@ script="$(cd "$here/../.." && pwd)/bin/pr-wait"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home"; mkdir -p "$HOME"
 unset PR_WAIT_GRACE_SECS GH_TOKEN GITHUB_TOKEN
+# The suite polls with a zero interval to stay fast; the script only allows that with this
+# override (the zero-value usage cases below run with it unset).
+export PR_WAIT_ALLOW_ZERO_INTERVAL=1
 
 # fake gh: FAKE_GH_DIR holds 1.json, 2.json, ... (or N.err for a failing call, whose
 # text goes to stderr with exit 1). Call number N uses the highest file <= N.
@@ -50,6 +53,7 @@ expect() {  # NAME RC LASTLINE-REGEX
   if [ "$rc" -eq "$2" ] && grep -Eq -- "$3" <<<"$last"; then ok "$1"
   else bad "$1" "rc=$rc (want $2) last=[$last] (want /$3/) err=[$err]"; fi
 }
+sc() { printf '{"__typename":"StatusContext","context":"%s","state":"%s"}' "$1" "$2"; }
 R=octo/demo
 
 newfx; put 1 OPEN $SHA1 "[$(cr build COMPLETED SUCCESS),$(cr lint COMPLETED NEUTRAL),$(cr docs COMPLETED SKIPPED)]"
@@ -118,6 +122,71 @@ for args in "" "octo/demo" "octo/demo abc" "nodash 7" "octo/demo 7 --bogus" "oct
   else bad "bad arguments exit 10 with usage: [$args]" "rc=$rc out=[$out] err=[$err]"; fi
 done
 [ ! -e "$fx/calls.log" ] && ok "usage errors never call gh" || bad "usage errors never call gh"
+
+# legacy commit statuses (state instead of conclusion)
+newfx; put 1 OPEN $SHA1 "[$(sc ci/legacy FAILURE),$(cr build COMPLETED SUCCESS)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "status FAILURE gives failed" 1 "^PR-WAIT octo/demo#7 failed:ci/legacy sha=$SHA1 mins=[0-9]+\$"
+newfx; put 1 OPEN $SHA1 "[$(sc ci/legacy ERROR)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "status ERROR gives failed" 1 "^PR-WAIT octo/demo#7 failed:ci/legacy "
+newfx; put 1 OPEN $SHA1 "[$(sc ci/legacy PENDING)]"; put 2 OPEN $SHA1 "[$(sc ci/legacy SUCCESS)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "status PENDING then SUCCESS gives green" 0 "^PR-WAIT octo/demo#7 green sha=$SHA1 "
+newfx; put 1 OPEN $SHA1 "[$(sc ci/legacy EXPECTED)]"
+run bash "$script" $R 7 --interval 0s --timeout 1s
+expect "status EXPECTED stays pending (timeout)" 2 "^PR-WAIT octo/demo#7 timeout "
+newfx; put 1 OPEN $SHA1 "[$(sc ci/legacy WEIRD)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "unrecognised status state is never green" 1 "^PR-WAIT octo/demo#7 failed:ci/legacy "
+
+# mixed pending and failed, other failing conclusions
+newfx; put 1 OPEN $SHA1 "[$(cr slow IN_PROGRESS ''),$(cr build COMPLETED FAILURE)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "failed plus pending reports failed on the first poll" 1 "^PR-WAIT octo/demo#7 failed:build "
+[ "$(cat "$fx/.n")" = 1 ] && ok "failed plus pending needs one poll only" || bad "failed plus pending needs one poll only" "calls=$(cat "$fx/.n")"
+newfx; put 1 OPEN $SHA1 "[$(sc ci/legacy PENDING),$(cr build COMPLETED CANCELLED)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "CANCELLED beside a pending status gives failed" 1 "^PR-WAIT octo/demo#7 failed:build "
+newfx; put 1 OPEN $SHA1 "[$(cr build COMPLETED TIMED_OUT)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "TIMED_OUT gives failed" 1 "^PR-WAIT octo/demo#7 failed:build "
+newfx; put 1 OPEN $SHA1 "[$(cr build COMPLETED '')]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "completed with an empty conclusion is never green" 1 "^PR-WAIT octo/demo#7 failed:build "
+
+# names must not decide the verdict
+newfx; put 1 OPEN $SHA1 "[$(cr '' COMPLETED FAILURE)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "one check, FAILURE, empty name exits 1" 1 "^PR-WAIT octo/demo#7 failed:unknown sha=$SHA1 "
+newfx; put 1 OPEN $SHA1 "[$(sc '' FAILURE)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "status FAILURE with an empty context exits 1" 1 "^PR-WAIT octo/demo#7 failed:unknown "
+newfx; put 1 OPEN $SHA1 "[$(cr '\u001b\u0007' COMPLETED FAILURE)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "control-only name still fails, shown as unknown" 1 "^PR-WAIT octo/demo#7 failed:unknown sha="
+newfx; put 1 OPEN $SHA1 "[$(cr 'a\u001b[31mred\u0007\u009bb' COMPLETED FAILURE)]"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+if [ "$rc" -eq 1 ] && ! grep -q '[[:cntrl:]]' <<<"$out" && grep -q 'failed:a\[31mredb' <<<"$last"; then ok "control and escape bytes are stripped from check names"
+else bad "control and escape bytes are stripped from check names" "rc=$rc out=$(printf %q "$out")"; fi
+
+# head commit id missing: fail closed as a gh error
+newfx; printf '{"state":"OPEN","headRefOid":"","statusCheckRollup":[%s]}\n' "$(cr build COMPLETED SUCCESS)" >"$fx/1.json"
+run bash "$script" $R 7 --sha $SHA1 --interval 0s --timeout 5s
+expect "empty head id is a gh error, not green" 10 "^PR-WAIT octo/demo#7 error:gh "
+newfx; printf '{"state":"OPEN","statusCheckRollup":[%s]}\n' "$(cr build COMPLETED SUCCESS)" >"$fx/1.json"
+run bash "$script" $R 7 --interval 0s --timeout 5s
+expect "missing head id without --sha is a gh error too" 10 "^PR-WAIT octo/demo#7 error:gh "
+
+# zero interval and zero timeout are usage errors (zero interval only with the override unset)
+newfx; put 1 OPEN $SHA1 "[$(cr build COMPLETED SUCCESS)]"
+for args in "--interval 0" "--interval 0s" "--timeout 0" "--timeout 0m"; do
+  # shellcheck disable=SC2086
+  PR_WAIT_ALLOW_ZERO_INTERVAL="" run bash "$script" $R 7 $args
+  if [ "$rc" -eq 10 ] && grep -q '^PR-WAIT octo/demo#7 error:usage ' <<<"$last"; then ok "zero value rejected: [$args]"
+  else bad "zero value rejected: [$args]" "rc=$rc out=[$out] err=[$err]"; fi
+done
+[ ! -e "$fx/calls.log" ] && ok "zero-value usage errors never call gh" || bad "zero-value usage errors never call gh"
 
 changed="$(find "$tmp" -type f -newer "$fakebin/gh" -not -path "$tmp/fx*" -not -name err 2>/dev/null | wc -l)"
 [ "$changed" = 0 ] && ok "writes no files of its own" || bad "writes no files of its own" "$changed"

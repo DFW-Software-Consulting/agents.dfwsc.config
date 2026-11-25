@@ -45,6 +45,24 @@ if [ "$event" = "SubagentStart" ] && ! handback_is_exempt "$agent_type"; then
   if [ -n "$ctx" ]; then ctx="$ctx"$'\n\n'"$add"; else ctx="$add"; fi
 fi
 
+# Tool card: appended on SubagentStart only. The allow-list is the repo agent
+# types whose tools: line has Bash (tests/run-context-docs-start-tests.sh checks
+# it against agents/*.md); not HANDBACK_EXEMPT_TYPES, and independent of it.
+if [ "$event" = "SubagentStart" ]; then
+  card=""
+  _sleep='- Do not chain a long sleep before a command (sleep 25 or more, then cmd, is blocked), and do not chain shorter sleeps to work around it.'
+  _commit='- Commit with git commit -m "subject" -m "paragraph", one -m per paragraph. A -F - heredoc is denied when the path has a word like config or hooks.'
+  case "$agent_type" in
+    executor|check|backend-architect|git-workflow|frontend-developer|test-automator|deployment-engineer|devops-troubleshooter|database-optimizer|performance-engineer)
+      card=$'Tool card:\n- Tool names are case-sensitive: Bash, Read, Edit (never bash).\n- Monitor, ToolSearch and TaskStop are not available to you. For a long command use Bash with run_in_background: true and wait for its completion notification.\n'"$_sleep No polling loops."$'\n'"$_commit" ;;
+    general-purpose)
+      card=$'Tool card:\n- Tool names are case-sensitive: Bash, Read, Edit (never bash).\n- Monitor exists. It needs description and timeout_ms (30 minutes at most). A deferred tool needs one ToolSearch select: call first.\n'"$_sleep"$'\n'"$_commit" ;;
+  esac
+  if [ -n "$card" ]; then
+    if [ -n "$ctx" ]; then ctx="$ctx"$'\n\n'"$card"; else ctx="$card"; fi
+  fi
+fi
+
 [ -n "$ctx" ] || exit 0
 jq -n --arg e "$event" --arg c "$ctx" '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null
 exit 0

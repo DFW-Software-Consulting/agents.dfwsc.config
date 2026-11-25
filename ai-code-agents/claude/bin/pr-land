@@ -13,10 +13,17 @@
 #         notices.log in the same directory (every notice, UTC timestamp, always)
 # Config: ${XDG_CONFIG_HOME:-$HOME/.config}/pr-land/notify.conf with a line
 #         NOTIFY_CMD=<absolute path to an executable>; called with the notice as its only argument.
-# Env:    PR_LAND_NOW  ISO timestamp used as "now". A TEST SEAM; invalid value exits 10.
-#         PR_LAND_LOCK_WAIT  seconds arm and cancel wait for the shared lock (default 30; test seam).
+# Env:    Test seams, honoured ONLY when PR_LAND_TEST=1 is set (without it every one is ignored):
+#         PR_LAND_NOW  ISO timestamp used as "now"; an invalid value exits 10.
+#         PR_LAND_LOCK_WAIT  seconds arm and cancel wait for the shared lock (default 30).
+#         PR_LAND_GH_PATH  a PATH used to resolve gh instead of the fixed one.
+# Every gh call and the notifier call run under `env -i` with PATH=/usr/local/bin:/usr/bin:/bin and
+# only HOME, USER, LOGNAME, LANG=C, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS; gh is resolved once
+# to an absolute path through that fixed PATH.
 # exit:   0 ok, 1 refused or unknown target, 10 usage error or missing gh, jq, flock or timeout (all four are required).
 set -uo pipefail
+LC_ALL=C; export LC_ALL
+[ -n "${HOME:-}" ] || { echo "pr-land: HOME is not set" >&2; exit 10; }
 
 usage() {
   cat >&2 <<'U'
@@ -28,7 +35,24 @@ U
   exit 10
 }
 
-for tool in gh jq flock timeout; do
+TESTMODE=0; [ "${PR_LAND_TEST:-}" = 1 ] && TESTMODE=1
+PIN_PATH=/usr/local/bin:/usr/bin:/bin
+GH_SEARCH="$PIN_PATH"
+[ "$TESTMODE" -eq 1 ] && [ -n "${PR_LAND_GH_PATH:-}" ] && GH_SEARCH="$PR_LAND_GH_PATH"
+# build_pin ARRAYNAME: an `env -i` prefix passing only the pass-list
+build_pin() {
+  local -n arr="$1"; local v
+  arr=(/usr/bin/env -i "PATH=$PIN_PATH" LANG=C "HOME=${HOME:-}")
+  for v in USER LOGNAME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS; do
+    [ -n "${!v:-}" ] && arr+=("$v=${!v}")
+  done
+  return 0
+}
+build_pin PIN
+# gh is resolved once, to an absolute path, through the fixed PATH
+GH_BIN="$(PATH="$GH_SEARCH" command -v gh 2>/dev/null)"; [[ "$GH_BIN" == /* ]] || GH_BIN=""
+[ -n "$GH_BIN" ] || { echo "pr-land: gh not found" >&2; exit 10; }
+for tool in jq flock timeout; do
   command -v "$tool" >/dev/null 2>&1 || { echo "pr-land: $tool not found" >&2; exit 10; }
 done
 
@@ -42,7 +66,7 @@ EXPIRE_SECS=$((72 * 3600)); NOCHECK_SECS=$((15 * 60)); KEEP_SECS=$((14 * 86400))
 
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 epoch_of() { date -u -d "$1" +%s 2>/dev/null; }
-if [ -n "${PR_LAND_NOW:-}" ]; then
+if [ "$TESTMODE" -eq 1 ] && [ -n "${PR_LAND_NOW:-}" ]; then
   [[ "$PR_LAND_NOW" =~ $ISO_RE ]] && NOW="$(date -u -d "$PR_LAND_NOW" +%s 2>/dev/null)" \
     || { echo "pr-land: PR_LAND_NOW must be an ISO UTC timestamp like 2026-01-02T03:04:05Z" >&2; exit 10; }
 else NOW="$(date -u +%s)"; fi
@@ -75,7 +99,7 @@ deliver() {  # MSG; 0 when delivered
   local cmd rc; cmd="$(notifier)"; rc=$?
   [ $rc -eq 2 ] && return 0
   [ $rc -eq 0 ] || return 1
-  timeout -k 5 20 "$cmd" "$1" >/dev/null 2>&1 9>&-
+  timeout -k 5 20 "${PIN[@]}" "$cmd" "$1" >/dev/null 2>&1 9>&-
 }
 log_notice() { mkdir -p "$state_dir"; printf '%s %s\n' "$(iso "$NOW")" "$1" >>"$state_dir/notices.log"; }
 notified=" "
@@ -147,7 +171,7 @@ check_one() {
   if [ $((NOW - $(epoch_of "$armed"))) -gt "$EXPIRE_SECS" ]; then
     finish "$f" expired "PR-LAND $repo#$pr expired sha=$sha : armed more than 72 hours ago"; return
   fi
-  out="$(timeout -k 5 60 gh pr view "$pr" -R "$repo" --json state,isDraft,headRefOid,baseRefName,mergeable,reviewDecision,statusCheckRollup 2>"$state_dir/.gh-err.$$" 9>&-)"; rc=$?
+  out="$(timeout -k 5 60 "${PIN[@]}" "$GH_BIN" pr view "$pr" -R "$repo" --json state,isDraft,headRefOid,baseRefName,mergeable,reviewDecision,statusCheckRollup 2>"$state_dir/.gh-err.$$" 9>&-)"; rc=$?
   v=""
   if [ $rc -eq 0 ]; then
     # The whole verdict is computed in jq. Free text from gh is reduced to a safe alphabet
@@ -232,7 +256,8 @@ retry_one() {
 }
 
 lock_wait() {  # arm and cancel: wait (bounded) for the lock the sweep holds
-  local w="${PR_LAND_LOCK_WAIT:-30}"
+  local w=30
+  [ "$TESTMODE" -eq 1 ] && w="${PR_LAND_LOCK_WAIT:-30}"
   [[ "$w" =~ ^[0-9]+$ ]] || w=30
   mkdir -p "$state_dir"
   exec 9>"$state_dir/.lock"
@@ -263,7 +288,7 @@ cmd_arm() {
   [[ "$want" =~ $SHA_RE ]] || { echo "pr-land: --sha must be 7 to 40 hex characters" >&2; usage; }
   want="${want,,}"
   local out head base st dr
-  out="$(timeout -k 5 60 gh pr view "$p" -R "$r" --json state,isDraft,headRefOid,baseRefName 2>/dev/null)" \
+  out="$(timeout -k 5 60 "${PIN[@]}" "$GH_BIN" pr view "$p" -R "$r" --json state,isDraft,headRefOid,baseRefName 2>/dev/null)" \
     && jq -e 'type=="object"' >/dev/null 2>&1 <<<"$out" || { echo "pr-land: cannot read $r#$p with gh" >&2; exit 1; }
   st="$(jq -r '.state // ""' <<<"$out")"; dr="$(jq -r '.isDraft // false' <<<"$out")"
   head="$(jq -r '.headRefOid // ""' <<<"$out" | tr 'A-F' 'a-f')"; base="$(jq -r '.baseRefName // "" | tostring | gsub("[^A-Za-z0-9 ._:/()@+-]"; "_") | .[0:100]' <<<"$out" | head -n 1)"

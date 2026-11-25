@@ -4,28 +4,48 @@
 # A fake `gh` is first on PATH, replays canned JSON per PR number and records every argv
 # it is called with; a fake notifier records what it is given. HOME and the XDG
 # directories are throwaway. "Now" is PR_LAND_NOW. No network, no real gh, no real config.
+# The tool pins the environment of every gh and notifier call (env -i plus a pass-list), so the
+# fakes get their paths baked in at generation time. Test seams (PR_LAND_NOW, PR_LAND_LOCK_WAIT,
+# PR_LAND_GH_PATH) need PR_LAND_TEST=1; `pl` sets it and the fake gh directory. A counting
+# `timeout` shim sits first on PATH: it logs every gh call the script makes, refuses to run any
+# gh but the fake, and so doubles as the tripwire against a real gh ever running.
+# Hermetic start: nothing inherited from the caller can change what the suite does, except the one
+# documented override PR_LAND_SCRIPT (the script under test, for mutation proofs on a scratch copy).
 # Usage: local-hooks/tests/run-pr-land-tests.sh
 set -uo pipefail
+for _v in $(compgen -v); do case "$_v" in GH_*|GIT_*) unset "$_v" ;; esac; done
+unset _v SHIM_BLOCK PR_LAND_NOW PR_LAND_LOCK_WAIT PR_LAND_GH_PATH PR_LAND_TEST BASH_ENV ENV GITHUB_TOKEN GH_TOKEN GH_HOST
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+suite="$here/$(basename "${BASH_SOURCE[0]}")"
 script="$(cd "$here/../.." && pwd)/bin/pr-land"
+if [ -n "${PR_LAND_SCRIPT:-}" ]; then
+  if [ ! -f "$PR_LAND_SCRIPT" ] || [ ! -x "$PR_LAND_SCRIPT" ]; then
+    echo "run-pr-land-tests: PR_LAND_SCRIPT=$PR_LAND_SCRIPT is not an executable file; refusing to fall back" >&2; exit 2
+  fi
+  script="$(cd "$(dirname "$PR_LAND_SCRIPT")" && pwd)/$(basename "$PR_LAND_SCRIPT")"
+fi
+echo "pr-land suite: script under test = $script"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state" XDG_CONFIG_HOME="$tmp/config"
 mkdir -p "$HOME"
-unset GH_TOKEN GITHUB_TOKEN
 sd="$XDG_STATE_HOME/pr-land"
-fx="$tmp/fx"; export FAKE_GH_DIR="$fx" GH_ALL_LOG="$tmp/gh-all.log"
-export NOTIF_LOG="$tmp/notif.log" NOTIF_FAIL="$tmp/notif.fail"
+fx="$tmp/fx"; GH_ALL_LOG="$tmp/gh-all.log"
+NOTIF_LOG="$tmp/notif.log"; NOTIF_FAIL="$tmp/notif.fail"; NOTIF_ENV="$tmp/notif.env"; NOTIF_PROBE="$tmp/notif.probe"
+SHIM_LOG="$tmp/timeout-shim.log"; M="$tmp/marker"   # no hostile hook may ever create M
 export PR_LAND_NOW=2026-11-24T12:00:00Z
 
 fakebin="$tmp/bin"; mkdir -p "$fakebin"
-cat >"$fakebin/gh" <<'GH'
+cat >"$fakebin/gh" <<GH
 #!/usr/bin/env bash
-d="$FAKE_GH_DIR"
+d="$fx"; all="$GH_ALL_LOG"
+GH
+cat >>"$fakebin/gh" <<'GH'
 printf '%s\n' "$*" >>"$d/calls.log"
-printf '%s\n' "$*" >>"$GH_ALL_LOG"
-if [ -n "${FAKE_GH_RELEASE:-}" ]; then  # handshake: say we are in, then block until released (20 s hard bound)
+printf '%s\n' "$*" >>"$all"
+if [ -e "$d/env-probe" ]; then env >"$d/env.log"; fi
+if [ -e "$d/hold" ]; then  # handshake: say we are in, then block until released (20 s hard bound)
   : >"$d/entered"
-  for _ in $(seq 1 400); do [ -e "$FAKE_GH_RELEASE" ] && break; sleep 0.05; done
+  for _ in $(seq 1 400); do [ -e "$d/release" ] && break; sleep 0.05; done
 fi
 pr="$3"
 if [ -e "$d/fail-$pr.txt" ]; then cat "$d/fail-$pr.txt" >&2; exit 1; fi
@@ -33,18 +53,47 @@ if [ -e "$d/fail-$pr.txt" ]; then cat "$d/fail-$pr.txt" >&2; exit 1; fi
 cat "$d/resp-$pr.json"
 GH
 chmod +x "$fakebin/gh"
-cat >"$tmp/notify.sh" <<'N'
+cat >"$tmp/notify.sh" <<N
 #!/usr/bin/env bash
 [ -e "$NOTIF_FAIL" ] && exit 1
-printf '%s\n' "$1" >>"$NOTIF_LOG"
-printf '%s\n' "$#" >>"$NOTIF_LOG.argc"
+[ -e "$NOTIF_PROBE" ] && env >"$NOTIF_ENV"
+printf '%s\n' "\$1" >>"$NOTIF_LOG"
+printf '%s\n' "\$#" >>"$NOTIF_LOG.argc"
 N
 chmod +x "$tmp/notify.sh"
-export PATH="$fakebin:$PATH"
+# the counting timeout shim: logs "exec|block ARGV" for every call with a gh argument. It runs
+# only the fake gh (absolute or bare, found first on PATH); any other gh is blocked, and
+# every gh is blocked while SHIM_BLOCK is set. Everything else (the notifier) goes to the real timeout.
+shimbin="$tmp/shim"; mkdir -p "$shimbin"
+cat >"$shimbin/timeout" <<SH
+#!/usr/bin/env bash
+log="$SHIM_LOG"; fakegh="$fakebin/gh"
+SH
+cat >>"$shimbin/timeout" <<'SH'
+isgh=0; allow=1
+for a in "$@"; do
+  case "$a" in
+    gh) isgh=1 ;;
+    */gh) isgh=1; [ "$a" = "$fakegh" ] || allow=0 ;;
+  esac
+done
+if [ "$isgh" = 1 ]; then
+  if [ "$allow" = 1 ] && [ -z "${SHIM_BLOCK:-}" ]; then echo "exec $*" >>"$log"; else echo "block $*" >>"$log"; exit 1; fi
+fi
+exec /usr/bin/timeout "$@"
+SH
+chmod +x "$shimbin/timeout"
+# a bare `gh` found through the suite's own PATH is a bug in the script: it logs and fails
+tripbin="$tmp/trip"; mkdir -p "$tripbin"; TRIP_LOG="$tmp/bare-gh.log"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\nexit 1\n' "$TRIP_LOG" >"$tripbin/gh"; chmod +x "$tripbin/gh"
+export PATH="$shimbin:$tripbin:$PATH"
+# the real gh is blocked by the shim; the tests that rely on that need one in the fixed PATH
+HAVE_REAL_GH=0; PATH=/usr/local/bin:/usr/bin:/bin command -v gh >/dev/null 2>&1 && HAVE_REAL_GH=1
 
-pass=0; fail=0
+pass=0; fail=0; skipped=0
 ok()  { pass=$((pass + 1)); echo "ok   - $1"; }
 bad() { fail=$((fail + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; }
+skip() { skipped=$((skipped + 1)); echo "SKIP $1: no gh in the fixed PATH"; }
 check() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 R=octo/demo
@@ -53,7 +102,7 @@ S2=2222222222222222222222222222222222222222
 fresh() { rm -rf "$sd" "$XDG_CONFIG_HOME" "$fx" "$NOTIF_LOG" "$NOTIF_LOG.argc" "$NOTIF_FAIL"; mkdir -p "$fx"; export PR_LAND_NOW=2026-11-24T12:00:00Z; }
 withnotif() { mkdir -p "$XDG_CONFIG_HOME/pr-land"; printf 'NOTIFY_CMD=%s\n' "$tmp/notify.sh" >"$XDG_CONFIG_HOME/pr-land/notify.conf"; }
 run() { out="$("$@" 2>"$tmp/err")"; rc=$?; err="$(cat "$tmp/err")"; }
-pl() { run bash "$script" "$@"; }
+pl() { run env PR_LAND_TEST=1 PR_LAND_GH_PATH="$fakebin" bash "$script" "$@"; }
 sf() { echo "$sd/${1%%/*}__${1##*/}__$2.json"; }
 sget() { jq -r ".$2 | if . == null then \"\" else tostring end" "$1"; }
 nlog() { cat "$sd/notices.log" 2>/dev/null; }
@@ -75,9 +124,9 @@ waitfor() { local _i; for _i in $(seq 1 200); do [ -e "$1" ] && return 0; sleep 
 fresh
 pl; check "no arguments: usage, exit 10" '[ $rc -eq 10 ] && grep -qi usage <<<"$err"' "rc=$rc err=[$err]"
 pl bogus; check "unknown command: usage, exit 10" '[ $rc -eq 10 ] && grep -qi usage <<<"$err"' "rc=$rc err=[$err]"
-run env PATH="$tmp/empty" /bin/bash "$script" list; check "missing gh: exit 10" '[ $rc -eq 10 ]' "rc=$rc"
+run env PATH="$tmp/empty" PR_LAND_TEST=1 PR_LAND_GH_PATH="$tmp/empty" /bin/bash "$script" list; check "missing gh: exit 10" '[ $rc -eq 10 ]' "rc=$rc"
 mkdir -p "$tmp/onlygh"; cp "$fakebin/gh" "$tmp/onlygh/gh"
-run env PATH="$tmp/onlygh" /bin/bash "$script" list; check "missing jq: exit 10" '[ $rc -eq 10 ]' "rc=$rc"
+run env PATH="$tmp/onlygh" PR_LAND_TEST=1 PR_LAND_GH_PATH="$tmp/onlygh" /bin/bash "$script" list; check "missing jq: exit 10" '[ $rc -eq 10 ]' "rc=$rc"
 
 # ---------- arm ----------
 fresh; resp 7 OPEN false $S1 main MERGEABLE "" "[]"
@@ -215,13 +264,13 @@ check "invalid JSON and missing fields: skipped, kept, the valid file still proc
 
 # ---------- concurrent sweeps ----------
 fresh; mkstate $R 7 $S1 main $A1H armed; resp 7 OPEN false $S1 main MERGEABLE APPROVED "[$(cr a IN_PROGRESS '')]"
-rel="$tmp/release1"; rm -f "$rel"
-( FAKE_GH_RELEASE="$rel" bash "$script" sweep >"$tmp/first.out" 2>&1; echo $? >"$tmp/first.rc" ) &
+: >"$fx/hold"
+( PR_LAND_TEST=1 PR_LAND_GH_PATH="$fakebin" bash "$script" sweep >"$tmp/first.out" 2>&1; echo $? >"$tmp/first.rc" ) &
 bg=$!
 waitfor "$fx/entered" || bad "first sweep reached gh" "marker never appeared"
 pl sweep
 check "second concurrent sweep is skipped at once, exit 0" '[ $rc -eq 0 ] && grep -qi skipped <<<"$out"' "rc=$rc out=[$out]"
-: >"$rel"; wait "$bg"
+: >"$fx/release"; wait "$bg"
 check "first sweep finished normally while the second was skipped" '[ "$(cat "$tmp/first.rc")" = 0 ] && [ -z "$(cat "$tmp/first.out")" ]' "rc=$(cat "$tmp/first.rc" 2>/dev/null) out=[$(cat "$tmp/first.out")]"
 check "only the first sweep called gh" '[ "$(wc -l <"$fx/calls.log")" = 1 ]'
 
@@ -361,10 +410,102 @@ check "arm with a 150-character base succeeds" '[ $rc -eq 0 ]' "rc=$rc err=[$err
 pl sweep
 check "150-character base armed then swept unchanged is not base-changed" '[ "$(sget "$(sf $R 7)" status)" = ready ]' "status=$(sget "$(sf $R 7)" status) notices=[$(nlog)]"
 
+# ---------- pinned environment of every gh and notifier call ----------
+fresh; withnotif; : >"$fx/env-probe"; : >"$NOTIF_PROBE"; rm -f "$NOTIF_ENV" "$M"
+# BASH_ENV is read by every non-interactive bash, including pr-land itself; only the fake gh and
+# the fake notifier must not run it
+printf 'case "$0" in */gh|*/notify.sh) touch %s ;; esac\n' "$M" >"$tmp/bashenv.sh"
+hostile_env() { export GH_HOST=evil.example GH_CONFIG_DIR=/tmp/x GH_REPO=a/b GH_TOKEN=tok GITHUB_TOKEN=tok2 GH_ENTERPRISE_TOKEN=tok3 GH_PAGER=less PAGER=less BROWSER=firefox BASH_ENV="$tmp/bashenv.sh" ENV="$tmp/bashenv.sh" GIT_DIR=/tmp/y GIT_WORK_TREE=/tmp/z; }
+clean_env() { unset GH_HOST GH_CONFIG_DIR GH_REPO GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GH_PAGER PAGER BROWSER BASH_ENV ENV GIT_DIR GIT_WORK_TREE; }
+# shellcheck disable=SC2034  # PASSRE is read inside the evals in check
+PASSRE='HOME|USER|LOGNAME|LANG|PATH|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|PWD|SHLVL|_|OLDPWD'
+# positive control: the same fakes run directly, with BASH_ENV set and no pin, DO run the hook
+mkdir -p "$tmp/ctl"; sed "s|^d=.*|d=\"$tmp/ctl\"; all=/dev/null|" "$fakebin/gh" >"$tmp/ctl/gh"; chmod +x "$tmp/ctl/gh"
+BASH_ENV="$tmp/bashenv.sh" "$tmp/ctl/gh" pr view 7 >/dev/null 2>&1
+check "control: the fake gh run unpinned with BASH_ENV set does run the hook (marker created)" '[ -e "$M" ]'; rm -f "$M"
+BASH_ENV="$tmp/bashenv.sh" "$tmp/notify.sh" x >/dev/null 2>&1
+check "control: the fake notifier run unpinned with BASH_ENV set does run the hook (marker created)" '[ -e "$M" ]'; rm -f "$M" "$NOTIF_LOG" "$NOTIF_LOG.argc"
+resp 7 OPEN false $S1 main MERGEABLE "" "[]"
+hostile_env; pl arm $R 7 --sha $S1; clean_env; cp "$fx/env.log" "$tmp/arm.env" 2>/dev/null
+check "hostile environment: arm still works through the fake gh" '[ $rc -eq 0 ] && [ -s "$tmp/arm.env" ]' "rc=$rc err=[$err]"
+check "arm: gh environment has none of GH_*, GITHUB_*, GIT_*, PAGER, BROWSER, BASH_ENV, ENV, XDG_CONFIG_HOME" '! grep -Eq "^(GH_|GITHUB_|GIT_|PAGER=|BROWSER=|BASH_ENV=|ENV=|XDG_CONFIG_HOME)" "$tmp/arm.env"' "$(cut -d= -f1 "$tmp/arm.env" | tr '\n' ' ')"
+check "arm: gh environment is the pass-list only, PATH fixed, LANG=C" '[ -z "$(cut -d= -f1 "$tmp/arm.env" | grep -Evx "$PASSRE")" ] && grep -qx "PATH=/usr/local/bin:/usr/bin:/bin" "$tmp/arm.env" && grep -qx "LANG=C" "$tmp/arm.env" && grep -qx "HOME=$HOME" "$tmp/arm.env"' "$(cut -d= -f1 "$tmp/arm.env" | tr '\n' ' ')"
+resp 7 OPEN false $S1 main MERGEABLE APPROVED "$GOOD"; rm -f "$fx/env.log"
+hostile_env; pl sweep; clean_env
+check "hostile environment: the sweep reached ready and the notifier" '[ $rc -eq 0 ] && [ "$(sget "$(sf $R 7)" status)" = ready ] && [ -s "$fx/env.log" ] && [ -s "$NOTIF_ENV" ]' "rc=$rc err=[$err] status=$(sget "$(sf $R 7)" status)"
+check "sweep: gh environment has none of GH_*, GITHUB_*, GIT_*, PAGER, BROWSER, BASH_ENV, ENV, XDG_CONFIG_HOME" '! grep -Eq "^(GH_|GITHUB_|GIT_|PAGER=|BROWSER=|BASH_ENV=|ENV=|XDG_CONFIG_HOME)" "$fx/env.log"' "$(cut -d= -f1 "$fx/env.log" | tr '\n' ' ')"
+check "sweep: gh environment is the pass-list only, PATH fixed, LANG=C" '[ -z "$(cut -d= -f1 "$fx/env.log" | grep -Evx "$PASSRE")" ] && grep -qx "PATH=/usr/local/bin:/usr/bin:/bin" "$fx/env.log" && grep -qx "LANG=C" "$fx/env.log"' "$(cut -d= -f1 "$fx/env.log" | tr '\n' ' ')"
+check "notifier environment has none of GH_*, GITHUB_*, GIT_*, PAGER, BROWSER, BASH_ENV, ENV, XDG_CONFIG_HOME" '! grep -Eq "^(GH_|GITHUB_|GIT_|PAGER=|BROWSER=|BASH_ENV=|ENV=|XDG_CONFIG_HOME)" "$NOTIF_ENV"' "$(cut -d= -f1 "$NOTIF_ENV" | tr '\n' ' ')"
+check "notifier environment is the pass-list only, PATH fixed, LANG=C" '[ -z "$(cut -d= -f1 "$NOTIF_ENV" | grep -Evx "$PASSRE")" ] && grep -qx "PATH=/usr/local/bin:/usr/bin:/bin" "$NOTIF_ENV" && grep -qx "LANG=C" "$NOTIF_ENV"' "$(cut -d= -f1 "$NOTIF_ENV" | tr '\n' ' ')"
+check "BASH_ENV script never ran in the fake gh or the fake notifier" '[ ! -e "$M" ]'
+rm -f "$NOTIF_PROBE"
+
+# pass-through: the pass-list variables reach the fake gh and the fake notifier unchanged
+fresh; withnotif; : >"$fx/env-probe"; : >"$NOTIF_PROBE"; rm -f "$NOTIF_ENV"
+resp 7 OPEN false $S1 main MERGEABLE APPROVED "$GOOD"; mkstate $R 7 $S1 main $A1H armed
+USER=user_marker LOGNAME=logname_marker XDG_RUNTIME_DIR=/run/xrd_marker DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus_marker LANG=de_DE.UTF-8 pl sweep
+for ef in "$fx/env.log" "$NOTIF_ENV"; do
+  check "pass-through to ${ef##*/}: USER, LOGNAME, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS exactly as given, LANG=C" '[ -s "$ef" ] && grep -qx "USER=user_marker" "$ef" && grep -qx "LOGNAME=logname_marker" "$ef" && grep -qx "XDG_RUNTIME_DIR=/run/xrd_marker" "$ef" && grep -qx "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus_marker" "$ef" && grep -qx "LANG=C" "$ef" && [ "$(grep -c "^LANG=" "$ef")" = 1 ]' "$(cat "$ef" 2>/dev/null | head -12 | tr '\n' ' ')"
+done
+rm -f "$NOTIF_PROBE"
+
+# HOME is required
+fresh
+run env -u HOME PR_LAND_TEST=1 PR_LAND_GH_PATH="$fakebin" bash "$script" list
+check "HOME unset: exit 10 with a message" '[ $rc -eq 10 ] && grep -q "HOME is not set" <<<"$err"' "rc=$rc err=[$err]"
+run env HOME= PR_LAND_TEST=1 PR_LAND_GH_PATH="$fakebin" bash "$script" list
+check "HOME empty: exit 10 with a message" '[ $rc -eq 10 ] && grep -q "HOME is not set" <<<"$err"' "rc=$rc err=[$err]"
+
+# the one documented override never falls back silently
+run env PR_LAND_SCRIPT="$tmp/no-such-script" bash "$suite"
+check "PR_LAND_SCRIPT pointing at a missing file: the suite exits non-zero at once with a message" '[ $rc -ne 0 ] && grep -q "refusing to fall back" <<<"$err" && ! grep -q "^ok " <<<"$out"' "rc=$rc err=[$err]"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/not-exec"
+run env PR_LAND_SCRIPT="$tmp/not-exec" bash "$suite"
+check "PR_LAND_SCRIPT pointing at a non-executable file: the suite exits non-zero at once with a message" '[ $rc -ne 0 ] && grep -q "refusing to fall back" <<<"$err" && ! grep -q "^ok " <<<"$out"' "rc=$rc err=[$err]"
+
+# ---------- test seams are ignored without PR_LAND_TEST=1 ----------
+# No real gh may run: the shim blocks every gh that is not the fake (SHIM_BLOCK blocks them all),
+# and logs what the script tried to execute. A far-FUTURE PR_LAND_NOW would expire a fresh entry.
+if [ "$HAVE_REAL_GH" = 1 ]; then
+nowiso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+fresh; withnotif; mkstate $R 7 $S1 main "$nowiso" armed; resp 7 OPEN false $S1 main MERGEABLE APPROVED "$GOOD"
+# shellcheck disable=SC2034  # b0 and e0 are read inside the evals in check
+b0="$(grep -c '^block ' "$SHIM_LOG" 2>/dev/null)"
+# shellcheck disable=SC2034
+e0="$(grep -c '^exec ' "$SHIM_LOG" 2>/dev/null)"
+run env -u PR_LAND_TEST SHIM_BLOCK=1 PR_LAND_NOW=2099-01-01T00:00:00Z PR_LAND_GH_PATH="$fakebin" bash "$script" sweep
+f="$(sf $R 7)"
+check "without PR_LAND_TEST a far-future PR_LAND_NOW does not expire a fresh entry" '[ $rc -eq 0 ] && [ "$(sget "$f" status)" = armed ] && [ "$(nlines)" = 0 ]' "rc=$rc status=$(sget "$f" status) notices=[$(nlog)]"
+check "without PR_LAND_TEST PR_LAND_GH_PATH is ignored: the fake gh is not called" '[ ! -e "$fx/calls.log" ]'
+check "without PR_LAND_TEST the gh the script tried is not under the fake directory" '[ "$(grep -c "^block " "$SHIM_LOG")" -gt "$b0" ] && [ "$(grep -c "^exec " "$SHIM_LOG")" = "$e0" ] && ! grep "^block " "$SHIM_LOG" | tail -n +$((b0 + 1)) | grep -qF "$fakebin"' "$(tail -n 2 "$SHIM_LOG")"
+run env -u PR_LAND_TEST PR_LAND_NOW=garbage PR_LAND_GH_PATH="$tmp/nowhere" bash "$script" list
+check "without PR_LAND_TEST an invalid PR_LAND_NOW is ignored (no exit 10)" '[ $rc -eq 0 ]' "rc=$rc err=[$err]"
+fresh; resp 7 OPEN false $S1 main MERGEABLE "" "[]"
+run env -u PR_LAND_TEST SHIM_BLOCK=1 PR_LAND_GH_PATH="$fakebin" bash "$script" arm $R 7 --sha $S1
+check "without PR_LAND_TEST arm does not use PR_LAND_GH_PATH: the fake is not called, nothing armed" '[ $rc -eq 1 ] && [ ! -e "$fx/calls.log" ] && [ ! -e "$(sf $R 7)" ]' "rc=$rc err=[$err]"
+else
+  skip "without PR_LAND_TEST a far-future PR_LAND_NOW does not expire a fresh entry"
+  skip "without PR_LAND_TEST PR_LAND_GH_PATH is ignored: the fake gh is not called"
+  skip "without PR_LAND_TEST the gh the script tried is not under the fake directory"
+  skip "without PR_LAND_TEST an invalid PR_LAND_NOW is ignored (no exit 10)"
+  skip "without PR_LAND_TEST arm does not use PR_LAND_GH_PATH: the fake is not called, nothing armed"
+fi
+pl_gone() { run env PR_LAND_TEST=1 PR_LAND_GH_PATH="$tmp/nowhere" bash "$script" "$@"; }
+resp 7 OPEN false $S1 main MERGEABLE "" "[]"; pl_gone arm $R 7 --sha $S1
+check "arm with gh not found: exit 10 and a message, no state" '[ $rc -eq 10 ] && grep -q "gh not found" <<<"$err" && [ ! -e "$(sf $R 7)" ]' "rc=$rc err=[$err]"
+mkstate $R 8 $S1 main $A1H armed; pl_gone sweep
+check "sweep with gh not found: one stderr line, entry left armed, no notice" '[ "$(grep -c . <<<"$err")" = 1 ] && [ "$(sget "$(sf $R 8)" status)" = armed ] && [ "$(nlines)" = 0 ]' "rc=$rc err=[$err]"
+
 # ---------- the whole suite: gh was only ever asked to view ----------
 check "gh was called during the suite" '[ -s "$GH_ALL_LOG" ]'
 check "recorded gh argv log contains only pr view calls" '[ "$(grep -vc "^pr view " "$GH_ALL_LOG")" = 0 ]' "$(grep -v '^pr view ' "$GH_ALL_LOG" | head -3)"
 check "recorded gh argv log has no merge, ready, comment, review, close or api" '! grep -Eqw "merge|ready|comment|review|close|api" "$GH_ALL_LOG"'
 
-echo; echo "$pass passed, $fail failed"
+# tripwire: every gh the script executed was the fake, and the fake recorded each one
+check "tripwire: gh calls the script made (counted by the timeout shim) equal the calls the fake recorded" '[ "$(grep -c "^exec " "$SHIM_LOG")" = "$(wc -l <"$GH_ALL_LOG")" ] && [ "$(grep -c "^exec " "$SHIM_LOG")" -gt 0 ]' "shim=$(grep -c '^exec ' "$SHIM_LOG") fake=$(wc -l <"$GH_ALL_LOG")"
+check "tripwire: no executed gh path was anything but the fake" '! grep "^exec " "$SHIM_LOG" | grep -F "/gh " | grep -qvF "$fakebin/gh "' "$(grep '^exec ' "$SHIM_LOG" | grep -vF "$fakebin/gh " | head -2)"
+
+check "tripwire: no bare gh was ever run through the suite's PATH" '[ ! -s "$TRIP_LOG" ]' "$(cat "$TRIP_LOG" 2>/dev/null | head -3)"
+
+echo; echo "$pass passed, $fail failed, $skipped skipped (script: $script)"
 [ "$fail" -eq 0 ]

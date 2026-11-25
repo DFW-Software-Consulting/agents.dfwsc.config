@@ -35,3 +35,4 @@ Central home for coding-agent configuration, engineering standards and workflow 
 
 ## Work convention
 All work happens in a git worktree branched from the default branch, never in the primary checkout. A hook (`local-hooks/worktree-gate.sh`) denies edits and HEAD-changing git commands in a primary checkout.
+- `ai-code-agents/claude/bin/checkback` : durable "tell me later" reminders (time or whitelisted read-only condition); unit files in `bin/systemd/`, installed by hand; see git-workflow-skills.md.

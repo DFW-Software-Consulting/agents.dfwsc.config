@@ -1,0 +1,442 @@
+#!/usr/bin/env bash
+# checkback: a durable "tell me later". The owner arms a reminder from the shell: at a time, or
+# when a narrow read-only condition becomes true, one notice is written. A periodic sweep (a
+# systemd user timer, outside any agent session) does the work. Because it runs unattended, a
+# forged or corrupted state file can cause nothing worse than a notice or a whitelisted
+# read-only check: the stored condition is re-validated on every sweep, run as an argv array
+# (never through a shell), and its output is never read, logged or sent.
+#
+# Usage:
+#   checkback add (--in <N>m|<N>h | --at <HH:MM>) --say '<text>' [--until '<condition>' [--every <N>m] [--max <N>]]
+#   checkback sweep
+#   checkback list
+#   checkback cancel <id>
+# Condition whitelist (words split by our own tokenizer; single and double quotes only):
+#   gh pr checks <number> -R <owner/repo> [--required]
+#   test -f <absolute path> | test -e <absolute path>
+# Condition output is discarded, so "met" means exactly one thing: the command exited 0. Only shapes
+# whose exit status carries meaning are allowed (gh pr view and gh run view are not: they exit 0 when
+# the pull request or run merely exists or is still running).
+# gh pr checks in gh 2.46.0 (read from `gh pr checks --help` and `gh help exit-codes`, not run against
+# the network): the help text lists no command-specific codes. The general rule is 0 success, 1 any
+# failure, 2 cancelled, 4 authentication. For this command exit 0 means every check passed; failing
+# checks make it non-zero (1), and so do checks still pending (newer gh versions use 8 for pending).
+# Anything other than 0 is "not met yet" here and counts as an attempt.
+# Every condition runs in a pinned environment: PATH=/usr/local/bin:/usr/bin:/bin, LANG=C and only
+# HOME, USER, LOGNAME, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS passed through (so GH_*, GIT_*,
+# BASH_ENV, PAGER, tokens and XDG_CONFIG_HOME never reach it); gh is resolved once to an absolute path.
+# The notifier call gets the same pinned environment. notices.log is not rotated.
+# A sweep stops after 200 due entries or 45 seconds (oldest due first), says so on stderr and exits 0.
+# State:  ${XDG_STATE_HOME:-$HOME/.local/state}/checkback/<id>.json, notices.log in the same directory
+# Config: ${XDG_CONFIG_HOME:-$HOME/.config}/pr-land/notify.conf with a line NOTIFY_CMD=<absolute path
+#         to an executable>, called with the notice as its only argument. The notifier logic below is a
+#         small copy of pr-land's on purpose: this script does not depend on pr-land at run time.
+# Test seams, honoured ONLY when CHECKBACK_TEST=1 is also set (ignored in production):
+#         CHECKBACK_NOW  ISO UTC timestamp used as "now"; an invalid value exits 10.
+#         CHECKBACK_LOCK_WAIT  seconds add and cancel wait for the shared lock (default 30).
+#         CHECKBACK_COND_PATH  PATH used to find gh for conditions (default is the fixed PATH).
+#         CHECKBACK_COND_TIMEOUT / CHECKBACK_NOTIFY_TIMEOUT  seconds (defaults 60 and 20).
+# exit:   0 ok, 1 refused or unknown id or lock timeout, 2 condition not allowed,
+#         10 usage error or a missing tool (jq, flock and timeout always; gh only for a gh condition).
+set -uo pipefail
+export LC_ALL=C   # character-class checks below must never be widened by a locale
+
+usage() {
+  cat >&2 <<'U'
+usage: checkback add (--in <N>m|<N>h | --at <HH:MM>) --say '<text>' [--until '<condition>' [--every <N>m] [--max <N>]]
+       checkback sweep
+       checkback list
+       checkback cancel <id>
+U
+  exit 10
+}
+
+for tool in jq flock timeout; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "checkback: $tool not found" >&2; exit 10; }
+done
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/checkback"
+conf="${XDG_CONFIG_HOME:-$HOME/.config}/pr-land/notify.conf"
+REPO_RE='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+ID_RE='^[A-Za-z0-9]+$'
+ISO_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+KEEP_SECS=$((14 * 86400))
+
+iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+epoch_of() { date -u -d "$1" +%s 2>/dev/null; }
+TESTMODE=0; [ "${CHECKBACK_TEST:-}" = 1 ] && TESTMODE=1
+# seam NAME DEFAULT: the value of a numeric test seam, only in test mode
+seam() { local v="${!1:-}"; if [ "$TESTMODE" -eq 1 ] && [[ "$v" =~ ^[0-9]+$ ]]; then echo "$v"; else echo "$2"; fi; }
+PIN_PATH=/usr/local/bin:/usr/bin:/bin
+COND_PATH="$PIN_PATH"
+[ "$TESTMODE" -eq 1 ] && [ -n "${CHECKBACK_COND_PATH:-}" ] && COND_PATH="$CHECKBACK_COND_PATH"
+COND_TIMEOUT="$(seam CHECKBACK_COND_TIMEOUT 60)"; NOTIFY_TIMEOUT="$(seam CHECKBACK_NOTIFY_TIMEOUT 20)"
+SWEEP_MAX=200; SWEEP_SECS=45
+# build_pin ARRAYNAME PATHVALUE: an `env -i` prefix passing only the pass-list
+build_pin() {
+  local -n arr="$1"; local v
+  arr=(/usr/bin/env -i "PATH=$2" LANG=C "HOME=${HOME:-}")
+  for v in USER LOGNAME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS; do
+    [ -n "${!v:-}" ] && arr+=("$v=${!v}")
+  done
+  return 0
+}
+build_pin PIN_COND "$COND_PATH"; build_pin PIN_NOTIF "$PIN_PATH"
+if [ "$TESTMODE" -eq 1 ] && [ -n "${CHECKBACK_NOW:-}" ]; then
+  [[ "$CHECKBACK_NOW" =~ $ISO_RE ]] && NOW="$(date -u -d "$CHECKBACK_NOW" +%s 2>/dev/null)" \
+    || { echo "checkback: CHECKBACK_NOW must be an ISO UTC timestamp like 2026-01-02T03:04:05Z" >&2; exit 10; }
+else NOW="$(date -u +%s)"; fi
+
+# clean TEXT: every character outside the safe alphabet becomes "_" (one line, no control characters)
+clean() { printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9 ._:/()@+,'"'"'!?#=-' '_'; }
+# resolve_cmd WORD: sets RUN_BIN to an absolute path for gh (through the condition PATH) or test
+resolve_cmd() {
+  RUN_BIN=""
+  case "$1" in
+    gh) RUN_BIN="$(PATH="$COND_PATH" command -v gh 2>/dev/null)"; [[ "$RUN_BIN" == /* ]] || RUN_BIN="" ;;
+    test)
+      local c d; local -a dirs=()
+      if [ "$TESTMODE" -eq 1 ] && [ -n "${CHECKBACK_COND_PATH:-}" ]; then   # test seam: a fake test binary
+        IFS=: read -ra dirs <<<"$COND_PATH"
+        for d in "${dirs[@]}"; do [ -x "$d/test" ] && { RUN_BIN="$d/test"; break; }; done
+      fi
+      if [ -z "$RUN_BIN" ]; then for c in /usr/bin/test /bin/test; do [ -x "$c" ] && { RUN_BIN="$c"; break; }; done; fi ;;
+  esac
+  [ -n "$RUN_BIN" ]
+}
+jget() { jq -r --arg k "$2" '.[$k] // empty | tostring' "$1" 2>/dev/null; }
+
+# write_json FILE JQ_FILTER [jq args...]: filter applied to the existing file (or null), atomic.
+write_json() {
+  local file="$1" filter="$2"; shift 2
+  local tmpf; mkdir -p "$state_dir"
+  tmpf="$(mktemp "$state_dir/.tmp.XXXXXX")" || return 1
+  if [ -e "$file" ]; then jq "$@" "$filter" "$file" >"$tmpf"; else jq -n "$@" "$filter" >"$tmpf"; fi \
+    && mv -f "$tmpf" "$file" || { rm -f "$tmpf"; return 1; }
+}
+
+# ---- condition whitelist ----
+# tokenize STRING: sets WORDS (array). Understands single quotes, double quotes and spaces only.
+# Returns 1 (refuse) on a shell metacharacter anywhere, a control character, a glob character
+# outside quotes, or an unterminated quote.
+tokenize() {
+  local s="$1" i c q="" cur="" have=0 n
+  WORDS=()
+  n=${#s}
+  for ((i = 0; i < n; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      ';'|'|'|'&'|'$'|'`'|'<'|'>'|'('|')'|'{'|'}'|'\') return 1 ;;
+    esac
+    [[ "$c" =~ [[:cntrl:]] ]] && return 1
+    if [ -n "$q" ]; then
+      if [ "$c" = "$q" ]; then q=""; else cur+="$c"; fi
+      continue
+    fi
+    case "$c" in
+      "'"|'"') q="$c"; have=1 ;;
+      ' ') if [ "$have" -eq 1 ]; then WORDS+=("$cur"); cur=""; have=0; fi ;;
+      '*'|'?'|'['|']') return 1 ;;
+      *) cur+="$c"; have=1 ;;
+    esac
+  done
+  [ -z "$q" ] || return 1
+  if [ "$have" -eq 1 ]; then WORDS+=("$cur"); fi
+  return 0
+}
+
+# valid_path P: absolute, no ".." segment, no newline
+valid_path() {
+  local p="$1"
+  [[ "$p" == /* ]] || return 1
+  case "$p" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  case "$p/" in */../*) return 1 ;; esac
+  return 0
+}
+
+# valid_words WORD...: 0 only for an exact whitelisted shape
+valid_words() {
+  local -a w=("$@")
+  local n=${#w[@]}
+  [ "$n" -ge 3 ] || return 1
+  local x; for x in "${w[@]}"; do [[ "$x" =~ [[:cntrl:]] ]] && return 1; done
+  if [ "${w[0]}" = test ]; then
+    [ "$n" -eq 3 ] || return 1
+    [ "${w[1]}" = -f ] || [ "${w[1]}" = -e ] || return 1
+    valid_path "${w[2]}"
+    return
+  fi
+  [ "${w[0]}" = gh ] && [ "${w[1]}" = pr ] && [ "${w[2]}" = checks ] || return 1
+  [ "$n" -eq 6 ] || [ "$n" -eq 7 ] || return 1
+  [[ "${w[3]}" =~ ^[0-9]+$ ]] || return 1
+  [ "${w[4]}" = -R ] || return 1
+  [[ "${w[5]}" =~ $REPO_RE ]] || return 1
+  [ "$n" -eq 6 ] && return 0
+  [ "${w[6]}" = --required ]
+}
+
+# ---- notices ----
+# notifier: prints the configured executable. Returns 2 when none is configured (the log
+# line is then the whole notice), 1 when the configured path is unusable.
+notifier() {
+  local line cmd
+  [ -r "$conf" ] || return 2
+  line="$(grep -E '^NOTIFY_CMD=' "$conf" | tail -n1)"; [ -n "$line" ] || return 2
+  cmd="${line#NOTIFY_CMD=}"
+  case "$cmd" in /*) ;; *) return 1 ;; esac
+  [ -f "$cmd" ] && [ -x "$cmd" ] || return 1
+  printf '%s' "$cmd"
+}
+deliver() {  # MSG; 0 when delivered
+  local cmd rc; cmd="$(notifier)"; rc=$?
+  [ $rc -eq 2 ] && return 0
+  [ $rc -eq 0 ] || return 1
+  timeout -k 5 "$NOTIFY_TIMEOUT" "${PIN_NOTIF[@]}" "$cmd" "$1" >/dev/null 2>&1 </dev/null 9>&-
+}
+log_notice() { mkdir -p "$state_dir"; printf '%s %s\n' "$(iso "$NOW")" "$1" >>"$state_dir/notices.log"; }
+notified=" "
+# notice FILE MSG: log always, try the notifier, keep the text pending when it fails
+notice() {
+  log_notice "$2"
+  notified="$notified$1 "
+  if ! deliver "$2"; then write_json "$1" '.pending_msg=$m' --arg m "$2"; fi
+}
+# finish FILE STATUS MSG: terminal state first (at most one notice), then the notice
+finish() {
+  write_json "$1" '.status=$s | .closed_at=$t' --arg s "$2" --arg t "$(iso "$NOW")" || return 1
+  notice "$1" "$3"
+}
+
+# ---- state files ----
+# load_state FILE: validates shape, types and ranges in one jq call; sets id due created status every max attempts
+# (the free text is read separately with jget). A value out of range makes the file damaged.
+load_state() {
+  local f="$1" base line
+  line="$(jq -r '
+    def int: type == "number" and . == floor;
+    if type == "object" and (.id | type == "string") and (.text | type == "string")
+      and (.due_at | type == "string") and (.created_at | type == "string") and (.status | type == "string")
+      and (.condition == null or (.condition | type == "array" and all(.[]; type == "string")))
+      and (.every_min | int) and (.max | int) and (.attempts | int) and (.pending_msg | type == "string")
+    then [.id, .due_at, .created_at, .status, .every_min, .max, .attempts] | map(tostring) | @tsv else empty end' "$f" 2>/dev/null)" || return 1
+  [ -n "$line" ] || return 1
+  IFS=$'\t' read -r id due created status every max attempts <<<"$line"
+  base="${f##*/}"; base="${base%.json}"
+  [[ "$id" =~ $ID_RE ]] && [ "$id" = "$base" ] || return 1
+  [[ "$due" =~ $ISO_RE ]] && epoch_of "$due" >/dev/null && [[ "$created" =~ $ISO_RE ]] && epoch_of "$created" >/dev/null || return 1
+  case "$status" in armed|done|gave-up|cancelled|invalid) ;; *) return 1 ;; esac
+  [[ "$every" =~ ^[0-9]{1,2}$ ]] && [ "$every" -ge 1 ] && [ "$every" -le 60 ] || return 1
+  [[ "$max" =~ ^[0-9]{1,3}$ ]] && [ "$max" -ge 1 ] && [ "$max" -le 288 ] || return 1
+  [[ "$attempts" =~ ^[0-9]{1,6}$ ]] && [ "$attempts" -le 100000 ] || return 1
+}
+terminal() { [ "$status" != armed ]; }
+# stale FILE: 0 when a terminal file is older than 14 days
+stale() {
+  local f="$1" at e
+  terminal || return 1
+  at="$(jget "$f" closed_at)"; [ -n "$at" ] || at="$due"
+  e="$(epoch_of "$at")" || return 1
+  [ $((NOW - e)) -gt "$KEEP_SECS" ]
+}
+each_state() {  # calls "$1" FILE for every valid, fresh state file; skips the others
+  local f name
+  for f in "$state_dir"/*.json; do
+    [ -e "$f" ] || continue
+    name="${f##*/}"
+    if ! load_state "$f"; then
+      [ "${quiet_skip:-0}" -eq 1 ] || echo "checkback: skipping invalid state file $name" >&2
+      continue
+    fi
+    stale "$f" && continue
+    "$1" "$f"
+  done
+}
+
+lock_wait() {  # add and cancel: wait (bounded) for the lock the sweep holds
+  local secs; secs="$(seam CHECKBACK_LOCK_WAIT 30)"
+  mkdir -p "$state_dir"
+  exec 9>"$state_dir/.lock"
+  flock -w "$secs" 9 || { echo "checkback: could not get the lock within ${secs}s (a sweep is running?)" >&2; exit 1; }
+}
+
+# ---- sweep ----
+# stored condition: re-validated every time, never trusted from add time
+sweep_one() {
+  local f="$1" ctext text
+  [ "$status" = armed ] || return 0
+  text="$(jget "$f" text)"
+  [ "$NOW" -ge "$(epoch_of "$due")" ] || return 0
+  ctext="$(clean "$text")"; ctext="${ctext:0:300}"
+  if [ "$(jq -r '.condition | type' "$f")" = null ]; then
+    finish "$f" "done" "CHECKBACK $id due: $ctext"
+    return 0
+  fi
+  local -a words=()
+  if jq -e '.condition | all(.[]; (test("[\\n\\r]") | not))' "$f" >/dev/null 2>&1; then
+    mapfile -t words < <(jq -r '.condition[]' "$f")
+  fi
+  if ! valid_words "${words[@]}"; then
+    write_json "$f" '.status="invalid" | .closed_at=$t' --arg t "$(iso "$NOW")"
+    echo "checkback: $id has a stored condition that is not allowed; marked invalid" >&2
+    return 0
+  fi
+  if ! resolve_cmd "${words[0]}"; then
+    echo "checkback: $id needs ${words[0]}, which was not found; left armed" >&2
+    return 0
+  fi
+  # absolute path, pinned environment, stdin from /dev/null, output discarded (never read)
+  if timeout -k 5 "$COND_TIMEOUT" "${PIN_COND[@]}" "$RUN_BIN" "${words[@]:1}" </dev/null >/dev/null 2>&1 9>&-; then
+    finish "$f" "done" "CHECKBACK $id met: $ctext"
+    return 0
+  fi
+  local n=$((attempts + 1))
+  if [ "$n" -ge "$max" ]; then
+    write_json "$f" '.attempts=$n' --argjson n "$n" || return 0
+    finish "$f" gave-up "CHECKBACK $id gave-up: $ctext"
+  else
+    write_json "$f" '.attempts=$n | .due_at=$d' --argjson n "$n" --arg d "$(iso $((NOW + every * 60)))"
+  fi
+}
+retry_one() {
+  local f="$1" msg
+  case "$notified" in *" $f "*) return ;; esac
+  if [ "$SECONDS" -ge "$SWEEP_SECS" ]; then stopped=1; return 0; fi
+  msg="$(jget "$f" pending_msg)"; [ -n "$msg" ] || return 0
+  # a stored notice is untrusted: sanitise, cap, require our own prefix
+  msg="$(clean "$msg")"; msg="${msg:0:500}"
+  case "$msg" in
+    "CHECKBACK "*) ;;
+    *) echo "checkback: dropped an unusable pending notice in ${f##*/}" >&2; write_json "$f" '.pending_msg=""'; return 0 ;;
+  esac
+  if deliver "$msg"; then write_json "$f" '.pending_msg=""'; fi
+  return 0
+}
+
+# collect_due: "<due epoch> <file>" for every valid armed entry whose time has come
+collect_due() {
+  local f e
+  for f in "$state_dir"/*.json; do
+    [ -e "$f" ] || continue
+    if ! load_state "$f"; then echo "checkback: skipping invalid state file ${f##*/}" >&2; continue; fi
+    [ "$status" = armed ] || continue
+    e="$(epoch_of "$due")" || continue
+    [ "$NOW" -ge "$e" ] && echo "$e $f"
+  done
+}
+
+cmd_sweep() {
+  mkdir -p "$state_dir"
+  exec 9>"$state_dir/.lock"
+  flock -n 9 || { echo "CHECKBACK sweep skipped: another sweep is running"; exit 0; }
+  local -a order=(); local entry f processed=0
+  stopped=0
+  mapfile -t order < <(collect_due | sort -k1,1n -k2,2)   # oldest due first, so nothing starves
+  for entry in "${order[@]}"; do
+    if [ "$processed" -ge "$SWEEP_MAX" ] || [ "$SECONDS" -ge "$SWEEP_SECS" ]; then stopped=1; break; fi
+    f="${entry#* }"
+    load_state "$f" || continue
+    sweep_one "$f"
+    processed=$((processed + 1))
+  done
+  quiet_skip=1   # damaged files were already reported by the first pass
+  each_state retry_one
+  [ "$stopped" -eq 0 ] || echo "checkback: sweep stopped early (limit $SWEEP_MAX entries or $SWEEP_SECS seconds); the next sweep continues" >&2
+  exit 0
+}
+
+# ---- add ----
+cmd_add() {
+  local in="" at="" say="" until_s="" every="" max="" have_say=0 have_until=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --in)    [ $# -ge 2 ] && [ -z "$in" ] || usage; in="$2"; shift 2 ;;
+      --at)    [ $# -ge 2 ] && [ -z "$at" ] || usage; at="$2"; shift 2 ;;
+      --say)   [ $# -ge 2 ] && [ "$have_say" -eq 0 ] || usage; say="$2"; have_say=1; shift 2 ;;
+      --until) [ $# -ge 2 ] && [ "$have_until" -eq 0 ] || usage; until_s="$2"; have_until=1; shift 2 ;;
+      --every) [ $# -ge 2 ] && [ -z "$every" ] || usage; every="$2"; shift 2 ;;
+      --max)   [ $# -ge 2 ] && [ -z "$max" ] || usage; max="$2"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [ "$have_say" -eq 1 ] || usage
+  { [ -n "$in" ] && [ -n "$at" ]; } && usage
+  { [ -z "$in" ] && [ -z "$at" ]; } && usage
+  local due_epoch
+  if [ -n "$in" ]; then
+    [[ "$in" =~ ^([1-9][0-9]{0,5})([mh])$ ]] || { echo "checkback: bad --in: $in" >&2; usage; }
+    local num="${BASH_REMATCH[1]}" unit="${BASH_REMATCH[2]}"
+    if [ "$unit" = h ]; then [ "$num" -le 168 ] || { echo "checkback: --in allows at most 168h" >&2; usage; }; num=$((num * 60))
+    else [ "$num" -le 10080 ] || { echo "checkback: --in allows at most 10080m" >&2; usage; }; fi
+    due_epoch=$((NOW + num * 60))
+  else
+    [[ "$at" =~ ^([01][0-9]|2[0-3]):([0-5][0-9])$ ]] || { echo "checkback: bad --at: $at (want HH:MM)" >&2; usage; }
+    local day t
+    day="$(date -d "@$NOW" +%Y-%m-%d)" && t="$(date -d "$day $at:00" +%s 2>/dev/null)" || { echo "checkback: cannot resolve --at $at" >&2; usage; }
+    if [ "$t" -le "$NOW" ]; then
+      t="$(date -d "$day $at:00 + 1 day" +%s 2>/dev/null)" || { echo "checkback: cannot resolve --at $at" >&2; usage; }
+    fi
+    due_epoch="$t"
+  fi
+  local text; text="$(clean "$say")"
+  { [ "${#text}" -ge 1 ] && [ "${#text}" -le 300 ]; } || { echo "checkback: --say must be 1 to 300 characters" >&2; usage; }
+  local every_n=5 max_n=12 cond_json=null
+  if [ "$have_until" -eq 1 ]; then
+    if [ -n "$every" ]; then
+      [[ "$every" =~ ^([1-9][0-9]?)m$ ]] && [ "${BASH_REMATCH[1]}" -le 60 ] || { echo "checkback: bad --every: $every (1m to 60m)" >&2; usage; }
+      every_n="${BASH_REMATCH[1]}"
+    fi
+    if [ -n "$max" ]; then
+      [[ "$max" =~ ^[1-9][0-9]{0,2}$ ]] && [ "$max" -le 288 ] || { echo "checkback: bad --max: $max (1 to 288)" >&2; usage; }
+      max_n="$max"
+    fi
+    if ! tokenize "$until_s" || ! valid_words "${WORDS[@]}"; then
+      echo "condition not allowed" >&2; exit 2
+    fi
+    if ! resolve_cmd "${WORDS[0]}"; then
+      echo "checkback: ${WORDS[0]} not found (needed for this condition)" >&2; exit 10
+    fi
+    cond_json="$(printf '%s\0' "${WORDS[@]}" | jq -Rs 'split("\u0000") | .[:-1]')" || exit 10
+  else
+    { [ -z "$every" ] && [ -z "$max" ]; } || usage
+  fi
+  lock_wait
+  local id f tries=0
+  while :; do
+    id="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 8)"
+    [[ "$id" =~ ^[a-z0-9]{8}$ ]] || { echo "checkback: could not generate an id" >&2; exit 1; }
+    f="$state_dir/$id.json"
+    [ -e "$f" ] || break
+    tries=$((tries + 1)); [ "$tries" -lt 20 ] || { echo "checkback: could not generate a free id" >&2; exit 1; }
+  done
+  write_json "$f" '{id:$id,text:$text,due_at:$due,created_at:$now,status:"armed",condition:$cond,every_min:$every,max:$max,attempts:0,pending_msg:""}' \
+    --arg id "$id" --arg text "$text" --arg due "$(iso "$due_epoch")" --arg now "$(iso "$NOW")" \
+    --argjson cond "$cond_json" --argjson every "$every_n" --argjson max "$max_n" || exit 1
+  echo "CHECKBACK $id armed due=$(iso "$due_epoch")"
+}
+
+# ---- list and cancel ----
+list_one() { echo "$id $status $due $attempts $(clean "$(jget "$1" text)")"; }
+cmd_list() { each_state list_one; }
+
+cmd_cancel() {
+  [ $# -eq 1 ] || usage
+  local want="$1" f
+  [[ "$want" =~ $ID_RE ]] || { echo "checkback: no such id: $want" >&2; exit 1; }
+  lock_wait
+  f="$state_dir/$want.json"
+  [ -e "$f" ] || { echo "checkback: no such id: $want" >&2; exit 1; }
+  load_state "$f" || { echo "checkback: $want is not a valid state file; not touching it" >&2; exit 1; }
+  [ "$status" = armed ] || { echo "checkback: $want is not armed ($status)" >&2; exit 1; }
+  write_json "$f" '.status="cancelled" | .closed_at=$t' --arg t "$(iso "$NOW")" || exit 1
+  echo "CHECKBACK $want cancelled"
+}
+
+[ $# -ge 1 ] || usage
+cmd="$1"; shift
+case "$cmd" in
+  add) cmd_add "$@" ;;
+  sweep) [ $# -eq 0 ] || usage; cmd_sweep ;;
+  list) [ $# -eq 0 ] || usage; cmd_list ;;
+  cancel) cmd_cancel "$@" ;;
+  *) usage ;;
+esac

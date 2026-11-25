@@ -406,6 +406,11 @@ btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
 if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
 else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
 
+# the checkback tool suite (its own script; counted here as one result)
+cbk_out="$(bash "$here/run-checkback-tests.sh" 2>&1)"; cbk_rc=$?
+if [ "$cbk_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - checkback suite: $(tail -1 <<<"$cbk_out")"
+else fail=$((fail + 1)); echo "FAIL - checkback suite"; grep -E '^FAIL|passed' <<<"$cbk_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

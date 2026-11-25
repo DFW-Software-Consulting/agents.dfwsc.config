@@ -101,6 +101,15 @@ done
 check "allow: echo \$'a>b'" allow "$gate" "$(bash_payload "echo \$'a>b'")"
 check "allow: backtick without write" allow "$gate" "$(bash_payload 'echo `date`')"
 
+# --- delegate-reminder text (gate on) ---
+rem_out="$(echo '{}' | $remind)"; rem_rc=$?
+rem_ck() { if eval "$2"; then pass=$((pass + 1)); echo "ok   - reminder: $1"; else fail=$((fail + 1)); echo "FAIL - reminder: $1: $rem_out"; fi; }
+rem_ck "exit 0" '[ "$rem_rc" -eq 0 ]'
+rem_ck "names the no-polling rule" 'grep -qF "Never poll CI with sleep loops or a waiting subagent" <<<"$rem_out"'
+rem_ck "names pr-wait on PATH and no file redirects" 'grep -qF "pr-wait (if it is on PATH)" <<<"$rem_out" && grep -qF "no file redirects" <<<"$rem_out"'
+rem_ck "starts with Delegation mode" '[[ "$rem_out" == "Delegation mode"* ]]'
+rem_ck "ends with the main-thread sentence" '[[ "$rem_out" == *"The main thread plans, coordinates, reviews, and talks to JC." ]]'
+rem_ck "is a single line" '[ "$(printf "%s\n" "$rem_out" | wc -l)" -eq 1 ]'
 # --- Escape hatch: off-file TTL and env ---
 touch "$off"
 check "fresh off-file disables gate" allow "$gate" "$edit"

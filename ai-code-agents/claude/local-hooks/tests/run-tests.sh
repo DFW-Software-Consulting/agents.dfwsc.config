@@ -406,6 +406,11 @@ btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
 if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
 else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
 
+# the wt-reap script suite (its own script; counted here as one result)
+wr_out="$(bash "$here/run-wt-reap-tests.sh" 2>&1)"; wr_rc=$?
+if [ "$wr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - wt-reap suite: $(tail -1 <<<"$wr_out")"
+else fail=$((fail + 1)); echo "FAIL - wt-reap suite"; grep -E '^FAIL|passed' <<<"$wr_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

@@ -400,6 +400,12 @@ check_err "no walker: delegate gate literal deny has no note" "bash $iso/delegat
 check_err "working walker: delegate gate is silent on stderr" "$gate" "$(bash_payload 'F=$(mktemp); echo hi > "$F"')" '' ''
 rm -rf "$iso"
 
+
+# the brain-task-reminder hook suite (its own script; counted here as one result)
+btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
+if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
+else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

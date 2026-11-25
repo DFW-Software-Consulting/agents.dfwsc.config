@@ -411,6 +411,11 @@ wr_out="$(bash "$here/run-wt-reap-tests.sh" 2>&1)"; wr_rc=$?
 if [ "$wr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - wt-reap suite: $(tail -1 <<<"$wr_out")"
 else fail=$((fail + 1)); echo "FAIL - wt-reap suite"; grep -E '^FAIL|passed' <<<"$wr_out" | sed 's/^/       /'; fi
 
+# the worktree-hygiene skill text suite (its own script; counted here as one result)
+ws_out="$(bash "$here/run-worktree-skill-tests.sh" 2>&1)"; ws_rc=$?
+if [ "$ws_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - worktree skill suite: $(tail -1 <<<"$ws_out")"
+else fail=$((fail + 1)); echo "FAIL - worktree skill suite"; grep -E '^FAIL|passed' <<<"$ws_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

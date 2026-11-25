@@ -181,25 +181,21 @@ wt-status.sh --offline # Offline mode (cached)
 - Uncommitted changes
 - Push status
 
-### `wt-cleanup.sh` - Remove Finished Worktrees
+### `wt-reap` - Report and Remove Finished Worktrees
 
-Cleans up worktrees after their PRs are merged.
+Reports which worktrees are safe to remove and why the rest are kept. `wt-cleanup` was retired because it forced removals.
 
 ```bash
-wt-cleanup.sh           # Actually removes
-wt-cleanup.sh --dry-run # Preview only
-wt-cleanup.sh -n        # Short form for --dry-run
-wt-cleanup.sh -o        # Offline mode
+wt-reap                    # Report only, changes nothing
+wt-reap --apply            # Remove only what the report lists as REMOVABLE
 ```
 
-**Options:**
-- `--dry-run, -n` - Preview only, don't remove
-- `--offline, -o` - Skip git fetch
-- `--help, -h` - Show help
+- Run `wt-reap` (report mode) first to see what is removable and why the rest is kept.
+- Run `wt-reap --apply` only when the owner has asked for removal.
+- Never pass `--include-ignored` unless the owner asks.
+- Never use `git worktree remove --force` or `git branch -D` as a substitute.
 
-**Removes:**
-- Worktrees whose branches were deleted from remote
-- Worktrees whose branches were merged to main
+A worktree is removable only when it is clean, fully pushed and its branch tip is the head of a merged pull request. `wt-reap` lives in the repo's `claude/bin/` and is not installed by this skill; see the repo docs for linking it onto your PATH.
 
 ### `wt-install.sh` - Installation Helper
 
@@ -247,11 +243,11 @@ git commit -m "your message"
 ### After PR Merges
 
 ```bash
-# See what can be cleaned up
-wt-cleanup.sh --dry-run
+# See what can be cleaned up (report only)
+wt-reap
 
-# Actually clean up
-wt-cleanup.sh
+# Only when the owner has asked for removal
+wt-reap --apply
 ```
 
 ### Daily Check
@@ -271,7 +267,6 @@ wt-new.sh 123 --offline
 wt-check.sh --offline
 wt-precommit.sh --offline
 wt-status.sh --offline
-wt-cleanup.sh --offline
 ```
 
 ## Red Flags - STOP If You See These

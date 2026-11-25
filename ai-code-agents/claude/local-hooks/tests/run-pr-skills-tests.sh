@@ -230,6 +230,20 @@ if [ -x "$gl" ] && [ -f "$t" ] && [ -f "$f" ]; then
   for n in 'never force push' 'never push to a default branch' 'launched this session himself' 'pushing its own branch, opening a draft pull request and posting the review' 'no retry and no other route' 'after its checks pass locally and the review is written'; do
     grep -qi -- "$n" <<<"$ov" && ok "templates: Overnight prompt has '$n'" || bad "templates: Overnight prompt lacks '$n'"
   done
+  # review fixes: counted re-review, tier name, order of pushes, bounded wait, reader rule
+  grep -Eqi 'every review run counts as a round' "$f" && grep -qi 'whatever triggered it' "$f" \
+    && ok "pr-converge: every review run counts as a round" || bad "pr-converge: counted re-review rule missing"
+  grep -Eqi 'stops? (at|after) the (round )?cap|after the third review' "$f" && grep -qi 'no extra review' "$f" \
+    && ok "pr-converge: cap stops the run even after a marker mismatch" || bad "pr-converge: cap-after-mismatch rule missing"
+  grep -q 'CONSIDER' "$f" && ! grep -q 'NITs' "$f" \
+    && ok "pr-converge: CONSIDER tier, no NITs" || bad "pr-converge: NITs wording or CONSIDER missing"
+  grep -q 'Reviewed-head marker' "$f" && grep -q 'amend rule' "$f" && grep -qi 'pr-review/SKILL.md' "$f" \
+    && ok "pr-converge: reader rule points at the review skill" || bad "pr-converge: reader rule does not point at the review skill"
+  grep -Eq 'pr-wait <owner/repo> <pr> --sha <head> --timeout [0-9]+m' "$f" && grep -Eq 'timeout [0-9]+m gh pr checks <pr> -R <owner/repo> --watch' "$f" \
+    && ok "pr-converge: checks wait is bounded" || bad "pr-converge: checks wait has no timeout"
+  grep -qi 'on timeout' "$f" && grep -qi 'do not loop' "$f" && ok "pr-converge: timeout stops and reports" || bad "pr-converge: timeout stop rule missing"
+  grep -qi 'first push' <<<"$ov" && grep -qi 'local-mode review' <<<"$ov" && grep -qi 're-reviewed in PR mode' <<<"$ov" \
+    && ok "templates: Overnight push order is possible (local review, then PR review of the pushed head)" || bad "templates: Overnight push order unclear"
   # hygiene: no personal names or initials; also in the docs lines added
   if grep -nE '\bJC\b' "$f" "$t" "$gl" >/dev/null; then bad "pr-converge: a person's initials appear in S, T or G"
   else ok "pr-converge: no initials in S, T or G"; fi

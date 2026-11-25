@@ -17,8 +17,11 @@
 #   per line, # comments) unless --include-ignored is given; an ignored directory holding a nested repository is
 #   always KEEP   5 the branch has an upstream and the local tip equals it; if the upstream was configured but its
 #   remote-tracking ref is gone (deleted after a merge) only condition 6 stands in for it   6 a MERGED pull
-#   request has that branch as head and its head commit equals the branch tip (one `gh pr list` call per branch)
+#   request has that branch as head and its head commit equals the branch tip, and it was merged into the default branch (origin/HEAD must be set;
+#   one `gh pr list` call per branch)
 #   7 no stash entry names the branch, not locked, no rebase/merge/cherry-pick/revert/bisect in progress
+#   8 no index entry carries the assume-unchanged or skip-worktree flag (`git ls-files -v`: a lowercase tag or S);
+#   those hide edits from status. Judged last, so every other reason keeps its place. Sparse checkouts are always KEEP.
 # --apply re-checks all of this just before acting, then runs `git worktree remove` and, only if that worked,
 # `git branch -d`; neither is ever forced and no worktree file is deleted any other way (the tool's own temporary
 # directory is the only other thing it removes). With the upstream gone, git usually refuses `branch -d`; the
@@ -106,19 +109,21 @@ default_branch() {
 }
 DEFBR="$(default_branch)"
 
-# merged_prs BRANCH: the merged pull requests with that head, as "number sha" lines in $TMPD/prs.
+# merged_prs BRANCH: the merged pull requests with that head, as "number sha base" lines in $TMPD/prs
+# (a missing sha or base is written as -).
 # Returns 1 when gh failed or did not answer with a JSON array.
 merged_prs() {
-  local out obj n s
-  out="$(cd "$MAIN" && timeout -k 5 30 "${PIN[@]}" "$GH_BIN" pr list --head "$1" --state merged --limit 100 --json number,headRefOid 2>/dev/null)" || return 1
+  local out obj n s b
+  out="$(cd "$MAIN" && timeout -k 5 30 "${PIN[@]}" "$GH_BIN" pr list --head "$1" --state merged --limit 100 --json number,headRefOid,baseRefName 2>/dev/null)" || return 1
   [[ "$out" == *\[* ]] || return 1
   : >"$TMPD/prs"
   while [[ "$out" =~ \{[^{}]*\} ]]; do
     obj="${BASH_REMATCH[0]}"; out="${out#*"$obj"}"
-    n=""; s=""
+    n=""; s=""; b=""
     [[ "$obj" =~ \"number\"[[:space:]]*:[[:space:]]*([0-9]+) ]] && n="${BASH_REMATCH[1]}"
     [[ "$obj" =~ \"headRefOid\"[[:space:]]*:[[:space:]]*\"([0-9a-fA-F]+)\" ]] && s="${BASH_REMATCH[1]}"
-    printf '%s %s\n' "$n" "$s" >>"$TMPD/prs"
+    [[ "$obj" =~ \"baseRefName\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]] && b="${BASH_REMATCH[1]}"
+    printf '%s %s %s\n' "$n" "${s:--}" "${b:--}" >>"$TMPD/prs"
   done
   return 0
 }
@@ -145,7 +150,7 @@ is_safe_ignored() {
 V=KEEP; REASON=""; PRN=""; IGN=0; OUT=0; META=0; UPGONE=0; TIP=""
 keep() { V=KEEP; REASON="$1"; }
 evaluate() {
-  local i="$1" p b tip up cwdp wtp ents e dirty untracked gd line n s pre ig names nout cfg gp pfx IGNL
+  local i="$1" p b tip up cwdp wtp ents e dirty untracked gd line n s pb pre nondef nobase ig names nout cfg gp pfx IGNL
   p="${WP[$i]}"; b="${WB[$i]}"; V=KEEP; REASON=""; PRN=""; IGN=0; OUT=0; META=0; UPGONE=0; TIP=""
   # 1
   [ "$i" -eq 0 ] && { keep "main working tree"; return; }
@@ -209,10 +214,21 @@ evaluate() {
     gh_unavailable
   fi
   [ -s "$TMPD/prs" ] || { keep "${gp}no merged pull request"; return; }
-  while read -r n s; do
-    if [ -n "$s" ] && [ "$s" = "$tip" ]; then PRN="$n"; break; fi
+  # a merged pull request counts only if it was merged into the default branch, and that needs origin/HEAD to resolve
+  git -C "$MAIN" rev-parse --verify -q refs/remotes/origin/HEAD >/dev/null 2>&1 \
+    || { keep "${gp}origin/HEAD is not set (run: git remote set-head origin --auto)"; return; }
+  nondef=0; nobase=0
+  while read -r n s pb; do
+    [ "$s" = "$tip" ] || continue
+    if [ "$pb" = "-" ]; then nobase=1
+    elif [ "$pb" != "$DEFBR" ]; then nondef=1
+    else PRN="$n"; break; fi
   done <"$TMPD/prs"
-  [ -n "$PRN" ] || { keep "${gp}merged pull request head differs from branch tip"; return; }
+  if [ -z "$PRN" ]; then
+    [ "$nondef" -eq 0 ] || { keep "${gp}merged into a non-default base"; return; }
+    [ "$nobase" -eq 0 ] || { keep "${gp}merged pull request has no base branch"; return; }
+    keep "${gp}merged pull request head differs from branch tip"; return
+  fi
   # 7
   git -C "$MAIN" stash list --format=%gs >"$TMPD/stash" 2>/dev/null || { keep "git error: stash list failed"; return; }
   while IFS= read -r line; do
@@ -223,6 +239,12 @@ evaluate() {
   for pre in rebase-merge:"rebase in progress" rebase-apply:"rebase in progress" MERGE_HEAD:"merge in progress" \
              CHERRY_PICK_HEAD:"cherry-pick in progress" REVERT_HEAD:"revert in progress" BISECT_LOG:"bisect in progress"; do
     [ -e "$gd/${pre%%:*}" ] && { keep "${pre#*:}"; return; }
+  done
+  # edits hidden from status by assume-unchanged or skip-worktree: any lowercase tag, or S, in `ls-files -v`
+  git -C "$p" ls-files -v -z >"$TMPD/lsv" 2>"$TMPD/err" || { keep "git error: index listing failed"; return; }
+  mapfile -d '' -t ents <"$TMPD/lsv"
+  for e in "${ents[@]}"; do
+    case "${e:0:1}" in [a-zS]) keep "index flags hide changes (assume-unchanged or skip-worktree)"; return ;; esac
   done
   V=REMOVABLE
 }

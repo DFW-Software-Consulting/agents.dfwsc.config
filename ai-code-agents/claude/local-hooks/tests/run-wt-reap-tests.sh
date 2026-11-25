@@ -103,6 +103,7 @@ newfx() {
   chmod -R u+rwX "$fx" 2>/dev/null; rm -rf "$fx" "$ghd"; mkdir -p "$fx" "$ghd" "$WTS"
   git init -q --bare "$REMOTE"; git clone -q "$REMOTE" "$REPO" 2>/dev/null
   echo base >"$REPO/README"; G add README; G commit -q -m base; G push -q -u origin main
+  G remote set-head origin main
   printf '%s\n' '*.log' '*.pyc' 'node_modules/' '.env*' 'scratch-repo/' >>"$REPO/.git/info/exclude"
   : >"$GH_LOG"
 }
@@ -117,7 +118,9 @@ mkwt() {
   [ "${3:-}" = nopush ] || git -C "$p" push -q -u origin "refs/heads/$b:refs/heads/$b"
 }
 tip() { G rev-parse "refs/heads/$1"; }
-ghset() { printf '[{"number":%s,"headRefOid":"%s"}]\n' "$2" "${3:-$(tip "$1")}" >"$ghd/resp.$(keyof "$1").json"; }
+# ghsetb NAME NUMBER BASE [SHA]: one merged pull request whose base branch is BASE; ghset uses the default branch
+ghsetb() { printf '[{"number":%s,"headRefOid":"%s","baseRefName":"%s"}]\n' "$2" "${4:-$(tip "$1")}" "$3" >"$ghd/resp.$(keyof "$1").json"; }
+ghset() { ghsetb "$1" "$2" main "${3:-}"; }
 ghnone() { echo '[]' >"$ghd/resp.$(keyof "$1").json"; }
 snap() {
   { G worktree list --porcelain; G for-each-ref; G stash list
@@ -153,7 +156,7 @@ build_big() {
   mkwt cwd2 feat-cwd2; mkdir "$WTS/cwd2/sub"; echo s >"$WTS/cwd2/sub/f"; git -C "$WTS/cwd2" add sub/f; git -C "$WTS/cwd2" commit -q -m sub
   git -C "$WTS/cwd2" push -q; ghset feat-cwd2 27
   mkwt two feat-two
-  printf '[{"headRefOid":"%s","number":30},{"number":31,"headRefOid":"%s"}]\n' 9999999999999999999999999999999999999999 "$(tip feat-two)" >"$ghd/resp.$(keyof feat-two).json"
+  printf '[{"headRefOid":"%s","number":30,"baseRefName":"main"},{"number":31,"headRefOid":"%s","baseRefName":"main"}]\n' 9999999999999999999999999999999999999999 "$(tip feat-two)" >"$ghd/resp.$(keyof feat-two).json"
   mkwt q "$BQ"; ghset "$BQ" 32
   mkwt dash --force; ghset --force 33
   mkwt dashdirty --delete; echo d >"$WTS/dashdirty/d.txt"; ghset --delete 34
@@ -408,6 +411,87 @@ t "upstream gone apply: the branch is kept (never -D)" branch_exists feat-g1
 t "upstream gone apply: says so, with the tip and the pull request" has "worktree removed; branch feat-g1 kept (git does not see it as merged; its tip $G_TIP is the head of merged pull request #121)"
 t "upstream gone apply: the other three are untouched" test -d "$WTS/g2" -a -d "$WTS/g3" -a -d "$WTS/g4"
 t "upstream gone apply: summary counts the removal" hasre '^wt-reap: removed 1, failed 0, skipped 0, kept '
+
+# 12. index flags that hide edits from git status (assume-unchanged, skip-worktree) ---------------------
+HID='index flags hide changes (assume-unchanged or skip-worktree)'
+newfx
+mkwt ac feat-ac; ghset feat-ac 131; git -C "$WTS/ac" update-index --assume-unchanged ac.txt; echo hidden >>"$WTS/ac/ac.txt"
+mkwt acc feat-acc; ghset feat-acc 132
+mkwt sw feat-sw; ghset feat-sw 133; git -C "$WTS/sw" update-index --skip-worktree sw.txt; echo hidden >>"$WTS/sw/sw.txt"
+mkwt swc feat-swc; ghset feat-swc 134
+mkwt lf feat-lf; ghset feat-lf 136
+t "flags fixture: plain git status is blind to the assume-unchanged edit" test -z "$(git -C "$WTS/ac" status --porcelain)"
+t "flags fixture: plain git status is blind to the skip-worktree edit" test -z "$(git -C "$WTS/sw" status --porcelain)"
+wr --repo "$REPO"
+t "flags: assume-unchanged edit is KEEP with the new reason" has "$(line_keep ac feat-ac "$HID")"
+t "flags: control without the hidden edit is REMOVABLE (assume-unchanged case)" has "$(line_removable acc feat-acc 132)"
+t "flags: skip-worktree edit is KEEP with the new reason" has "$(line_keep sw feat-sw "$HID")"
+t "flags: control without the hidden edit is REMOVABLE (skip-worktree case)" has "$(line_removable swc feat-swc 134)"
+t "flags: a failing index listing is not what kept them (listing works in this run)" no hasre 'index listing failed'
+# a shim that fails only the ls-files call
+shimls="$tmp/shimls"; mkdir -p "$shimls"
+cat >"$shimls/git" <<SH
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = ls-files ] && { echo "fake git: ls-files failed" >&2; exit 1; }; done
+exec "$shim/git" "\$@"
+SH
+chmod +x "$shimls/git"
+out="$(cd "$cwd0" && env PATH="$shimls:$shim:$PATH" WT_REAP_TEST=1 WT_REAP_GH_PATH="$fakebin" bash "$script" --repo "$REPO" 2>"$tmp/err")"; rc=$?
+t "listing fails: the otherwise removable worktree is KEEP with the distinct reason" has "$(line_keep lf feat-lf 'git error: index listing failed')"
+wr --repo "$REPO"
+t "listing fails: control, same worktree with a working git is REMOVABLE" has "$(line_removable lf feat-lf 136)"
+wr --repo "$REPO" --apply
+t "flags apply: the hidden edits survive (assume-unchanged)" grep -q hidden "$WTS/ac/ac.txt"
+t "flags apply: the hidden edits survive (skip-worktree)" grep -q hidden "$WTS/sw/sw.txt"
+t "flags apply: the controls were removed" no test -d "$WTS/acc" -o -d "$WTS/swc"
+newfx; mkwt late feat-late; ghset feat-late 135
+printf 'git -C "%s/late" update-index --assume-unchanged late.txt; echo hidden >>"%s/late/late.txt"\n' "$WTS" "$WTS" >"$ghd/hook.$(keyof feat-late).2"
+wr --repo "$REPO" --apply
+t "flags apply: a flag set between the report and the removal is SKIPPED by the re-check" hasre "^SKIPPED $WTS/late feat-late: changed since the report: index flags hide changes"
+t "flags apply: ...and its directory with the edit remains" grep -q hidden "$WTS/late/late.txt"
+
+# 13. the base of the merged pull request must be the default branch
+newfx
+mkwt nb feat-nb; ghsetb feat-nb 141 develop
+mkwt nbg feat-nbg; ghsetb feat-nbg 142 develop; git -C "$REMOTE" update-ref -d refs/heads/feat-nbg
+mkwt abs feat-abs; printf '[{"number":143,"headRefOid":"%s"}]\n' "$(tip feat-abs)" >"$ghd/resp.$(keyof feat-abs).json"
+mkwt emp feat-emp; ghsetb feat-emp 144 ""
+mkwt o1 feat-o1; printf '[{"number":145,"headRefOid":"%s","baseRefName":"main"},{"number":146,"headRefOid":"%s","baseRefName":"develop"}]\n' "$(tip feat-o1)" "$(tip feat-o1)" >"$ghd/resp.$(keyof feat-o1).json"
+mkwt o2 feat-o2; printf '[{"number":148,"headRefOid":"%s","baseRefName":"develop"},{"number":147,"headRefOid":"%s","baseRefName":"main"}]\n' "$(tip feat-o2)" "$(tip feat-o2)" >"$ghd/resp.$(keyof feat-o2).json"
+mkwt ok2 feat-ok2; ghset feat-ok2 149
+G fetch -q --prune
+wr --repo "$REPO"
+t "base: merged into a non-default base is KEEP with its own reason" has "$(line_keep nb feat-nb 'merged into a non-default base')"
+t "base: ...also when the upstream is gone" has "$(line_keep nbg feat-nbg 'upstream gone: merged into a non-default base')"
+t "base: a missing baseRefName does not qualify (KEEP, own reason)" has "$(line_keep abs feat-abs 'merged pull request has no base branch')"
+t "base: an empty baseRefName does not qualify (KEEP, own reason)" has "$(line_keep emp feat-emp 'merged pull request has no base branch')"
+t "base: two PRs with the same head, default base first, is REMOVABLE with that PR" has "$(line_removable o1 feat-o1 145)"
+t "base: two PRs with the same head, default base second, is REMOVABLE with that PR" has "$(line_removable o2 feat-o2 147)"
+t "base: a PR into the default branch is REMOVABLE" has "$(line_removable ok2 feat-ok2 149)"
+t "base: gh was asked for baseRefName" grep -qF -- "number,headRefOid,baseRefName" "$GH_LOG"
+G remote set-head origin -d
+wr --repo "$REPO"
+t "base: origin/HEAD unset is KEEP and the reason says how to set it" has "$(line_keep ok2 feat-ok2 'origin/HEAD is not set (run: git remote set-head origin --auto)')"
+G remote set-head origin main
+
+# 14. more stash, path and symlink cases
+newfx
+mkwt st3 feat-st3; echo z >>"$WTS/st3/st3.txt"; git -C "$WTS/st3" stash push -q -m "saved work"; ghset feat-st3 151
+mkwt "sp ace" feat-sp; ghset feat-sp 152
+mkwt sl feat-sl; ghset feat-sl 153
+ln -s "$WTS/sl" "$tmp/sl-link"
+mkwt ok3 feat-ok3; ghset feat-ok3 154
+t "stash fixture: the entry has the 'On <branch>:' form" bash -c 'G=$(git -C "$1" stash list --format=%gs); [ "$G" = "On feat-st3: saved work" ]' _ "$REPO"
+wr --repo "$REPO"
+t "stash: the 'On <branch>:' form is KEEP" has "$(line_keep st3 feat-st3 'stash entry references the branch')"
+t "path with a space: REMOVABLE" has "$(line_removable 'sp ace' feat-sp 152)"
+t "path with a space: the other paths are unaffected" has "$(line_removable ok3 feat-ok3 154)"
+WR_CWD="$tmp/sl-link"; wr --repo "$REPO"
+t "symlinked path: a current directory reached through a symlink is KEEP" has "$(line_keep sl feat-sl 'current directory is inside it')"
+WR_CWD="$cwd0"
+wr --repo "$REPO" --apply
+t "path with a space apply: removed" no test -d "$WTS/sp ace"
+t "stash apply: the worktree with the stash is kept" test -d "$WTS/st3"
 
 # 7. whole-suite checks over what the tool ran ---------------------------------------------------------
 bad_flags="$(awk -F "$US" '{

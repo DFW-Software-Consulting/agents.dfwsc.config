@@ -406,6 +406,11 @@ btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
 if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
 else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
 
+# the context-docs-start tool card suite (its own script; counted here as one result)
+tc_out="$(bash "$here/run-context-docs-start-tests.sh" 2>&1)"; tc_rc=$?
+if [ "$tc_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - context-docs-start tool card suite: $(tail -1 <<<"$tc_out")"
+else fail=$((fail + 1)); echo "FAIL - context-docs-start tool card suite"; grep -E '^FAIL|passed' <<<"$tc_out" | sed 's/^/       /'; fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

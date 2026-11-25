@@ -2,6 +2,13 @@
 
 Newest first. Before proposing a fix, search here for the failure's signature; an entry whose Status is not fixed, or with a `Tried and failed` line, changes the theory before another attempt. Entry fields: Signature (optional, the stable searchable part of the message or symptom), Cause, Fix, Tried and failed (optional, what was attempted that did not work and why), Guard (optional, the test, check or hook that now prevents a repeat), Status (optional: open, fixed or worked around; none means fixed), Date.
 
+## A clean heredoc commit is denied as an unreadable message file (commit-message check)
+- Signature: `Cannot verify the commit-message file '-' at hook time. Use git commit -m with an inline message instead.` on a `git -C <path> commit` that reads its message from a here-document on stdin.
+- Cause: `hooks/no-agent-mention.py` keeps the old, strict reading of a message file when any word on the line is a whole word in its REDEFINE list (config, hooks, export, source, exec, hash, HOME, command, PATH and others). The list is matched against argument values, not only command words, so a `-C` or `cd` path with such a word (every worktree path of this repo has one) turns a clean heredoc into a denial. The same line with a path that has no such word is accepted.
+- Fix: commit with `git commit -m "subject" -m "paragraph"`, one `-m` per paragraph; it is denied only for real attribution text. The tool card tells subagents this. The hook itself is not fixed; that is a separate change for the repo owner.
+- Tried and failed: advising `git commit -F - <<'EOF'` as its own command (first version of the tool card); it fails in any directory whose path contains a REDEFINE word.
+- Date: 2026-11-24
+
 ## Differential suite failed only on some machines (`4:r1:c-cd`); checks gate recorded none_detected for this repo
 - Signature: `FAIL - 4:r1:c-cd [credit]: baseline denies, current allows (not a listed exception)` on `cd /tmp; git commit -F c.txt;`, 2 failed of 1964.
 - Cause: the case read `c.txt` in the shared `/tmp`; a stray `/tmp/c.txt` on the machine was found by the current hook (which resolves the message file) but not by the baseline, so the result depended on the machine. Separately, the repo had no `.claude/git-checks`, so `run-checks.sh` detected nothing and the checks gate passed any commit.

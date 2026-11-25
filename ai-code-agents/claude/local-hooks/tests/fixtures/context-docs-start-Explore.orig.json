@@ -1,0 +1,6 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SubagentStart",
+    "additionalContext": "This repo keeps context docs in docs/context/. Read the docs relevant to your task before starting, and check docs/context/errors.md before proposing a fix, searching it for the failure's Signature. An entry whose Status is not fixed, or that lists 'Tried and failed' attempts, means rethink the theory before another attempt. Index:\n\n- [auth.md](auth.md) : read when changing auth"
+  }
+}

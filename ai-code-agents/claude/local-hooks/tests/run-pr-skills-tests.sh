@@ -227,7 +227,7 @@ if [ -x "$gl" ] && [ -f "$t" ] && [ -f "$f" ]; then
     && ok "pr-converge: ready verdict string and mixed cases" || bad "pr-converge: verdict string or mixed cases missing"
   grep -qi 'only watches' "$f" && grep -qi 'owner runs' "$f" && ok "pr-converge: pr-land sentence" || bad "pr-converge: pr-land sentence missing"
   ov="$(awk 'index($0,"## Overnight")==1{p=1;next} /^## /{p=0} p' "$t")"
-  for n in 'never force push' 'never push to a default branch' 'launched this session himself' 'pushing its own branch, opening a draft pull request and posting the review' 'no retry and no other route' 'after its checks pass locally and the review is written'; do
+  for n in 'never force push' 'never push to a default branch' 'launched this session himself' 'pushing its own branch, opening a draft pull request and posting the review' 'no retry and no other route' 'checks pass locally'; do
     grep -qi -- "$n" <<<"$ov" && ok "templates: Overnight prompt has '$n'" || bad "templates: Overnight prompt lacks '$n'"
   done
   # review fixes: counted re-review, tier name, order of pushes, bounded wait, reader rule
@@ -242,8 +242,21 @@ if [ -x "$gl" ] && [ -f "$t" ] && [ -f "$f" ]; then
   grep -Eq 'pr-wait <owner/repo> <pr> --sha <head> --timeout [0-9]+m' "$f" && grep -Eq 'timeout [0-9]+m gh pr checks <pr> -R <owner/repo> --watch' "$f" \
     && ok "pr-converge: checks wait is bounded" || bad "pr-converge: checks wait has no timeout"
   grep -qi 'on timeout' "$f" && grep -qi 'do not loop' "$f" && ok "pr-converge: timeout stops and reports" || bad "pr-converge: timeout stop rule missing"
-  grep -qi 'first push' <<<"$ov" && grep -qi 'local-mode review' <<<"$ov" && grep -qi 're-reviewed in PR mode' <<<"$ov" \
-    && ok "templates: Overnight push order is possible (local review, then PR review of the pushed head)" || bad "templates: Overnight push order unclear"
+  grep -qi 'first push' <<<"$ov" && grep -qi 'local-mode review' <<<"$ov" && grep -qi 'PR-mode review' <<<"$ov" \
+    && ok "templates: Overnight push order is possible (optional local review, then PR review of the pushed head)" || bad "templates: Overnight push order unclear"
+  # follow-up review fixes: overnight flow a-d, wait outcome map, end at step 7
+  grep -qi 'after every push, including the first' <<<"$ov" && grep -qi 'PR-mode review of the pushed head' <<<"$ov" \
+    && grep -qi 'does not count as a round' <<<"$ov" && grep -qi 'optional' <<<"$ov" \
+    && grep -qi 'reviewed-head marker equals the current head' <<<"$ov" \
+    && ok "templates: Overnight flow reviews every push in PR mode, local review optional and uncounted" || bad "templates: Overnight a-d flow missing"
+  grep -qi 'after every push, including the first' "$f" && grep -qi 'local-mode review' "$f" && grep -qi 'does not count as a round' "$f" \
+    && ok "pr-converge: skill states PR-mode review after every push, local review uncounted" || bad "pr-converge: skill lacks the every-push review rule"
+  wo="$(grep -F 'Wait outcomes' "$f")"
+  if [ -n "$wo" ] && grep -q 'exit 0' <<<"$wo" && grep -q 'exit 1' <<<"$wo" && grep -q 'exit 2' <<<"$wo" && grep -q '3 (head changed' <<<"$wo" \
+     && grep -q '4 (closed' <<<"$wo" && grep -q '10 (usage' <<<"$wo" && grep -q 'exit 5' <<<"$wo" && grep -q 'exit 124' <<<"$wo" && grep -qi 'fewer than three' <<<"$wo"; then
+    ok "pr-converge: every wait outcome mapped once"; else bad "pr-converge: wait outcome map missing or incomplete"; fi
+  grep -qi 'no review is ever started after the third' "$f" && grep -qi 'the run ends' "$f" && grep -qi 'head changed because this run pushed' "$f" \
+    && ok "pr-converge: step 7 ends the run, no review after the third" || bad "pr-converge: step 7 end rule missing"
   # hygiene: no personal names or initials; also in the docs lines added
   if grep -nE '\bJC\b' "$f" "$t" "$gl" >/dev/null; then bad "pr-converge: a person's initials appear in S, T or G"
   else ok "pr-converge: no initials in S, T or G"; fi

@@ -19,14 +19,14 @@ One job: publish the current branch.
 2. Read `pushed`, `push_ahead` and `push_behind` from the facts. If `pushed` is true and `push_behind` is above 0, return `blocked` without pushing: `["diverged"]` when `push_ahead` is also above 0, `["behind"]` otherwise, with both counts in `result`. Say that rebasing or merging is the user's call. If `pushed` is true and both counts are 0, push nothing and return `ok` (nothing new to publish).
 3. Run once `git -C <path> push -u <remote> <branch>`, where `<remote>` is the given remote or `push_remote`. `new_branch` is true when `pushed` was false in step 2.
 4. If the push is rejected as non-fast-forward, return `blocked` with `blocked_by: ["diverged"]` and stop. If it fails for any other reason, including a hook denial or a remote hook, return `blocked` with `blocked_by: ["push-failed"]` and the last lines of output in `result.log_tail`.
-5. On success, re-run `git-facts.sh` and report `push_ref` as `upstream`.
+5. On success, re-run `git-facts.sh` and report `push_ref` as `upstream`. Read the saved Brain task with `~/.claude/skills/brain-task-sync/brain-task.sh <path> get` and report it as `brain_task` (the id, or null when it prints `task=none`); nothing else changes. If the helper is missing or exits non-zero, report that in one line and continue as if nothing were saved; it is never a blocker.
 
 A force push or a push to the default branch is denied by a hook; do not try to work around it. Repository pre-push hooks run inside `git push`, so do not run them yourself. The remote-tracking counts come from the last fetch, so a stale count is possible; the push itself is the final test.
 
 ## Output
 
 ```json
-{"skill":"git-push","status":"ok","branch":"<branch>","head":"<sha>","blocked_by":[],"result":{"pushed_sha":"<sha>","remote":"origin","upstream":"origin/<branch>","new_branch":true},"next":["git-pr"]}
+{"skill":"git-push","status":"ok","branch":"<branch>","head":"<sha>","blocked_by":[],"result":{"pushed_sha":"<sha>","remote":"origin","upstream":"origin/<branch>","new_branch":true,"brain_task":"<id|null>"},"next":["git-pr"]}
 ```
 
 - On `blocked`, `result` holds `log_tail` and, for `diverged` and `behind`, `ahead` and `behind`; `next` is `[]`. `next` is a hint; the router decides.

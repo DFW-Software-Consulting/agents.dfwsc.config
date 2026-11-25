@@ -246,3 +246,7 @@ State plainly, once done:
 - The story's `task_id` (new or reused) and title
 - Which issues got linked (`owner/repo#n` list)
 - Which standup entry it landed in (morning/EOD, date)
+
+### 7. Save the task for the branch
+
+After the task row exists (new or reused), read its `short_id` (`select short_id from brain.tasks where id = '<task_id>'`). When the current directory is on a branch, save it with `~/.claude/skills/brain-task-sync/brain-task.sh <repo dir> set <short_id>` so commits and PRs for the branch carry it (add `--replace` only if the user asked to switch the branch to this task). No database write is involved. When no branch exists yet, or the branch is the default branch (the helper then prints `task=none reason=default-branch` and saves nothing), tell the caller to save it once a work branch exists. If the helper is missing or exits non-zero, report that in one line and continue as if nothing were saved; it is never a blocker.

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Print a filled-in /goal text from the pr-converge templates. Reads one file and prints; runs nothing from its arguments.
+# Usage: goal-line ship-pr <owner/repo> <pr>
+#        goal-line ops <owner/repo> "<task>"
+#        goal-line backlog <owner/repo> "<task>" "<check command>"
+#        goal-line overnight <owner/repo> "<task>"
+# Env: GOAL_LINE_TEMPLATES overrides the templates path (a test seam).
+# Exit 2 with usage on bad input, or if a placeholder would remain unfilled.
+set -u
+usage() { echo 'usage: goal-line ship-pr <owner/repo> <pr> | ops|overnight <owner/repo> "<task>" | backlog <owner/repo> "<task>" "<check>"' >&2; exit 2; }
+text() { [[ $1 =~ [^[:space:]] && $1 != *$'\n'* && $1 != *$'\r'* ]]; }
+[ "$#" -ge 3 ] || usage
+name="$1"; repo="$2"
+[[ $repo =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || usage
+case "$name" in
+  ship-pr) [ "$#" -eq 3 ] && [[ $3 =~ ^[0-9]+$ ]] || usage ;;
+  ops|overnight) [ "$#" -eq 3 ] && text "$3" || usage ;;
+  backlog) [ "$#" -eq 4 ] && text "$3" && text "$4" || usage ;;
+  *) usage ;;
+esac
+tpl="${GOAL_LINE_TEMPLATES:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../skills/pr-converge/templates.md}"
+[ -f "$tpl" ] || { echo "goal-line: missing $tpl" >&2; exit 2; }
+out="$(awk -v n="$name" '$0 == "<!-- begin " n " -->" {p=1; next} $0 == "<!-- end " n " -->" {p=0} p && NF' "$tpl")"
+# literal substitution: no pattern replacement, so & and backslash stay as given
+fill() { local s="$1" key="$2" val="$3" acc=""; while [[ $s == *"$key"* ]]; do acc+="${s%%"$key"*}$val"; s="${s#*"$key"}"; done; printf '%s' "$acc$s"; }
+out="$(fill "$out" '{{REPO}}' "$repo")"
+case "$name" in
+  ship-pr) out="$(fill "$out" '{{PR}}' "$3")" ;;
+  ops|overnight) out="$(fill "$out" '{{TASK}}' "$3")" ;;
+  backlog) out="$(fill "$out" '{{TASK}}' "$3")"; out="$(fill "$out" '{{CHECK}}' "$4")" ;;
+esac
+if [ -z "$out" ] || [[ $out == *'{{'* ]]; then echo "goal-line: template '$name' is empty or has an unfilled placeholder" >&2; exit 2; fi
+printf '%s\n' "$out"

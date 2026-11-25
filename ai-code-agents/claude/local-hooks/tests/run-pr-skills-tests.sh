@@ -103,5 +103,241 @@ else
     && ok "pr-review: re-review leaves exactly one marker line" || bad "pr-review: exactly-one-marker-line rule missing"
 fi
 
+# --- pr-converge: skill, templates, goal-line ---
+f="$skills_dir/pr-converge/SKILL.md"
+t="$skills_dir/pr-converge/templates.md"
+gl="$here/../../bin/goal-line"
+if [ ! -f "$f" ]; then
+  bad "pr-converge: no $f"
+else
+  [ "$(sed -n 's/^name: *//p' "$f" | head -1)" = "pr-converge" ] \
+    && ok "pr-converge: frontmatter name equals folder" || bad "pr-converge: frontmatter name is not pr-converge"
+  grep -Eqi '(at most|up to|maximum of|max) 3 rounds|3-round cap' "$f" && ok "pr-converge: 3-round cap" || bad "pr-converge: no 3-round cap"
+  grep -qi 'never merges' "$f" && ok "pr-converge: never merges" || bad "pr-converge: no 'never merges'"
+  grep -q 'DECISION: <exact command> | <why>' "$f" && ok "pr-converge: DECISION line format" || bad "pr-converge: DECISION line format missing"
+  grep -q 'reviewed-head' "$f" && grep -qi 'not reviewed at this head' "$f" \
+    && ok "pr-converge: marker rule" || bad "pr-converge: marker rule missing"
+  grep -qi 'Done when' "$f" && ok "pr-converge: fix brief carries Done when" || bad "pr-converge: no Done when"
+  grep -qi 'force push' "$f" && grep -qi 'promote' "$f" && ok "pr-converge: no force push, no promote" || bad "pr-converge: force push or promote rule missing"
+  grep -q 'pr-land' "$f" && grep -q 'pr-wait' "$f" && ok "pr-converge: pr-land and pr-wait handled" || bad "pr-converge: pr-land or pr-wait missing"
+  grep -qi 'never a sleep loop' "$f" && ok "pr-converge: no sleep loop" || bad "pr-converge: sleep-loop rule missing"
+  grep -q '/ship' "$f" && grep -q '/steward' "$f" && ok "pr-converge: overlap stated" || bad "pr-converge: overlap section missing"
+fi
+if [ ! -f "$t" ]; then
+  bad "pr-converge templates: no $t"
+else
+  for h in 'Ship-PR' 'Ops investigation' 'Backlog sweep' 'Overnight'; do
+    grep -q "^## $h" "$t" && ok "templates: has $h" || bad "templates: missing $h"
+  done
+  tsec() { awk -v h="## $1" 'index($0,h)==1{p=1;next} /^## /{p=0} p' "$t"; }
+  tsec 'Ship-PR' | grep -q 'Stop after 40 turns' && ok "templates: Ship-PR 40 turns" || bad "templates: Ship-PR 40 turns missing"
+  tsec 'Ops investigation' | grep -q 'Stop after 15 turns' && ok "templates: Ops 15 turns" || bad "templates: Ops 15 turns missing"
+  tsec 'Backlog sweep' | grep -q 'Stop after 40 turns' && ok "templates: Backlog 40 turns" || bad "templates: Backlog 40 turns missing"
+  tsec 'Overnight' | grep -q 'Stop after 40 turns' && ok "templates: Overnight 40 turns" || bad "templates: Overnight 40 turns missing"
+  for h in 'Ship-PR' 'Ops investigation' 'Backlog sweep' 'Overnight'; do
+    tsec "$h" | grep -q 'DECISION: <exact command> | <why>' && ok "templates: $h DECISION text" || bad "templates: $h DECISION text missing"
+  done
+  tsec 'Ship-PR' | grep -qi 'ready to merge' && ok "templates: Ship-PR ends at ready to merge" || bad "templates: Ship-PR end missing"
+  tsec 'Ship-PR' | grep -q 'under 1,000 characters' && ok "templates: Ship-PR reply cap" || bad "templates: Ship-PR reply cap missing"
+  tsec 'Ops investigation' | grep -qi 'no writes' && ok "templates: Ops no writes" || bad "templates: Ops no writes missing"
+  tsec 'Backlog sweep' | grep -qi 'exits 0' && tsec 'Backlog sweep' | grep -qi 'not merged' && ok "templates: Backlog exit 0, not merged" || bad "templates: Backlog end condition missing"
+  ov="$(tsec 'Overnight')"
+  grep -q 'claude --bg --permission-mode auto' <<<"$ov" && ok "templates: Overnight launch command" || bad "templates: Overnight launch command missing"
+  grep -q "end states are the pr-converge skill's end states" <<<"$ov" && ok "templates: Overnight end states are the skill's" || bad "templates: Overnight end state missing"
+  for n in 'never retry a denied action' 'never merge' 'never promote' 'never deploy' 'never run migrations' 'never read or write production' 'never write to shared databases'; do
+    grep -qi "$n" <<<"$ov" && ok "templates: Overnight '$n'" || bad "templates: Overnight '$n' missing"
+  done
+  grep -qi 'table' <<<"$ov" && grep -q 'under 1,000 characters' <<<"$ov" && ok "templates: Overnight table reply under cap" || bad "templates: Overnight reply rule missing"
+  grep -qi 'draft PR' <<<"$ov" && ok "templates: Overnight draft PR rule" || bad "templates: Overnight draft PR rule missing"
+fi
+if [ ! -f "$gl" ]; then
+  bad "goal-line: no $gl"
+else
+  [ -x "$gl" ] && ok "goal-line: executable" || bad "goal-line: not executable"
+  out="$("$gl" ship-pr octo/demo 7 2>/dev/null)"; rc=$?
+  [ "$rc" -eq 0 ] && ok "goal-line: ship-pr exits 0" || bad "goal-line: ship-pr exit $rc"
+  grep -q 'octo/demo' <<<"$out" && grep -qw '7' <<<"$out" && grep -q 'Stop after 40 turns' <<<"$out" \
+    && ok "goal-line: output has repo, PR, 40 turns" || bad "goal-line: output missing repo, PR or 40 turns"
+  grep -q '{{' <<<"$out" && bad "goal-line: unfilled placeholder" || ok "goal-line: placeholders filled"
+  "$gl" nope octo/demo 7 >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && ok "goal-line: unknown template exits 2" || bad "goal-line: unknown template exit $rc"
+  "$gl" ship-pr octo/demo >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && ok "goal-line: missing argument exits 2" || bad "goal-line: missing argument exit $rc"
+  "$gl" >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && ok "goal-line: no arguments exits 2" || bad "goal-line: no arguments exit $rc"
+fi
+# hygiene: no host, address or real-repo identifiers in the new files
+hy=""
+for x in "$f" "$t" "$gl"; do [ -f "$x" ] && hy="$hy $x"; done
+if [ -n "$hy" ] && grep -Eni '([0-9]{1,3}\.){3}[0-9]{1,3}|\.(ts\.net|com|dev|ai|app)\b|craft ?digital|dfwsc|@[a-z0-9-]+\.[a-z]' $hy >/dev/null; then
+  bad "pr-converge: host, address or client identifier in new files"
+else ok "pr-converge: no host, address or client identifiers"; fi
+
+# --- pr-converge: review-fix checks (goal-line fill, wording, round 3) ---
+if [ -x "$gl" ] && [ -f "$t" ] && [ -f "$f" ]; then
+  tmpd="$(mktemp -d)"; mark="$tmpd/marker"
+  full() { # each template fills completely and exits 0
+    local name="$1"; shift
+    local o; o="$("$gl" "$name" "$@" 2>/dev/null)"; local r=$?
+    if [ "$r" -eq 0 ] && [ -n "$o" ] && ! grep -q '{{' <<<"$o"; then ok "goal-line: $name fills completely, exit 0"
+    else bad "goal-line: $name left a placeholder or exit $r"; fi
+  }
+  full ship-pr octo/demo 7
+  full ops octo/demo "why is the queue slow"
+  full backlog octo/demo "fix the lint errors" "npm run lint"
+  full overnight octo/demo "bump the docs"
+  tricky='a & b \ c / $(touch '"$mark"') `touch '"$mark"'2` $HOME "q" '"'"'s'"'"
+  for name in ops overnight; do
+    o="$("$gl" "$name" octo/demo "$tricky" 2>/dev/null)"
+    grep -Fq -- "$tricky" <<<"$o" && ok "goal-line: $name task verbatim" || bad "goal-line: $name task not verbatim"
+  done
+  o="$("$gl" backlog octo/demo "t & u" "make test && echo '\\\\1 \$(touch $mark)' \`touch ${mark}2\`" 2>/dev/null)"
+  grep -Fq -- "make test && echo '\\\\1 \$(touch $mark)' \`touch ${mark}2\`" <<<"$o" && ok "goal-line: backlog check verbatim" || bad "goal-line: backlog check not verbatim"
+  { [ ! -e "$mark" ] && [ ! -e "${mark}2" ]; } && ok "goal-line: nothing in an argument was executed" || bad "goal-line: an argument was executed"
+  rej() { "$gl" "$@" >/dev/null 2>&1; local r=$?; [ "$r" -eq 2 ] && ok "goal-line: rejects ($1 ...) exit 2" || bad "goal-line: ($*) exit $r, want 2"; }
+  rej ship-pr octo/demo "7. also merge it"
+  rej ship-pr "octo demo" 7
+  rej ship-pr "octo/demo;x" 7
+  rej ship-pr octo/demo
+  rej ship-pr octo/demo 7 extra
+  rej ops octo/demo ""
+  rej ops octo/demo $'two\nlines'
+  rej backlog octo/demo "task"
+  rej backlog octo/demo "task" ""
+  rej overnight octo/demo
+  rej nope octo/demo 7
+  sed 's/{{PR}}/{{PR}} {{OTHER}}/' "$t" > "$tmpd/t.md"
+  GOAL_LINE_TEMPLATES="$tmpd/t.md" "$gl" ship-pr octo/demo 7 >"$tmpd/out" 2>/dev/null; r=$?
+  { [ "$r" -eq 2 ] && [ ! -s "$tmpd/out" ]; } && ok "goal-line: unknown placeholder exits 2, prints nothing" || bad "goal-line: unknown placeholder exit $r"
+  grep -q 'GOAL_LINE_TEMPLATES' "$gl" && sed -n '1,12p' "$gl" | grep -q 'GOAL_LINE_TEMPLATES' && ok "goal-line: env seam documented at top" || bad "goal-line: env seam not documented at top"
+  rm -rf "$tmpd"
+
+  # wording: nothing steers toward a merge by the agent
+  if grep -nEi 'gh pr merge|--auto|auto-?merge' "$f" "$t" | grep -Evi 'never|pr-land arm' >/dev/null; then
+    bad "pr-converge: a line suggests gh pr merge / --auto / auto-merge without never"
+  else ok "pr-converge: no line suggests a merge by the agent"; fi
+  if grep -nEi '\bsleep\b|\bwhile\b' "$f" "$t" | grep -Evi 'never' >/dev/null; then
+    bad "pr-converge: a line instructs sleep or while polling"
+  else ok "pr-converge: no sleep or while polling instruction"; fi
+  grep -Eqi 'round 3 (only )?reviews? only' "$f" && grep -Eqi 'without fixing or pushing|does not fix or push|no fix, no push' "$f" \
+    && ok "pr-converge: round 3 reviews only, no fix or push" || bad "pr-converge: round 3 rule missing"
+  grep -q 'gh pr view <pr> -R <owner/repo> --json headRefOid' "$f" && grep -qi 'never .*local checkout' "$f" \
+    && ok "pr-converge: head re-read from GitHub after push" || bad "pr-converge: head re-read rule missing"
+  grep -q 'Ready to merge' "$f" && grep -qi 'pending' "$f" && grep -qi 'failed' "$f" \
+    && ok "pr-converge: ready verdict string and mixed cases" || bad "pr-converge: verdict string or mixed cases missing"
+  grep -qi 'only watches' "$f" && grep -qi 'owner runs' "$f" && ok "pr-converge: pr-land sentence" || bad "pr-converge: pr-land sentence missing"
+  ov="$(awk 'index($0,"## Overnight")==1{p=1;next} /^## /{p=0} p' "$t")"
+  for n in 'never force push' 'never push to a default branch' 'launched this session himself' 'pushing its own branch, opening a draft pull request and posting the review' 'no retry and no other route'; do
+    grep -qi -- "$n" <<<"$ov" && ok "templates: Overnight prompt has '$n'" || bad "templates: Overnight prompt lacks '$n'"
+  done
+  # review fixes: counted re-review, tier name, order of pushes, bounded wait, reader rule
+  grep -Eqi 'every review run counts as a round' "$f" && grep -qi 'whatever triggered it' "$f" \
+    && ok "pr-converge: every review run counts as a round" || bad "pr-converge: counted re-review rule missing"
+  grep -Eqi 'stops? (at|after) the (round )?cap|after the third review' "$f" && grep -qi 'no extra review' "$f" \
+    && ok "pr-converge: cap stops the run even after a marker mismatch" || bad "pr-converge: cap-after-mismatch rule missing"
+  grep -q 'CONSIDER' "$f" && ! grep -q 'NITs' "$f" \
+    && ok "pr-converge: CONSIDER tier, no NITs" || bad "pr-converge: NITs wording or CONSIDER missing"
+  grep -q 'Reviewed-head marker' "$f" && grep -q 'amend rule' "$f" && grep -qi 'pr-review/SKILL.md' "$f" \
+    && ok "pr-converge: reader rule points at the review skill" || bad "pr-converge: reader rule does not point at the review skill"
+  grep -Eq 'pr-wait <owner/repo> <pr> --sha <H> --timeout [0-9]+m' "$f" \
+    && ok "pr-converge: checks wait is bounded" || bad "pr-converge: checks wait has no timeout"
+  grep -qi 'on timeout' "$f" && grep -qi 'do not loop' "$f" && ok "pr-converge: timeout stops and reports" || bad "pr-converge: timeout stop rule missing"
+  # step A: the optional local-mode review is not counted
+  a="$(awk -v s="**Step A:" 'index($0,s)==1{p=1;print;next} p && (/^\*\*Step [A-Z]:/ || /^## /){p=0} p' "$f")"
+  grep -qi 'local-mode review' <<<"$a" && grep -qi 'does not count as a round' <<<"$a" \
+    && ok "pr-converge: step A local review optional and uncounted" || bad "pr-converge: step A lacks the uncounted local review rule"
+  # restructure: one canonical loop, steps A to E, each with one job
+  sl() { grep -nE "^\*\*Step $1:" "$f" | cut -d: -f1; }
+  steps_ok=1; prev=0
+  for s in A B C D E; do
+    c="$(grep -cE "^\*\*Step $s:" "$f")"; n="$(sl "$s" | head -1)"
+    if [ "$c" -ne 1 ] || [ -z "$n" ] || [ "$n" -le "$prev" ]; then steps_ok=0; break; fi
+    prev="$n"
+  done
+  [ "$steps_ok" -eq 1 ] && ok "pr-converge: step markers A to E appear once each, in order" || bad "pr-converge: step markers A to E missing, repeated or out of order"
+  # a step's text runs from its marker to the next step marker or the next heading
+  ssec() { awk -v s="**Step $1:" 'index($0,s)==1{p=1;print;next} p && (/^\*\*Step [A-Z]:/ || /^## /){p=0} p' "$f"; }
+  succ_ok=1
+  for s in A B C D E; do
+    grep -Eq 'go to step [A-E]|END|stop with a DECISION line' <<<"$(ssec "$s")" || { succ_ok=0; bad "pr-converge: step $s names no successor"; }
+  done
+  [ "$succ_ok" -eq 1 ] && ok "pr-converge: every step names its successor"
+  # each step's successors exactly, per branch, inside that step's own text
+  gos() { grep -o 'go to step [A-E]' <<<"$(ssec "$1")" | sed 's/go to step //' | sort -u | tr -d '\n'; }
+  [ "$(gos A)" = "B" ] && grep -Eq 'no local commits[^.]*, go to step B\.' <<<"$(ssec A)" && grep -Eq 'git-push[^.]*, then go to step B\.' <<<"$(ssec A)" \
+    && ok "pr-converge: step A leads only to B (nothing to push, and after the push)" || bad "pr-converge: step A successor is not B"
+  [ "$(gos B)" = "C" ] && grep -Eq 'add 1 to R.*Then go to step C\.$' <<<"$(ssec B)" \
+    && ok "pr-converge: step B leads only to C" || bad "pr-converge: step B successor is not C"
+  c="$(ssec C)"
+  [ "$(gos C)" = "BDE" ] && [ "$(grep -o 'go to step [A-E]' <<<"$c" | wc -l)" -eq 3 ] \
+    && grep -Eq 'not equal to H[^.]*: go to step B\.' <<<"$c" \
+    && grep -Eq 'Ready to merge[^;]*no MUST-FIX or SHOULD-FIX item is open, go to step E;' <<<"$c" \
+    && grep -Eq 'in every other case the result is not ready: go to step D\.' <<<"$c" \
+    && ok "pr-converge: step C: mismatch to B, ready to E, anything else to D" || bad "pr-converge: step C successors wrong"
+  [ "$(gos D)" = "B" ] && grep -Eq 'push through `git-push`[^.]*, and go to step B\.' <<<"$(ssec D)" \
+    && ok "pr-converge: step D leads only to B after its push" || bad "pr-converge: step D successor after the push is not B"
+  [ "$(gos E)" = "D" ] && ok "pr-converge: step E's only step successor is D (exit 1)" || bad "pr-converge: step E leads to a step other than D"
+  [ "$(grep -c 'go to step E' "$f")" -eq 1 ] && grep -q 'go to step E' <<<"$c" \
+    && ok "pr-converge: only step C leads to step E" || bad "pr-converge: a step other than C leads to E"
+  [ "$(grep -c 'A review starts only in step B' "$f")" -eq 1 ] && ok "pr-converge: review starts only in step B, said once" || bad "pr-converge: 'A review starts only in step B' not exactly once"
+  [ "$(grep -c 'A fix is made only in step D' "$f")" -eq 1 ] && ok "pr-converge: fix made only in step D, said once" || bad "pr-converge: 'A fix is made only in step D' not exactly once"
+  [ "$(grep -c 'Only step E waits' "$f")" -eq 1 ] && ok "pr-converge: only step E waits, said once" || bad "pr-converge: 'Only step E waits' not exactly once"
+  # the cap is checked before the review in B and before the fix in D
+  b="$(ssec B)"; d="$(ssec D)"
+  { [ "$(grep -o 'If R is 3' <<<"$b" | wc -l)" -eq 1 ] \
+    && awk -v x="$b" 'BEGIN{x=tolower(x); i=index(x,"if r is 3"); j=index(x,"run one pr-mode review"); exit !(i>0 && j>i)}'; } \
+    && ok "pr-converge: step B checks the cap before starting a review" || bad "pr-converge: step B does not check the cap first"
+  awk -v x="$d" 'BEGIN{x=tolower(x); i=index(x,"if r is 3"); j=index(x,"dispatch one fix agent"); exit !(i>0 && j>i)}' \
+    && ok "pr-converge: step D checks the cap before any fix" || bad "pr-converge: step D does not check the cap before fixing"
+  grep -q 'without fixing or pushing' <<<"$d" && ok "pr-converge: step D at the cap stops without fixing or pushing" || bad "pr-converge: step D cap stop rule missing"
+  # the wait command appears once, inside step E
+  e="$(ssec E)"
+  [ "$(grep -c 'pr-wait <owner/repo> <pr> --sha <H> --timeout 60m' "$f")" -eq 1 ] && grep -q 'pr-wait <owner/repo> <pr> --sha <H> --timeout 60m' <<<"$e" \
+    && ok "pr-converge: the wait command appears once, inside step E" || bad "pr-converge: wait command not exactly once inside step E"
+  if grep -n 'gh pr checks.*--watch' "$f" "$t" >/dev/null; then bad "pr-converge: gh pr checks --watch fallback still present"
+  else ok "pr-converge: no gh pr checks --watch fallback"; fi
+  grep -q '124' "$f" && bad "pr-converge: fallback exit 124 still mapped" || ok "pr-converge: no exit 124 mapping"
+  # each pr-wait exit code, matched with a boundary, maps to the successor in its own clause in step E
+  xo() { grep -Eq "(^|[^0-9])$1 \\($2\\)[^.:]*: $3" <<<"$e"; }
+  xo 0 green 'END' && ok "pr-converge: exit 0 (green) ends ready" || bad "pr-converge: exit 0 not mapped to END"
+  xo 5 'no checks' 'END' && ok "pr-converge: exit 5 (no checks) ends ready" || bad "pr-converge: exit 5 not mapped to END"
+  xo 1 failed 'go to step D' && ok "pr-converge: exit 1 (failed) goes to step D" || bad "pr-converge: exit 1 not mapped to step D"
+  for p in '2 timeout' '3 head changed' '4 closed or merged' '10 usage or gh error'; do
+    code="${p%% *}"; what="${p#* }"
+    xo "$code" "$what" 'stop with a DECISION line' && ok "pr-converge: exit $code ($what) stops with DECISION" || bad "pr-converge: exit $code ($what) not mapped to a DECISION stop"
+  done
+  grep -Eq 'Any other exit code: stop with a DECISION line naming the code\.' <<<"$e" \
+    && ok "pr-converge: any other pr-wait exit code is a DECISION stop" || bad "pr-converge: other pr-wait exit codes have no successor"
+  grep -q "amend rule" <<<"$b" && grep -q 'always reviews H' <<<"$b" && ! grep -q 'The first review posts the review comment' <<<"$b" \
+    && ok "pr-converge: step B defers posting to the amend rule and always reviews H" || bad "pr-converge: step B posting rule or always-review clause missing"
+  grep -qi 'not installed' <<<"$e" && grep -qi 'checks were not awaited' <<<"$e" && grep -qi 'do not substitute another command' <<<"$e" \
+    && ok "pr-converge: pr-wait missing ends with a DECISION, no substitute" || bad "pr-converge: missing pr-wait rule absent"
+  grep -q 'no second wait' <<<"$e" && ok "pr-converge: no second wait" || bad "pr-converge: second-wait rule missing"
+  # templates and docs point at the loop and do not restate it
+  ov="$(awk 'index($0,"## Overnight")==1{p=1;next} /^## /{p=0} p' "$t")"
+  grep -q "pr-converge skill's loop from step A" <<<"$ov" && ok "templates: Overnight runs the skill's loop from step A" || bad "templates: Overnight does not name the skill's loop"
+  grep -q "pr-converge skill's loop from step A" <<<"$(awk 'index($0,"## Ship-PR")==1{p=1;next} /^## /{p=0} p' "$t")" \
+    && ok "templates: Ship-PR runs the skill's loop from step A" || bad "templates: Ship-PR does not name the skill's loop"
+  if grep -Eqi 'after every push, including the first|each PR-mode review is one round|Flow: \(a\)' "$t"; then bad "templates: a second statement of the push and review order"
+  else ok "templates: no second statement of the push and review order"; fi
+  gdoc2="$here/../../../../docs/context/git-workflow-skills.md"
+  if [ -f "$gdoc2" ]; then
+    dsec="$(awk '/^## pr-converge/{p=1;next} /^## /{p=0} p' "$gdoc2")"
+    if grep -Eqi 'after every push|a-d flow|gh pr checks --watch|green or no-checks' <<<"$dsec"; then bad "docs: pr-converge section restates the loop order"
+    else ok "docs: pr-converge section points at the loop, no second copy"; fi
+  fi
+  # hygiene: no personal names or initials; also in the docs lines added
+  if grep -nE '\bJC\b' "$f" "$t" "$gl" >/dev/null; then bad "pr-converge: a person's initials appear in S, T or G"
+  else ok "pr-converge: no initials in S, T or G"; fi
+  gdoc="$here/../../../../docs/context/git-workflow-skills.md"
+  if [ -f "$gdoc" ]; then
+    sec="$(awk '/^## pr-converge/{p=1;next} /^## /{p=0} p' "$gdoc")"
+    if [ -z "$sec" ]; then bad "docs: no pr-converge section"
+    elif grep -Eni '([0-9]{1,3}\.){3}[0-9]{1,3}|\.(ts\.net|com|dev|ai|app)\b|craft ?digital|dfwsc|\bJC\b' <<<"$sec" >/dev/null; then bad "docs: identifier in the pr-converge section"
+    else ok "docs: pr-converge section has no identifiers"; fi
+    grep -q 'goal-line backlog' <<<"$sec" && ok "docs: goal-line usage documented" || bad "docs: goal-line usage missing"
+  fi
+fi
+
 echo; echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -31,6 +31,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 ## Claude directory notes
 - `agents/` includes same-named shadows of built-in agents (for example `Explore`, `Plan`, `general-purpose`).
 - `skills/` holds one directory per skill, each with a `SKILL.md`. `skills/context-docs/SKILL.md` defines the `docs/context/` convention; `skills/git-verify/SKILL.md` runs `local-hooks/run-checks.sh`.
+- `bin/goal-line` prints a filled-in `/goal` text from `skills/pr-converge/templates.md` (`goal-line ship-pr <owner/repo> <pr>`; the other templates take a task, backlog also a check).
 - `commands/` holds slash commands. Command headers use `allowed-tools`, which pre-approves tools and does not restrict them (see errors.md).
 
 ## Work convention

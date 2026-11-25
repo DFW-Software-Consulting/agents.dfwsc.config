@@ -101,9 +101,11 @@ Write `./pr_review_<PR_NUMBER>.md` using exactly this structure (omit sections w
 ### What works well
 
 <2-4 brief, genuine bullets.>
+
+<!-- reviewed-head: <40-hex sha> -->
 ```
 
-Use only the three displayed verdict choices and the displayed finding dispositions and effort choices. Disclose any skipped files in the assessment. Include two to four genuine bullets under "What works well" when that section is present.
+The last two template lines (one blank line, then the marker line) are the reviewed-head marker; see "Reviewed-head marker" below. Use only the three displayed verdict choices and the displayed finding dispositions and effort choices. Disclose any skipped files in the assessment. Include two to four genuine bullets under "What works well" when that section is present.
 
 ## Always amend the existing review; post only when there is none
 
@@ -127,7 +129,15 @@ Only amend a comment confirmed to be a prior review in this exact format. Never 
 gh pr comment <PR_NUMBER> -R <OWNER/REPO> --body-file ./pr_review_<PR_NUMBER>.md
 ```
 
-**Reviewed-head marker.** The comment ends with one hidden last line, `<!-- reviewed-head: <40-hex sha> -->`, holding the `headRefOid` fetched above. Add it to `./pr_review_<PR_NUMBER>.md` before posting or amending. A repeat review replaces that line with the current head and never adds a second one. A reader treats a comment with no marker, or a marker that differs from the current head, as "not reviewed at this head". Local mode posts no comment, so it gets no marker.
+**Reviewed-head marker.** Writer and reader rules are one contract; follow them exactly.
+
+- Writer shape: the marker is the last line of the comment body, alone on its line, preceded by exactly one blank line, with nothing after it except one optional final line break. In it, `<40-hex sha>` stands for the `headRefOid` fetched above, which must be exactly 40 lowercase hex characters. The review text itself must never contain a line that looks like the marker.
+- Reader pattern, applied to the last line of the body (one final line break ignored), with the line before it blank: `^<!-- reviewed-head: ([0-9a-f]{40}) -->$`. No leading or trailing spaces, no carriage return, no other case.
+- Which marker a reader trusts: only the comment the amend rule selects (authored by the authenticated login, body starts with `## Code Review — `, contains `(#<PR_NUMBER>)`, most recently created of those), and in that comment only the last line, when it matches the pattern. A marker quoted elsewhere in that body, in any other comment, or in the PR body is ignored.
+- Unavailable head: if `headRefOid` cannot be fetched or is not 40 lowercase hex characters, omit the marker and its blank line, never a placeholder or a partial value, and say so in the final response.
+- Reader result: a comment with no marker, a malformed marker, or a marker that differs from the current head means "not reviewed at this head".
+- Re-review: the amended body is built fresh from the new file and carries the marker for the head reviewed in that amendment, replacing the old one, so the body ends with exactly one marker line. The skill never adds a second.
+- Local mode posts no comment, so it never gets a marker.
 
 Verify either way using `gh pr view` comments or, if necessary, `gh api`. For a new post, reliably identify it by comparing pre-post IDs and confirming author, body, and creation time. For an amend, confirm the same comment ID now carries the new body (an updated `updatedAt`/edited body on that id, not a new id in the list).
 

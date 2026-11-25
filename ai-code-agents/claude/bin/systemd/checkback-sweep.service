@@ -1,0 +1,8 @@
+[Unit]
+Description=checkback sweep (sends due reminders and re-checks read-only conditions; never writes anywhere but its own state)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/checkback sweep
+TimeoutStartSec=120

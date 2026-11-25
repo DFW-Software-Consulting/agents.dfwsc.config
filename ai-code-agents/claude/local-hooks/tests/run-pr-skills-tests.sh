@@ -262,6 +262,23 @@ if [ -x "$gl" ] && [ -f "$t" ] && [ -f "$f" ]; then
     grep -Eq 'go to step [A-E]|END|stop with a DECISION line' <<<"$(ssec "$s")" || { succ_ok=0; bad "pr-converge: step $s names no successor"; }
   done
   [ "$succ_ok" -eq 1 ] && ok "pr-converge: every step names its successor"
+  # each step's successors exactly, per branch, inside that step's own text
+  gos() { grep -o 'go to step [A-E]' <<<"$(ssec "$1")" | sed 's/go to step //' | sort -u | tr -d '\n'; }
+  [ "$(gos A)" = "B" ] && grep -Eq 'no local commits[^.]*, go to step B\.' <<<"$(ssec A)" && grep -Eq 'git-push[^.]*, then go to step B\.' <<<"$(ssec A)" \
+    && ok "pr-converge: step A leads only to B (nothing to push, and after the push)" || bad "pr-converge: step A successor is not B"
+  [ "$(gos B)" = "C" ] && grep -Eq 'add 1 to R.*Then go to step C\.$' <<<"$(ssec B)" \
+    && ok "pr-converge: step B leads only to C" || bad "pr-converge: step B successor is not C"
+  c="$(ssec C)"
+  [ "$(gos C)" = "BDE" ] && [ "$(grep -o 'go to step [A-E]' <<<"$c" | wc -l)" -eq 3 ] \
+    && grep -Eq 'not equal to H[^.]*: go to step B\.' <<<"$c" \
+    && grep -Eq 'Ready to merge[^;]*no MUST-FIX or SHOULD-FIX item is open, go to step E;' <<<"$c" \
+    && grep -Eq 'in every other case the result is not ready: go to step D\.' <<<"$c" \
+    && ok "pr-converge: step C: mismatch to B, ready to E, anything else to D" || bad "pr-converge: step C successors wrong"
+  [ "$(gos D)" = "B" ] && grep -Eq 'push through `git-push`[^.]*, and go to step B\.' <<<"$(ssec D)" \
+    && ok "pr-converge: step D leads only to B after its push" || bad "pr-converge: step D successor after the push is not B"
+  [ "$(gos E)" = "D" ] && ok "pr-converge: step E's only step successor is D (exit 1)" || bad "pr-converge: step E leads to a step other than D"
+  [ "$(grep -c 'go to step E' "$f")" -eq 1 ] && grep -q 'go to step E' <<<"$c" \
+    && ok "pr-converge: only step C leads to step E" || bad "pr-converge: a step other than C leads to E"
   [ "$(grep -c 'A review starts only in step B' "$f")" -eq 1 ] && ok "pr-converge: review starts only in step B, said once" || bad "pr-converge: 'A review starts only in step B' not exactly once"
   [ "$(grep -c 'A fix is made only in step D' "$f")" -eq 1 ] && ok "pr-converge: fix made only in step D, said once" || bad "pr-converge: 'A fix is made only in step D' not exactly once"
   [ "$(grep -c 'Only step E waits' "$f")" -eq 1 ] && ok "pr-converge: only step E waits, said once" || bad "pr-converge: 'Only step E waits' not exactly once"
@@ -289,6 +306,10 @@ if [ -x "$gl" ] && [ -f "$t" ] && [ -f "$f" ]; then
     code="${p%% *}"; what="${p#* }"
     xo "$code" "$what" 'stop with a DECISION line' && ok "pr-converge: exit $code ($what) stops with DECISION" || bad "pr-converge: exit $code ($what) not mapped to a DECISION stop"
   done
+  grep -Eq 'Any other exit code: stop with a DECISION line naming the code\.' <<<"$e" \
+    && ok "pr-converge: any other pr-wait exit code is a DECISION stop" || bad "pr-converge: other pr-wait exit codes have no successor"
+  grep -q "amend rule" <<<"$b" && grep -q 'always reviews H' <<<"$b" && ! grep -q 'The first review posts the review comment' <<<"$b" \
+    && ok "pr-converge: step B defers posting to the amend rule and always reviews H" || bad "pr-converge: step B posting rule or always-review clause missing"
   grep -qi 'not installed' <<<"$e" && grep -qi 'checks were not awaited' <<<"$e" && grep -qi 'do not substitute another command' <<<"$e" \
     && ok "pr-converge: pr-wait missing ends with a DECISION, no substitute" || bad "pr-converge: missing pr-wait rule absent"
   grep -q 'no second wait' <<<"$e" && ok "pr-converge: no second wait" || bad "pr-converge: second-wait rule missing"

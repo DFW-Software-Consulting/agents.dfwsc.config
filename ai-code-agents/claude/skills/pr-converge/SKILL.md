@@ -18,7 +18,7 @@ A review starts only in step B. A fix is made only in step D. Only step E waits.
 
 **Step A: prepare.** If the run has no local commits that are not yet on the PR branch, go to step B. Otherwise run the local checks through the `git-verify` skill; if they do not pass, stop with a DECISION line. A local-mode review before this push is optional, posts nothing and does not count as a round (R is unchanged). When the checks pass, push through the `git-push` skill (no `--force`), then go to step B.
 
-**Step B: review.** If R is 3, stop at the cap with a DECISION line: name H and the marker seen (or that none was found). Otherwise re-read H from GitHub, run one PR-mode review of H with the `pr-review` skill (`<PR_NUMBER> <OWNER/REPO>`), and add 1 to R. The first review posts the review comment; every later one amends that same comment. Then go to step C.
+**Step B: review.** If R is 3, stop at the cap with a DECISION line: name H and the marker seen (or that none was found). Otherwise re-read H from GitHub, run one PR-mode review of H with the `pr-review` skill (`<PR_NUMBER> <OWNER/REPO>`), and add 1 to R. Step B always reviews H when entered, even if an earlier review of H exists. The review posts the review comment or, when one already exists, amends it, as the `pr-review` skill's amend rule decides. Then go to step C.
 
 **Step C: read the result.** Re-read H from GitHub. Read the review's `<!-- reviewed-head: <40-hex sha> -->` marker exactly as the "Reviewed-head marker" section of `pr-review/SKILL.md` defines it (only the comment its amend rule selects, only its last line). If the marker is missing, malformed or not equal to H, the result counts as not reviewed at this head: go to step B. Otherwise read the `Verdict:` line: if it is exactly `✅ Ready to merge` (the first of the three verdict choices in `pr-review/SKILL.md`) and no MUST-FIX or SHOULD-FIX item is open, go to step E; in every other case the result is not ready: go to step D.
 
@@ -28,6 +28,7 @@ A review starts only in step B. A fix is made only in step D. Only step E waits.
 - Exit 0 (green) or exit 5 (no checks): END, ready. A review is posted whose marker equals H, checks are green or there are none, and a person merges. Write the report.
 - Exit 1 (failed): go to step D (its cap check comes first).
 - Exit 2 (timeout), 3 (head changed), 4 (closed or merged) or 10 (usage or gh error): stop with a DECISION line naming the outcome and H (on timeout, also the checks still pending); no second wait, and do not loop.
+- Any other exit code: stop with a DECISION line naming the code.
 
 If `pr-wait` is not installed, do not substitute another command: stop with a DECISION line whose command is the wait above and whose reason says the review is posted for H and checks were not awaited.
 

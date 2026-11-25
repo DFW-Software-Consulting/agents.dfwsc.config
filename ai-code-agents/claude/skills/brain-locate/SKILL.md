@@ -124,3 +124,7 @@ State clearly, for whatever called this skill to use next:
 
 That's the payload any downstream Brain write (a task insert, etc.) should key
 off of.
+
+### 7. Save the project for this repo
+
+After a project is resolved (step 2, or confirmed in step 3), save its id so later work does not repeat the lookup: `~/.claude/skills/brain-task-sync/brain-task.sh <repo dir> project set <project-id>`. It is stored in the repository's local git config (`brain.project-id`), shared by all worktrees and never committed; no database write is involved. If the helper is missing or exits non-zero, report that in one line and continue as if nothing were saved; it is never a blocker.

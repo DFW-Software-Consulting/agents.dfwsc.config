@@ -21,6 +21,7 @@ One job: open a pull request from a pushed branch.
 1. Run `~/.claude/local-hooks/git-facts.sh --dir <path>`. If `pushed` is false or `push_ahead` is above 0, return `blocked` with `blocked_by: ["unpushed"]` and `next: ["git-push"]`.
 2. Pick the template: `pr_template` from the facts if set, else `~/.claude/skills/git-pr/templates/pr-body.md`.
 3. Read `git log --oneline <changes.base>..HEAD` and `git diff <changes.base>...HEAD`, where `changes.base` is the remote default branch ref from the facts (never a possibly stale local branch). Fill the sections: what changed (3 to 5 bullets), why it is the smallest viable change (one sentence), and verification: each command in `results` with `exit` 0 as a checked item on the template line its script name matches (build, test, lint or typecheck); a result that matches no line goes on one extra line. Template lines with no result stay unchecked with `TBD: not run`.
+3a. Saved Brain task: run `~/.claude/skills/brain-task-sync/brain-task.sh <path> get`. When it prints `task=<id>`, add the plain line `Brain-Task: <id>` (no list marker, no placeholder; short_id, or the uuid if that is what is saved) as its own paragraph, with a blank line before and after, never appended to a list item: directly after the template's links or references block (the `Links to` / Gate lines) when it has one, otherwise as the last paragraph of the body. When nothing is saved, add nothing. No portal link is added: none is documented. If the helper is missing or exits non-zero, report that in one line and continue as if nothing were saved; it is never a blocker.
 4. Placeholder rule: keep every heading in order, but remove a section the template marks as conditional ("only if ...") when it does not apply. No angle-bracket placeholders or HTML comments may remain. For a value you do not have, write a `TBD:` line with the reason (for example `Gate 1: TBD: no approval link given`); omit the `Links to` line when there is no issue number.
 5. Size: use `changes.total` from the facts. The limit is the one the template states (the bundled template says 200 lines); a repository template that states none has no limit, so report `cap: null`. Over the limit, warn in the report and add a short split plan to the body. A warning does not stop the PR.
 6. Write a title of at most 72 characters in the style of the recent commits.
@@ -33,9 +34,10 @@ Text that credits a coding agent is denied by a hook; write the body as the deve
 ## Output
 
 ```json
-{"skill":"git-pr","status":"ok","branch":"<branch>","head":"<sha>","blocked_by":[],"result":{"pr_url":"<url>","title":"...","base":"main","template_used":"repo|sop","loc":{"insertions":0,"deletions":0,"total":0,"cap":200},"codeowners":["..."]},"next":[]}
+{"skill":"git-pr","status":"ok","branch":"<branch>","head":"<sha>","blocked_by":[],"result":{"pr_url":"<url>","title":"...","base":"main","template_used":"repo|sop","loc":{"insertions":0,"deletions":0,"total":0,"cap":200},"codeowners":["..."],"brain_task":"<id|null>"},"next":[]}
 ```
 
+- `brain_task` is the saved task id from the helper, or null.
 - `template_used` is `repo` when the repository's own template was used, `sop` for the bundled one.
 - `blocked` with `gh-missing` returns `result: {"body":"...","command":"gh pr create ..."}`; `unpushed` returns `result: {}` and `next: ["git-push"]`. `next` is a hint; the router decides.
 

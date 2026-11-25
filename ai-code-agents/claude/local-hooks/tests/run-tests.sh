@@ -371,6 +371,11 @@ cg_out="$(bash "$here/run-completion-gate-tests.sh" 2>&1)"; cg_rc=$?
 if [ "$cg_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - completion-gate suite: $(grep '^passed:' <<<"$cg_out")"
 else fail=$((fail + 1)); echo "FAIL - completion-gate suite"; grep -E '^FAIL|^passed' <<<"$cg_out" | sed 's/^/       /'; fi
 
+# the brain-task-sync evidence script suite (its own script; counted here as one result)
+bt_out="$(bash "$here/run-brain-task-sync-tests.sh" 2>&1)"; bt_rc=$?
+if [ "$bt_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-sync suite: $(tail -1 <<<"$bt_out")"
+else fail=$((fail + 1)); echo "FAIL - brain-task-sync suite"; grep -E '^FAIL|passed' <<<"$bt_out" | sed 's/^/       /'; fi
+
 # --- fallbacks say so on standard error, never on the hook's output ---
 # check_err NAME SCRIPT PAYLOAD STDOUT-EXPECT(exact) STDERR-REGEX (empty regex: stderr must be empty)
 check_err() {

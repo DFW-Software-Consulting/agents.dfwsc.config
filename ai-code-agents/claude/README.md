@@ -97,6 +97,7 @@ built-ins' defaults, so every agent's tier stays explicit. Do NOT set
 | `git-push` | Publish the current branch with upstream tracking |
 | `git-pr` | Open a pull request from a pushed branch using the PR template |
 | `git-issue` | Create an issue from the issue template |
+| `brain-task-sync` | After a push or PR, note progress on the user's own Brain task (advisory; run by the `git-workflow` agent); also keeps the Brain task saved for a branch (`brain-task.sh`), which commits and PRs carry as `Brain-Task: <id>`; `find` mode looks for the task of an unsaved branch, and the repo's Brain project is saved once; a saved task is rechecked, never auto-saved from a trailer, and refused on the default branch |
 | `worktree-hygiene` | Git worktree management scripts |
 | `codebase-research` | Structure map, symbol index, AST scan scripts |
 | `biome-autofix` | Run Biome linter and auto-fix issues |

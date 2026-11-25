@@ -25,7 +25,7 @@ Central home for coding-agent configuration, engineering standards and workflow 
 - `opencode`, `codex` and `gemini` link their own files into the matching tool directories.
 - `hermes` links nothing; it prints the `skills.external_dirs` entry to add.
 - The script refuses to replace an existing real directory.
-- Live sessions read these from the main worktree through whole-directory links (hooks-shipping.md), not from the primary checkout.
+- Live sessions read these from the main worktree through whole-directory links (hooks-shipping.md), not from the primary checkout. OpenCode skills, commands and agents follow the same rule since 2026-11-18; its `opencode.json` link still goes to the primary checkout. `setup-agent-configs.sh` links from the checkout it is run in, so running it from the primary re-creates the primary-pointing links.
 - It does not link `hooks/`, `local-hooks/` or `personal-hooks/`. How those reach a live session is in hooks-shipping.md.
 
 ## Claude directory notes

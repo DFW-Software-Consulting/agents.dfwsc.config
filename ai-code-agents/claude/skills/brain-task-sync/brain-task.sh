@@ -30,7 +30,9 @@ if [ "$cmd" = project ]; then
   [[ "$cur" =~ $UUID_RE ]] || cur=""
   case "$sub" in
     get) echo "project=${cur:-none}" ;;
-    clear) git -C "$dir" config --local --unset-all brain.project-id 2>/dev/null; echo "project=none" ;;
+    clear) git -C "$dir" config --local --unset-all brain.project-id 2>/dev/null; rc=$?
+           # 5 = the key was already absent (a clean clear); anything else left the value in place
+           if [ "$rc" -eq 0 ] || [ "$rc" -eq 5 ]; then echo "project=none"; else echo "error=config-write-failed"; fi ;;
     set) new="${4,,}"; git -C "$dir" config --local brain.project-id "$new" || { echo "error=config-write-failed"; exit 0; }; echo "project=$new" ;;
   esac
   exit 0
@@ -62,7 +64,9 @@ valid "$old" || old=""
 echo "branch=$branch"
 case "$cmd" in
   get) echo "task=${old:-none}" ;;
-  clear) git -C "$dir" config --local --unset-all "$key" 2>/dev/null; echo "task=none" ;;
+  clear) git -C "$dir" config --local --unset-all "$key" 2>/dev/null; rc=$?
+         # 5 = the key was already absent (a clean clear); anything else left the value in place
+         if [ "$rc" -eq 0 ] || [ "$rc" -eq 5 ]; then echo "task=none"; else echo "error=config-write-failed"; fi ;;
   set)
     new="${3,,}"
     if [ -n "$old" ] && [ "$old" != "$new" ] && [ "${4:-}" != "--replace" ]; then

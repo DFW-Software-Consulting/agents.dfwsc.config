@@ -17,7 +17,7 @@
 #   per line, # comments) unless --include-ignored is given; an ignored directory holding a nested repository is
 #   always KEEP   5 the branch has an upstream and the local tip equals it; if the upstream was configured but its
 #   remote-tracking ref is gone (deleted after a merge) only condition 6 stands in for it   6 a MERGED pull
-#   request has that branch as head and its head commit equals the branch tip, and it was merged into the default branch (origin/HEAD must be set;
+#   request has that branch as head and its head commit equals the branch tip, and it was merged into the default branch (origin/HEAD must be a symbolic ref that resolves;
 #   one `gh pr list` call per branch)
 #   7 no stash entry names the branch, not locked, no rebase/merge/cherry-pick/revert/bisect in progress
 #   8 no index entry carries the assume-unchanged or skip-worktree flag (`git ls-files -v`: a lowercase tag or S);
@@ -215,7 +215,8 @@ evaluate() {
   fi
   [ -s "$TMPD/prs" ] || { keep "${gp}no merged pull request"; return; }
   # a merged pull request counts only if it was merged into the default branch, and that needs origin/HEAD to resolve
-  git -C "$MAIN" rev-parse --verify -q refs/remotes/origin/HEAD >/dev/null 2>&1 \
+  git -C "$MAIN" symbolic-ref -q refs/remotes/origin/HEAD >/dev/null 2>&1 \
+    && git -C "$MAIN" rev-parse --verify -q refs/remotes/origin/HEAD >/dev/null 2>&1 \
     || { keep "${gp}origin/HEAD is not set (run: git remote set-head origin --auto)"; return; }
   nondef=0; nobase=0
   while read -r n s pb; do

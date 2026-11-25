@@ -493,6 +493,18 @@ wr --repo "$REPO" --apply
 t "path with a space apply: removed" no test -d "$WTS/sp ace"
 t "stash apply: the worktree with the stash is kept" test -d "$WTS/st3"
 
+# 15. origin/HEAD present only as a plain commit ref (not a symbolic ref): the default branch is unknown
+newfx
+G push -q origin main:develop; git -C "$REMOTE" symbolic-ref HEAD refs/heads/develop
+G remote set-head origin -d; G update-ref refs/remotes/origin/HEAD "$(G rev-parse refs/remotes/origin/main)"
+mkwt pr1 feat-pr1; ghset feat-pr1 161
+t "plain-ref fixture: origin/HEAD resolves but is not a symbolic ref" bash -c 'git -C "$1" rev-parse --verify -q refs/remotes/origin/HEAD >/dev/null && ! git -C "$1" symbolic-ref -q refs/remotes/origin/HEAD >/dev/null' _ "$REPO"
+wr --repo "$REPO"
+t "plain-ref origin/HEAD: a merged PR into the guessed main is KEEP with the unset reason" has "$(line_keep pr1 feat-pr1 'origin/HEAD is not set (run: git remote set-head origin --auto)')"
+G update-ref -d refs/remotes/origin/HEAD; G remote set-head origin develop
+wr --repo "$REPO"
+t "plain-ref control: a real symbolic origin/HEAD on develop makes the main-based PR KEEP as non-default" has "$(line_keep pr1 feat-pr1 'merged into a non-default base')"
+
 # 7. whole-suite checks over what the tool ran ---------------------------------------------------------
 bad_flags="$(awk -F "$US" '{
   scan = 0; for (i = 1; i <= NF; i++) { if ($i == "--") break; if (($i == "worktree" && $(i + 1) == "remove") || $i == "branch") scan = 1 }

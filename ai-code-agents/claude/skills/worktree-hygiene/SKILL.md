@@ -195,7 +195,7 @@ wt-reap --apply            # Remove only what the report lists as REMOVABLE
 - Never pass `--include-ignored` unless the owner asks.
 - Never use `git worktree remove --force` or `git branch -D` as a substitute.
 
-A worktree is removable only when it is clean, its branch tip equals its upstream (or the upstream is gone) and the tip is the head of a pull request merged into the default branch. A branch may be kept when its upstream is gone, because git does not see it as merged; that is reported as success. Worktrees with assume-unchanged or skip-worktree index flags are always kept, since those flags hide edits. Ignored directories whose name is on the built-in regenerable list (such as `node_modules` or `dist`) are removed without their contents being inspected. `wt-reap` lives in the repo's `claude/bin/` and is not installed by this skill; see the repo docs for linking it onto your PATH.
+A worktree is removable only when it is clean, its branch tip equals its upstream (or the upstream is gone) and the tip is the head of a pull request merged into the default branch. A branch may be kept when its upstream is gone, because git does not see it as merged; that is reported as success. Worktrees with assume-unchanged or skip-worktree index flags are always kept, since those flags hide edits. Ignored directories whose name is on the built-in regenerable list (such as `node_modules` or `dist`) are treated as disposable and their files are not otherwise inspected, except that a nested repository found inside (searched to depth 6, `node_modules` excluded) keeps the worktree. `wt-reap` lives in the repo's `claude/bin/` and is not installed by this skill; see the repo docs for linking it onto your PATH.
 
 ### `wt-install.sh` - Installation Helper
 

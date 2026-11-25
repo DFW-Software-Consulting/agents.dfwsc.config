@@ -16,8 +16,8 @@
 # assignment certain to have run (never a prefix assignment or a conditional one).
 # This gate has its own walker so the shared scanner stays unchanged; the variable
 # handling is meant to move into the shared scanner in a follow-up.
-# Known limits: an unparseable command line, bash -c/eval nesting over 3 levels,
-# git aliases, xargs/find -exec/ssh wrappers and lines over ~128 KB are not
+# Known limits: bash -c/eval nesting over 3 levels (a line the walker cannot parse that holds a push is an unknown directory),
+# git aliases, find -exec/ssh wrappers and lines over ~128 KB are not
 # followed; a `cd` to a missing directory or after `false &&` is followed as if
 # it ran (as before); word splitting under a changed IFS is not modelled.
 #

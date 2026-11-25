@@ -36,13 +36,13 @@ def show(e):
     return s
 
 
-def case(name, cmd, expect, cwd="/w", legacy=False, why=None):
+def case(name, cmd, expect, cwd="/w", why=None):
     global passed, failed
     SEEN.append(cmd)
-    got = [show(e) for e in cd.walk(cmd, cwd, home=H, legacy=legacy)]
+    got = [show(e) for e in cd.walk(cmd, cwd, home=H)]
     ok = got == expect
     if ok and why is not None:
-        ok = any(why in (e["why"] or "") for e in cd.walk(cmd, cwd, home=H, legacy=legacy))
+        ok = any(why in (e["why"] or "") for e in cd.walk(cmd, cwd, home=H))
     if ok:
         passed += 1; print(f"ok   - {name}")
     else:
@@ -70,9 +70,8 @@ for label, val in (("backticks", "`pwd`"), ("command substitution", "$(pwd)"), (
                    ("export with backticks", "`pwd`"), ("process substitution inside text", "/q/<(echo)"),
                    ("output process substitution inside text", "/q/>(cat)"), ("tilde after a colon", "/q/a:~/b"), ("two tildes", "~/x:~/y")):
     pre = "export W=" if label == "export with backticks" else "W="
-    for leg in (False, True):
-        case(f"stale value dropped after {label}{' (legacy)' if leg else ''}",
-             f"W=/p; {pre}{val}; cd \"$W\" && git commit", ["git:commit@unknown"], legacy=leg)
+    case(f"stale value dropped after {label}",
+         f"W=/p; {pre}{val}; cd \"$W\" && git commit", ["git:commit@unknown"])
 case("unterminated quote in an assignment: one body entry for the guards", 'W=/p; W="/q; cd "$W" && git commit', ["body:unknown"])
 case("bare tilde assignment still resolves", "W=~; cd \"$W\" && git commit", ["git:commit@/home/u"])
 case("tilde slash assignment still resolves", "W=~/r; cd \"$W\" && git commit", ["git:commit@/home/u/r"])
@@ -89,7 +88,6 @@ case("mktemp reassigned is unknown", "T=$(mktemp -d); T=$X; cd \"$T\"; git add .
 case("mktemp then absolute cd is known", "T=$(mktemp -d); cd \"$T\"; cd /p; git add .", ["git:add@/p"])
 case("env -C", "env -C /p git commit", ["git:commit@/p"])
 case("env -C variable", "env -C \"$X\" git commit", ["git:commit@unknown"])
-case("env -C is not followed in legacy mode", "env -C /p git commit", [], legacy=True)
 case("GIT_DIR literal", "GIT_DIR=x git push", ["git:push@/w[literal]"])
 case("GIT_DIR variable", "GIT_DIR=\"$V\" git push", ["git:push@/w[unknown]"])
 case("--git-dir and --work-tree", "git --git-dir=x --work-tree=\"$V\" push", ["git:push@/w[unknown]"])
@@ -853,9 +851,7 @@ if dt < 0.2:
 else:
     failed += 1; print(f"FAIL - runtime: _lex on 1 MB took {dt:.2f}s")
 
-# legacy mode (checks-gate) is frozen: the substitution prefix is not rewritten there
-case("legacy: substitution prefix unchanged", "GIT_DIR=$(pwd)/.git git commit -m x", [], legacy=True)
-# checks-gate's legacy results are pinned (see the fixture and its generator note)
+# checks-gate's analyze() results (normal mode) are pinned; regenerate the fixture only from a deliberate change
 import importlib.util, json
 spec = importlib.util.spec_from_file_location("cgc", os.path.join(os.environ["HOOKS"], "_checks-gate-check.py"))
 cgc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cgc)
@@ -871,9 +867,61 @@ with open(pins, encoding="utf-8") as fh:
             bad += 1
             print(f"FAIL - checks-gate analyze changed for {cmd!r}: {got} != {want}")
 if n > 400 and not bad:
-    passed += 1; print(f"ok   - checks-gate analyze() unchanged over {n} pinned command lines")
+    passed += 1; print(f"ok   - checks-gate analyze() (normal mode) unchanged over {n} pinned command lines")
 else:
     failed += 1; print(f"FAIL - checks-gate pins: {n} lines, {bad} changed")
+
+
+# a walker error (budget or any other) must not turn into a silent allow in checks-gate
+def _boom(exc):
+    def w(*a, **k):
+        raise exc
+    return w
+_real = cgc.cd.walk
+for label, exc, why in (("budget", cd.Budget(), "too many commands"), ("other error", RuntimeError("x"), "error while analysing")):
+    cgc.cd.walk = _boom(exc)
+    try:
+        push = cgc.analyze("git -C /p push origin feat", "/w")
+        pr = cgc.analyze("gh pr create --title x", "/w")
+        quiet = cgc.analyze("ls -l", "/w")
+    finally:
+        cgc.cd.walk = _real
+    if (len(push) == 1 and push[0][:2] == ("push", None) and why in push[0][3]
+            and len(pr) == 1 and pr[0][:2] == ("pr", None) and quiet == []):
+        passed += 1; print(f"ok   - checks-gate analyze(): walker {label} on a push or gh pr create is an unknown directory")
+    else:
+        failed += 1; print(f"FAIL - checks-gate analyze(): walker {label}: {push} {pr} {quiet}")
+
+# an error after the walker (entry loop, targets()) is an unknown directory too, through main()
+import io, contextlib
+def _raise(*a, **k):
+    raise RuntimeError("forced")
+_cf = os.path.join(tempfile.mkdtemp(), "conf")
+open(_cf, "w").write("MODE=deny\n")
+def _out(cmd, patches):
+    saved = [(o, n, getattr(o, n)) for o, n in patches]
+    for o, n in patches:
+        setattr(o, n, _raise)
+    os.environ.update(CMD=cmd, CWD="/w", GATE_HOME=H, CLAUDE_CHECKS_GATE_CONF=_cf)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            cgc.main()
+    finally:
+        for o, n, v in saved:
+            setattr(o, n, v)
+    return buf.getvalue()
+for label, patches in (("cd.effective", [(cgc.cd, "effective")]), ("gg.push_parts", [(cgc.gg, "push_parts")]),
+                       ("text_exempt", [(cgc, "text_exempt")]), ("targets()", [(cgc, "targets")]),
+                       ("resolved_targets()", [(cgc, "resolved_targets")])):
+    pushy = _out("git -C /p push origin feat", patches)
+    prc = _out("gh pr create --title x", patches)
+    quiet = _out("git status", patches)
+    if ('"permissionDecision": "deny"' in pushy and "could not analyse" in pushy and "Traceback" not in pushy
+            and ("could not analyse" in prc or label in ("cd.effective", "gg.push_parts", "text_exempt")) and quiet == ""):
+        passed += 1; print(f"ok   - checks-gate: an error in {label} on a push or gh pr create is denied, a line without one stays silent")
+    else:
+        failed += 1; print(f"FAIL - checks-gate: error in {label}: {pushy!r} {prc!r} {quiet!r}")
 
 print()
 print(f"passed: {passed}  failed: {failed}")

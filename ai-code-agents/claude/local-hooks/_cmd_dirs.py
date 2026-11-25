@@ -40,7 +40,7 @@ certain variables and the text of every followed body (additive; walk() is
 unchanged).
 Raises Budget when the line has more than MAX_CMDS commands to follow or the
 analysis takes longer than BUDGET_SECS: the caller then applies only rules that
-need no directory (see cheap_commands). legacy=True is not bounded.
+need no directory (see cheap_commands).
 
 A variable resolves only from a standalone, plain-literal assignment certain to
 have run (certain_env); anything doubtful is unknown. A value counts as a plain
@@ -67,9 +67,9 @@ the end of the command. An unquoted `${ }` is one span of its own, so the
 tokenizer never counts its braces. A line the lexer cannot parse (unclosed quote
 or substitution, nesting over MAX_NEST in any frame, or any failure inside the
 lexer) is one "body" entry holding the whole text: the gates judge it with
-BODY_GUARDS, so it fails closed. legacy=True does not use the lexer (frozen).
+BODY_GUARDS, so it fails closed.
 Known limits: `bash -c`/`eval` nesting deeper than 3, aliases,
-xargs/find -exec/ssh wrappers, lines over about 128 KB and word splitting under a
+find -exec/ssh wrappers, lines over about 128 KB and word splitting under a
 changed IFS are not followed; a command word that is, or starts with, an
 expansion (`$(echo git) push`, `"$cmd" push`, `$x git push`, `$(true)git push`) is
 not a command; the refspec of a push (`git push origin $(echo main)`) is not
@@ -833,23 +833,11 @@ def _tokens(cmd):
 
 
 
-def prefix_span(toks, i, legacy):
+def prefix_span(toks, i):
     """(ok, idx, chdirs) for the command word at i. ok: it is in command
     position; idx: the token indexes of its prefix words (NAME=value,
     sudo/env/timeout/..., their options and values); chdirs: the values of
-    `env -C DIR` / `--chdir=DIR`. legacy keeps the original rule (words of the
-    form NAME=value, a few prefix commands and dash words only): FROZEN, see
-    walk()."""
-    if legacy:
-        j, idx = i - 1, []
-        while j >= 0 and toks[j][0] == "w" and (
-                scan.bwc.ASSIGN.match(toks[j][1]) or toks[j][1] in scan.PREFIX or toks[j][1].startswith("-")):
-            idx.append(j)
-            j -= 1
-        if j < 0:
-            return True, idx, []
-        k, v = toks[j]
-        return (True if k == "o" else v in scan.KEYWORDS), idx, []
+    `env -C DIR` / `--chdir=DIR`."""
     s = i
     while s > 0 and toks[s - 1][0] == "w" and toks[s - 1][1] not in scan.KEYWORDS:
         s -= 1
@@ -931,19 +919,6 @@ def words_after(toks, k, redirs=None):
             n += 2 if n + 1 < len(toks) and toks[n + 1][0] == "w" else 1
         else:
             break
-    return out
-
-
-def prefix_redirect(toks, idx, env):
-    """None, "literal" or "unknown" for GIT_DIR= / GIT_WORK_TREE= prefixed to the command."""
-    out = None
-    for p in idx:
-        w = toks[p][1]
-        if w.startswith(("GIT_DIR=", "GIT_WORK_TREE=")):
-            if scan.literal(subst(w.partition("=")[2], env)):
-                out = out or "literal"
-            else:
-                out = "unknown"
     return out
 
 
@@ -1256,17 +1231,10 @@ def existing_dir(p):
     return p or None
 
 
-def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _inherit=None,
+def walk(cmd, cwd, home=None, _depth=0, _why=None, _temp=False, _inherit=None,
          _taint=False, _state=None):
     """See the module docstring. home sets the meaning of `~` (default: the
-    scanner's, from GATE_HOME).
-
-    legacy=True is FROZEN: it reproduces the walker checks-gate carried before
-    this module existed (no budget, no env -C/timeout/builtin prefixes, no
-    GIT_DIR from the environment). _checks-gate-check.py relies on it, and
-    tests/run-cmd-dirs-tests.sh pins its results over a fixed set of command
-    lines, so a change here cannot alter checks-gate silently. New behaviour
-    goes in the non-legacy paths only."""
+    scanner's, from GATE_HOME)."""
     if home is not None:
         scan.HOME = home
     state = _state or {"start": time.monotonic(), "count": 0}
@@ -1274,15 +1242,11 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
     orig = cmd
     subs_at = {}
     try:
-        if legacy:
-            toks = scan.bwc.tokenize(scan.bwc.strip_heredocs(cmd))
-        else:
-            toks, subs_at = _tokens(cmd)
+        toks, subs_at = _tokens(cmd)
     except ValueError:  # LexError included: a line that cannot be parsed is judged as text
-        if _depth or not legacy:
-            out.append(_entry("body", None, "a shell script body that cannot be parsed" if _depth
-                              else "a command line that cannot be parsed", False,
-                              text=cmd, depth=_depth))
+        out.append(_entry("body", None, "a shell script body that cannot be parsed" if _depth
+                          else "a command line that cannot be parsed", False,
+                          text=cmd, depth=_depth))
         return out
     if not cwd and _why is None and not _depth:
         cwd, _why = None, NO_CWD
@@ -1290,7 +1254,7 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
     why, temp, inherit = _why, _temp, _inherit or []
     gd_in = state.get("gd_in", "none")
     # Anything on the line that could redirect a mktemp path makes it unknown.
-    line_taint = _taint or "TMPDIR" in orig or bool(REDIRECTING.search(orig)) or not (legacy or temp_root_ok())
+    line_taint = _taint or "TMPDIR" in orig or bool(REDIRECTING.search(orig)) or not temp_root_ok()
     stack = []
     for i, (kind, t) in enumerate(toks):
         for inner in subs_at.get(i, ()):
@@ -1304,7 +1268,7 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
                 tset = set()
                 senv = {} if "((" in orig else certain_env(toks, i, tset, line_taint)
                 pre = _seed(senv, tset)
-            out.extend(walk(pre + inner, cwd, None, legacy, _depth, why, temp, inherit, _taint, state))
+            out.extend(walk(pre + inner, cwd, None, _depth, why, temp, inherit, _taint, state))
         if kind == "o":
             if t == "(":
                 stack.append((cwd, why, temp))
@@ -1312,17 +1276,16 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
                 cwd, why, temp = stack.pop()
             continue
         name = os.path.basename(t)
-        tracked = ("cd", "pushd", "popd", "git", "gh", "eval") if legacy else ("cd", "pushd", "popd", "git", "gh", "eval", "env")
+        tracked = ("cd", "pushd", "popd", "git", "gh", "eval", "env")
         if name not in tracked and name not in SHELLS:
             continue
-        ok, idx, chdirs = prefix_span(toks, i, legacy)
+        ok, idx, chdirs = prefix_span(toks, i)
         if not ok:
             continue
-        if not legacy:
-            state["count"] += 1
-            if state["count"] > MAX_CMDS or time.monotonic() - state["start"] > BUDGET_SECS:
-                raise Budget()
-        args = scan.bwc.args_until_op(toks, i + 1) if legacy else words_after(toks, i + 1)
+        state["count"] += 1
+        if state["count"] > MAX_CMDS or time.monotonic() - state["start"] > BUDGET_SECS:
+            raise Budget()
+        args = words_after(toks, i + 1)
         taint = line_taint
         tmp_ok = not taint
         # Arithmetic (`(( ))`, `$(( ))`) may assign; the tokenizer hides its text,
@@ -1360,11 +1323,7 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
                 state["trace"].append((out[-1], dict(env)))
         elif name == "git":
             r = git_target(args, d, w, tmp, env, temps, tmp_ok)
-            if legacy:
-                pr = prefix_redirect(toks, idx, env)
-                r["redirect"] = "unknown" if "unknown" in (pr, r["redirect"]) else (r["redirect"] or pr)
-            else:
-                explicit_dirs(e_env, env, r["dir"], r)
+            explicit_dirs(e_env, env, r["dir"], r)
             out.append(_entry("git", r["dir"], r["why"], r["temp"], sub=r["sub"], args=r["rest"],
                               pre=r["pre"], redirect=r["redirect"], gitdir=r["gitdir"],
                               worktree=r["worktree"], env=e_env, config=r["config"], depth=_depth))
@@ -1375,10 +1334,9 @@ def walk(cmd, cwd, home=None, legacy=False, _depth=0, _why=None, _temp=False, _i
             if body:
                 inh = list(inherit) + _session(toks, i) + prefix_env(toks, idx)
                 tainted = line_taint
-                if not legacy:
-                    state["gd_in"] = _gd_mode(toks, i, idx, inh, gd_in)
+                state["gd_in"] = _gd_mode(toks, i, idx, inh, gd_in)
                 try:
-                    out.extend(_body(body, cmd, d, w, tmp, env, temps, name == "eval", inh, _depth + 1, legacy,
+                    out.extend(_body(body, cmd, d, w, tmp, env, temps, name == "eval", inh, _depth + 1,
                                      tainted, state))
                 finally:
                     state["gd_in"] = gd_in
@@ -1396,7 +1354,7 @@ def trace(cmd, cwd, home=None):
     the path in effect or None). Both are [] when the line is over budget."""
     state = {"start": time.monotonic(), "count": 0, "trace": [], "bodies": []}
     try:
-        walk(cmd, cwd, home, False, _state=state)
+        walk(cmd, cwd, home, _state=state)
     except Budget:
         return [], []
     return state["trace"], state["bodies"]
@@ -1415,7 +1373,7 @@ def _session(toks, i):
     return list(d.items())
 
 
-def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, legacy, taint, state):
+def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, taint, state):
     """walk() of a script body; its own cd stays inside it. For eval the outer
     simple assignments in effect (and mktemp ones) are prepended so they resolve
     inside; a bash -c child sees only exported variables, which cannot be told:
@@ -1434,8 +1392,6 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
                        and not re.fullmatch(r"[^\s;&|()<>'\"\\]*", v))
     if is_eval:
         pre += "".join(f"{k}=$(mktemp -d); " for k in temps if re.fullmatch(r"\w+", k))
-    if legacy:
-        return walk(pre + body, cwd, None, legacy, depth, why, temp, inherit, taint, state)
     cands = [body]
     if "\\" in body:
         u = UNESC.sub(r"\1", body)
@@ -1447,7 +1403,7 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
             cands = [u] if dq and not sq else ([body, u] if dq and sq else [body])
     results, failed = [], 0
     for n, c in enumerate(cands):
-        r = walk(pre + c, cwd, None, legacy, depth, why, temp, inherit, taint, state)
+        r = walk(pre + c, cwd, None, depth, why, temp, inherit, taint, state)
         if len(r) == 1 and r[0]["kind"] == "body" and r[0]["text"] == pre + c:
             failed += 1
             continue
@@ -1499,7 +1455,7 @@ def cheap_commands(cmd):
         for i, (kind, t) in enumerate(toks):
             if kind != "w" or os.path.basename(t) != "git":
                 continue
-            ok, idx, _ = prefix_span(toks, i, False)
+            ok, idx, _ = prefix_span(toks, i)
             if not ok:
                 continue
             r = git_target(words_after(toks, i + 1), None, NO_CWD, False, {}, set())
@@ -1521,7 +1477,7 @@ def fed_texts(cmd):
     for i, (kind, t) in enumerate(toks):
         if kind != "w" or os.path.basename(t) not in SHELLS:
             continue
-        ok, idx, _ = prefix_span(toks, i, False)
+        ok, idx, _ = prefix_span(toks, i)
         if not ok:
             continue
         redirs = []
@@ -1585,7 +1541,7 @@ def cheap_gates(cmd):
             name = os.path.basename(t) if kind == "w" else ""
             if name not in ("git", "gh", "eval", "env") and name not in SHELLS:
                 continue
-            ok, idx, _ = prefix_span(toks, i, False)
+            ok, idx, _ = prefix_span(toks, i)
             if not ok:
                 continue
             args = words_after(toks, i + 1)

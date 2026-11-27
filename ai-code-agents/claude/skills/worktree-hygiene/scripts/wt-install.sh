@@ -43,7 +43,6 @@ while [[ $# -gt 0 ]]; do
             echo "  wt-check.sh    - Check branch state before work"
             echo "  wt-precommit.sh - Verify before committing"
             echo "  wt-status.sh   - Show all worktrees status"
-            echo "  wt-cleanup.sh  - Remove finished worktrees"
             echo ""
             echo "After installation, you may need to add ${INSTALL_DIR} to your PATH:"
             echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
@@ -67,7 +66,7 @@ if [[ ! -d "$SCRIPT_DIR" ]]; then
 fi
 
 # Scripts to install (without .sh extension for final links)
-SCRIPTS=("wt-new" "wt-check" "wt-precommit" "wt-status" "wt-cleanup")
+SCRIPTS=("wt-new" "wt-check" "wt-precommit" "wt-status")
 
 # Create installation directory if it doesn't exist
 if [[ ! -d "$INSTALL_DIR" ]]; then

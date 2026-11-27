@@ -104,7 +104,7 @@ newfx() {
   git init -q --bare "$REMOTE"; git clone -q "$REMOTE" "$REPO" 2>/dev/null
   echo base >"$REPO/README"; G add README; G commit -q -m base; G push -q -u origin main
   G remote set-head origin main
-  printf '%s\n' '*.log' '*.pyc' 'node_modules/' '.env*' 'scratch-repo/' >>"$REPO/.git/info/exclude"
+  printf '%s\n' '*.log' '*.pyc' 'node_modules/' '.env*' 'scratch-repo/' 'dist/' 'build/' 'venv/' '.venv/' '__pycache__/' '*.tmp' >>"$REPO/.git/info/exclude"
   : >"$GH_LOG"
 }
 # mkwt NAME BRANCH [nopush]: a linked worktree on BRANCH with one commit, pushed with upstream.
@@ -221,7 +221,7 @@ WR_CWD="$cwd0"
 build_big
 WR_CWD="$WTS/cwd"; wr --repo "$REPO" --apply
 t "apply: exit 0" test "$rc" -eq 0
-t "apply: prints the removed worktrees with ignored counts" has "removed $WTS/ok feat-ok (ignored entries: 0, of which outside the safe list: 0)"
+t "apply: prints the removed worktrees with ignored counts" has "removed $WTS/ok feat-ok (ignored entries: 0, of which not dependency caches: 0)"
 t "apply: summary" has "wt-reap: removed 7, failed 0, skipped 0, kept 17"
 for c in "ok feat-ok" "meta feat-meta" "stash2 feat-stash2" "two feat-two" "q $BQ" "dash --force" "cwd2 feat-cwd2"; do
   n="${c%% *}"; b="${c#* }"
@@ -333,36 +333,204 @@ build_ign() {
   mkwt nm feat-nm; mkdir "$WTS/nm/node_modules"; : >"$WTS/nm/node_modules/p.js"; ghset feat-nm 81
   mkwt env feat-env; echo S=1 >"$WTS/env/.env"; ghset feat-env 82
   mkwt nest feat-nest; mkdir "$WTS/nest/scratch-repo"; git init -q "$WTS/nest/scratch-repo"; : >"$WTS/nest/scratch-repo/f"; ghset feat-nest 83
+  mkwt gen feat-gen; echo g >"$WTS/gen/gen.tmp"; ghset feat-gen 84
 }
-NM_RM="removing $WTS/nm (ignored entries: 1, of which outside the safe list: 0)"
+SECRET_REASON='ignored files present (secret-looking, never removed): .env'
+NM_RM="removing $WTS/nm (ignored entries: 1, of which not dependency caches: 0)"
 build_ign; wr --repo "$REPO"
 t "ignored: only node_modules/ ignored is REMOVABLE" has "$(line_removable nm feat-nm 81) ignored=1"
-t "ignored: an ignored .env is KEEP and the reason names it" has "$(line_keep env feat-env 'ignored files outside the safe list (1): .env')"
+t "ignored: an ignored .env is KEEP and the reason names it" has "$(line_keep env feat-env "$SECRET_REASON")"
+t "ignored: a non-dependency ignored file is KEEP, reason 'ignored files present'" has "$(line_keep gen feat-gen 'ignored files present (1): gen.tmp')"
 t "ignored: a nested repository in an ignored path is KEEP" has "$(line_keep nest feat-nest 'nested repository in ignored path')"
 wr --repo "$REPO" --json
 t "ignored: json carries ignored and ignored_outside" bash -c 'jq -e ".[] | select(.branch == \"feat-env\") | (.ignored == 1 and .ignored_outside == 1)" >/dev/null <<<"$1"' _ "$out"
 wr --repo "$REPO" --apply
-t "ignored apply: node_modules worktree removed, announced first" test "$(lnum "$NM_RM")" -gt 0 -a "$(lnum "$NM_RM")" -lt "$(lnum "removed $WTS/nm feat-nm (ignored entries: 1, of which outside the safe list: 0)")"
+t "ignored apply: node_modules worktree removed, announced first" test "$(lnum "$NM_RM")" -gt 0 -a "$(lnum "$NM_RM")" -lt "$(lnum "removed $WTS/nm feat-nm (ignored entries: 1, of which not dependency caches: 0)")"
 t "ignored apply: node_modules worktree and branch gone" bash -c '[ ! -d "$1" ]' _ "$WTS/nm"
 t "ignored apply: the .env worktree is kept with its file" test -f "$WTS/env/.env"
+t "ignored apply: the gen.tmp worktree is kept with its file" test -f "$WTS/gen/gen.tmp"
 t "ignored apply: ...and its branch" branch_exists feat-env
 t "ignored apply: the nested repository survives" test -d "$WTS/nest/scratch-repo/.git"
 build_ign; wr --repo "$REPO" --apply --include-ignored
-t "include-ignored: .env worktree is REMOVABLE" has "$(line_removable env feat-env 82) ignored=1"
-E_RM="removing $WTS/env (ignored entries: 1, of which outside the safe list: 1)"
-t "include-ignored: the removing line (with counts) comes before the removed line" test "$(lnum "$E_RM")" -gt 0 -a "$(lnum "$E_RM")" -lt "$(lnum "removed $WTS/env feat-env (ignored entries: 1, of which outside the safe list: 1)")"
-t "include-ignored: the .env worktree is removed" bash -c '[ ! -d "$1" ]' _ "$WTS/env"
+t "include-ignored: gen.tmp worktree is REMOVABLE" has "$(line_removable gen feat-gen 84) ignored=1"
+t "include-ignored: the report lists the ignored file before removal" has "  will delete ignored files (1): gen.tmp"
+t "include-ignored: a secret-looking .env is still KEEP and named" has "$(line_keep env feat-env "$SECRET_REASON")"
+E_RM="removing $WTS/gen (ignored entries: 1, of which not dependency caches: 1)"
+t "include-ignored: the removing line (with counts) comes before the removed line" test "$(lnum "$E_RM")" -gt 0 -a "$(lnum "$E_RM")" -lt "$(lnum "removed $WTS/gen feat-gen (ignored entries: 1, of which not dependency caches: 1)")"
+t "include-ignored: the gen.tmp worktree is removed" bash -c '[ ! -d "$1" ]' _ "$WTS/gen"
+t "include-ignored: the .env worktree and its file survive" test -f "$WTS/env/.env"
 t "include-ignored: a nested repository is still KEEP" has "$(line_keep nest feat-nest 'nested repository in ignored path')"
 t "include-ignored: ...and survives" test -d "$WTS/nest/scratch-repo/.git"
-build_ign; mkdir -p "$XDG_CONFIG_HOME/wt-reap"; printf '# comment\n\n.env*\n' >"$XDG_CONFIG_HOME/wt-reap/ignorable"
+build_ign; mkdir -p "$XDG_CONFIG_HOME/wt-reap"; printf '# comment\n\n.env*\n*.tmp\n' >"$XDG_CONFIG_HOME/wt-reap/ignorable"
 wr --repo "$REPO"
-t "owner file: .env* listed makes the .env worktree REMOVABLE" has "$(line_removable env feat-env 82) ignored=1"
+t "owner file: *.tmp listed makes the gen.tmp worktree REMOVABLE" has "$(line_removable gen feat-gen 84) ignored=1"
+t "owner file: .env* listed does not make a secret removable (still KEEP)" has "$(line_keep env feat-env "$SECRET_REASON")"
 t "owner file: nested repository is still KEEP" has "$(line_keep nest feat-nest 'nested repository in ignored path')"
 build_ign; mkdir -p "$XDG_CONFIG_HOME/wt-reap"; printf '$(touch MARKER)\n`touch MARKER`\n' >"$XDG_CONFIG_HOME/wt-reap/ignorable"
 wr --repo "$REPO"
-t "owner file: command text is only a glob (.env still KEEP)" has "$(line_keep env feat-env 'ignored files outside the safe list (1): .env')"
+t "owner file: command text is only a glob (.env still KEEP)" has "$(line_keep env feat-env "$SECRET_REASON")"
+t "owner file: command text is only a glob (gen.tmp still KEEP)" has "$(line_keep gen feat-gen 'ignored files present (1): gen.tmp')"
 t "owner file: nothing executed (no marker file)" test ! -e "$cwd0/MARKER" -a ! -e "$REPO/MARKER" -a ! -e "$WTS/env/MARKER"
 rm -f "$XDG_CONFIG_HOME/wt-reap/ignorable"
+
+# 8b. ignored build outputs are inspected; dependency caches are not; secrets are never removed ---------------
+build_ign2() {
+  newfx; rm -f "$XDG_CONFIG_HOME/wt-reap/ignorable"
+  mkwt dn feat-dn; mkdir "$WTS/dn/dist"; echo 'notes' >"$WTS/dn/dist/NOTES.txt"; ghset feat-dn 91
+  mkwt dne feat-dne; mkdir "$WTS/dne/dist"; echo 'TOKEN=abc' >"$WTS/dne/dist/NOTES.env"; ghset feat-dne 98
+  mkwt bo feat-bo; mkdir "$WTS/bo/build"; echo bin >"$WTS/bo/build/output.bin"; ghset feat-bo 92
+  mkwt dep feat-dep; mkdir -p "$WTS/dep/node_modules/x" "$WTS/dep/.venv/lib" "$WTS/dep/__pycache__"; echo 'home = /usr' >"$WTS/dep/.venv/pyvenv.cfg"
+  echo js >"$WTS/dep/node_modules/x/i.js"; echo py >"$WTS/dep/.venv/lib/a.py"; : >"$WTS/dep/__pycache__/m.pyc"; ghset feat-dep 93
+  mkwt el feat-el; echo S=1 >"$WTS/el/.env.local"; ghset feat-el 94
+  mkwt pk feat-pk; mkdir "$WTS/pk/dist"; echo k >"$WTS/pk/dist/server.key"; echo ok >"$WTS/pk/dist/a.js"; ghset feat-pk 95
+}
+build_ign2; b2="$(snap)"; wr --repo "$REPO"
+t "build outputs: dist/NOTES.txt in a merged clean worktree is KEEP, 'ignored files present'" has "$(line_keep dn feat-dn 'ignored files present (1): dist/NOTES.txt')"
+t "build outputs: dist/NOTES.env (matches *.env) is KEEP as secret-looking" has "$(line_keep dne feat-dne 'ignored files present (secret-looking, never removed): dist/NOTES.env')"
+t "build outputs: build/output.bin alone is KEEP without --include-ignored" has "$(line_keep bo feat-bo 'ignored files present (1): build/output.bin')"
+t "build outputs: node_modules, .venv and __pycache__ with files only is REMOVABLE" has "$(line_removable dep feat-dep 93) ignored=3"
+t "build outputs: a secret-looking file in dist/ is KEEP and named (even though dist is a build output)" hasre "^KEEP $WTS/pk feat-pk ignored files present \(secret-looking, never removed\): dist/server.key"
+t "build outputs: report mode removes nothing" test "$b2" = "$(snap)"
+wr --repo "$REPO" --apply
+t "build outputs apply: dist/NOTES.txt survives with its content" grep -q 'notes' "$WTS/dn/dist/NOTES.txt"
+t "build outputs apply: dist/NOTES.env survives with its content" grep -q 'TOKEN=abc' "$WTS/dne/dist/NOTES.env"
+t "build outputs apply: ...and its branch" branch_exists feat-dn
+t "build outputs apply: build/output.bin survives" test -f "$WTS/bo/build/output.bin"
+t "build outputs apply: the dependency-cache-only worktree and its branch are removed" bash -c '[ ! -d "$1" ]' _ "$WTS/dep"
+t "build outputs apply: ...branch" no branch_exists feat-dep
+t "build outputs apply: .env.local survives" test -f "$WTS/el/.env.local"
+t "build outputs apply: dist/server.key survives" test -f "$WTS/pk/dist/server.key"
+build_ign2; wr --repo "$REPO" --apply --include-ignored
+t "build outputs include-ignored: build/output.bin worktree is REMOVABLE" has "$(line_removable bo feat-bo 92) ignored=1"
+t "build outputs include-ignored: the report lists the count and the file before removal" has "  will delete ignored files (1): build/output.bin"
+t "build outputs include-ignored: the listing comes before the removed line" test "$(lnum "  will delete ignored files (1): build/output.bin")" -gt 0 -a "$(lnum "  will delete ignored files (1): build/output.bin")" -lt "$(lnum "removed $WTS/bo feat-bo (ignored entries: 1, of which not dependency caches: 1)")"
+t "build outputs include-ignored: build/output.bin worktree is removed" bash -c '[ ! -d "$1" ]' _ "$WTS/bo"
+t "build outputs include-ignored: dist/NOTES.txt worktree is removed too" bash -c '[ ! -d "$1" ]' _ "$WTS/dn"
+t "build outputs include-ignored: .env.local is KEEP and named" has "$(line_keep el feat-el 'ignored files present (secret-looking, never removed): .env.local')"
+t "build outputs include-ignored: ...and survives" test -f "$WTS/el/.env.local"
+t "build outputs include-ignored: dist/server.key is KEEP and survives" test -f "$WTS/pk/dist/server.key"
+build_ign2; wr --repo "$REPO" --json --include-ignored
+t "build outputs: json carries the ignored paths" bash -c 'jq -e ".[] | select(.branch == \"feat-bo\") | (.ignored_paths == [\"build/output.bin\"])" >/dev/null <<<"$1"' _ "$out"
+build_ign2; mkdir "$WTS/dep/build"; mkdir -p "$WTS/dep/dist/node_modules/y"; : >"$WTS/dep/dist/node_modules/y/z.js"
+wr --repo "$REPO"
+t "build outputs: node_modules nested in dist/ is a dependency cache, not inspected" has "$(line_removable dep feat-dep 93) ignored=4"
+
+# 8d. unreadable paths, secrets in caches, look-alike cache names, every secret pattern, links, the race ------------
+build_r2() {
+  newfx; rm -f "$XDG_CONFIG_HOME/wt-reap/ignorable"
+  mkwt unr1 feat-unr1; mkdir -p "$WTS/unr1/node_modules/q" "$WTS/unr1/node_modules/ok"; : >"$WTS/unr1/node_modules/q/f"; ghset feat-unr1 201
+  mkwt unr2 feat-unr2; mkdir -p "$WTS/unr2/build/sub"; : >"$WTS/unr2/build/sub/f"; ghset feat-unr2 202
+  mkwt sec1 feat-sec1; mkdir -p "$WTS/sec1/node_modules/x"; echo S=1 >"$WTS/sec1/node_modules/x/.env"; ghset feat-sec1 203
+  mkwt sec2 feat-sec2; mkdir -p "$WTS/sec2/.venv"; echo 'home = /usr' >"$WTS/sec2/.venv/pyvenv.cfg"; echo S=1 >"$WTS/sec2/.venv/.env"; ghset feat-sec2 204
+  mkwt v1 feat-v1; mkdir "$WTS/v1/venv"; echo n >"$WTS/v1/venv/notes.txt"; ghset feat-v1 205
+  mkwt v2 feat-v2; mkdir "$WTS/v2/venv"; echo 'home = /usr' >"$WTS/v2/venv/pyvenv.cfg"; echo n >"$WTS/v2/venv/lib.py"; ghset feat-v2 206
+  mkwt v3 feat-v3; mkdir -p "$WTS/v3/build/sub/venv"; echo n >"$WTS/v3/build/sub/venv/notes.txt"; ghset feat-v3 207
+  mkdir -p "$tmp/outside"; echo precious >"$tmp/outside/target.txt"
+  mkwt lk feat-lk; mkdir "$WTS/lk/build"; ln -s "$tmp/outside/target.txt" "$WTS/lk/build/link"; ghset feat-lk 208
+  if ! isroot; then chmod 000 "$WTS/unr1/node_modules/q" "$WTS/unr2/build/sub"; fi
+}
+if isroot; then echo "SKIP - unreadable directory cases: root ignores directory permissions"; fi
+build_r2; wr --repo "$REPO"
+if ! isroot; then
+  t "unreadable: a directory inside node_modules is KEEP, not REMOVABLE" has "$(line_keep unr1 feat-unr1 'cannot read an ignored directory: node_modules/q')"
+  t "unreadable: build/ holding only an unreadable subdirectory is KEEP, not REMOVABLE ignored=0" has "$(line_keep unr2 feat-unr2 'cannot read an ignored directory: build/sub')"
+  wr --repo "$REPO" --apply --include-ignored
+  t "unreadable apply: both worktrees remain" test -d "$WTS/unr1" -a -d "$WTS/unr2"
+  chmod -R u+rwX "$WTS/unr1" "$WTS/unr2"; build_r2; wr --repo "$REPO"
+fi
+t "caches: a .env inside node_modules/x is KEEP and named" has "$(line_keep sec1 feat-sec1 'ignored files present (secret-looking, never removed): node_modules/x/.env')"
+t "caches: a .env inside a real .venv is KEEP and named" has "$(line_keep sec2 feat-sec2 'ignored files present (secret-looking, never removed): .venv/.env')"
+t "caches: a folder called venv without pyvenv.cfg is inspected (KEEP)" has "$(line_keep v1 feat-v1 'ignored files present (1): venv/notes.txt')"
+t "caches: a venv with pyvenv.cfg is a cache (REMOVABLE)" has "$(line_removable v2 feat-v2 206) ignored=1"
+t "caches: a look-alike venv nested in build/ is inspected (KEEP)" has "$(line_keep v3 feat-v3 'ignored files present (1): build/sub/venv/notes.txt')"
+t "link: a symlink in an ignored dir counts as an ignored file (KEEP without the flag)" has "$(line_keep lk feat-lk 'ignored files present (1): build/link')"
+wr --repo "$REPO" --apply --include-ignored
+t "caches include-ignored: the .env in node_modules is still KEEP and survives" test -f "$WTS/sec1/node_modules/x/.env"
+t "caches include-ignored: the .env in .venv is still KEEP and survives" test -f "$WTS/sec2/.venv/.env"
+t "caches include-ignored: the look-alike venvs hold plain files, so the flag removes them (and only the flag)" bash -c '[ ! -d "$1/v1" ] && [ ! -d "$1/v3" ]' _ "$WTS"
+t "caches include-ignored: the real venv worktree is removed" bash -c '[ ! -d "$1" ]' _ "$WTS/v2"
+t "link include-ignored: the worktree with a symlink is removed" bash -c '[ ! -d "$1" ]' _ "$WTS/lk"
+t "link include-ignored: the link target outside the worktree survives" grep -q precious "$tmp/outside/target.txt"
+
+# every secret pattern, by name (case-insensitive) or by a parent directory, kept even with --include-ignored
+newfx; rm -f "$XDG_CONFIG_HOME/wt-reap/ignorable"
+npat=0; patnames=(.env .env.local prod.env PROD.ENV .envrc secrets.yml Secrets.json db-secret.json terraform.tfstate terraform.tfstate.backup .npmrc .pypirc .netrc .git-credentials server.pem a.key id_rsa a.p12 a.keystore credentials.json Credentials/a.json)
+for n in "${patnames[@]}"; do
+  npat=$((npat + 1)); mkwt "pat$npat" "feat-pat$npat"; mkdir -p "$WTS/pat$npat/build/$(dirname "$n")"; echo x >"$WTS/pat$npat/build/$n"; ghset "feat-pat$npat" $((300 + npat))
+done
+mkwt nearmiss feat-near; mkdir "$WTS/nearmiss/build"; echo x >"$WTS/nearmiss/build/my-secret.txt"; echo x >"$WTS/nearmiss/build/environment.txt"; ghset feat-near 399
+wr --repo "$REPO" --include-ignored
+npat=0
+for n in "${patnames[@]}"; do
+  npat=$((npat + 1))
+  t "secret pattern: build/$n is KEEP even with --include-ignored" hasre "^KEEP $WTS/pat$npat feat-pat$npat ignored files present \(secret-looking, never removed\): "
+done
+t "secret pattern: a near miss (my-secret.txt, environment.txt) is not a secret, removable with the flag" has "$(line_removable nearmiss feat-near 399) ignored=1"
+wr --repo "$REPO" --apply --include-ignored
+t "secret pattern apply: every secret survives" bash -c 'n=0; for d in "$1"/pat*; do n=$((n+1)); done; [ "$n" -eq "$2" ]' _ "$WTS" "${#patnames[@]}"
+t "secret pattern apply: the near-miss worktree is removed" bash -c '[ ! -d "$1" ]' _ "$WTS/nearmiss"
+
+# a large node_modules is still quick: name-only scan, no file read
+newfx; mkwt big feat-big; ghset feat-big 401
+mkdir -p "$WTS/big/node_modules"
+for d in $(seq 1 40); do mkdir "$WTS/big/node_modules/p$d"; (cd "$WTS/big/node_modules/p$d" && seq 1 100 | sed 's/^/f/' | xargs touch); done
+nf="$(find "$WTS/big/node_modules" -type f | wc -l)"
+t0=$(date +%s%N); wr --repo "$REPO"; t1=$(date +%s%N); ms=$(( (t1 - t0) / 1000000 ))
+echo "info - report over a node_modules of $nf files took ${ms} ms"
+t "large node_modules ($nf files): REMOVABLE" has "$(line_removable big feat-big 401) ignored=1"
+t "large node_modules: the report took under 5 s (${ms} ms)" test "$ms" -lt 5000
+
+# the race: files that appear after the ignored-file scan (during the gh lookup) must stop the removal
+newfx
+mkwt rc1 feat-race1; mkdir "$WTS/rc1/node_modules"; : >"$WTS/rc1/node_modules/p.js"; ghset feat-race1 411
+printf 'mkdir -p "%s/rc1/dist"; echo late >"%s/rc1/dist/late.txt"\n' "$WTS" "$WTS" >"$ghd/hook.$(keyof feat-race1).2"
+mkwt rc2 feat-race2; mkdir "$WTS/rc2/build"; echo a >"$WTS/rc2/build/a.bin"; ghset feat-race2 412
+printf 'echo b >"%s/rc2/build/b.bin"\n' "$WTS" >"$ghd/hook.$(keyof feat-race2).2"
+mkwt rc3 feat-race3; mkdir "$WTS/rc3/node_modules"; : >"$WTS/rc3/node_modules/p.js"; ghset feat-race3 413
+printf 'echo S=1 >"%s/rc3/node_modules/.env"\n' "$WTS" >"$ghd/hook.$(keyof feat-race3).2"
+mkwt rc4 feat-race4; mkdir "$WTS/rc4/node_modules"; : >"$WTS/rc4/node_modules/p.js"; ghset feat-race4 414
+wr --repo "$REPO" --apply --include-ignored
+t "race: an ignored file created after the scan is SKIPPED, not deleted" hasre "^SKIPPED $WTS/rc1 feat-race1: changed since the re-check: ignored files changed"
+t "race: ...it survives" test -f "$WTS/rc1/dist/late.txt"
+t "race: with --include-ignored, a changed set of ignored files is SKIPPED" hasre "^SKIPPED $WTS/rc2 feat-race2: changed since the re-check: ignored files changed"
+t "race: ...both files survive" test -f "$WTS/rc2/build/a.bin" -a -f "$WTS/rc2/build/b.bin"
+t "race: a secret created in a cache after the scan is SKIPPED" hasre "^SKIPPED $WTS/rc3 feat-race3: changed since the re-check: ignored files present \(secret-looking"
+t "race: ...it survives" test -f "$WTS/rc3/node_modules/.env"
+t "race: an untouched worktree is still removed" bash -c '[ ! -d "$1" ]' _ "$WTS/rc4"
+t "race: skipped is not a failure (exit 0)" test "$rc" -eq 0
+
+# the same race without the flag: the late file is reported as ignored files present
+newfx; mkwt rc5 feat-race5; mkdir "$WTS/rc5/node_modules"; : >"$WTS/rc5/node_modules/p.js"; ghset feat-race5 415
+printf 'mkdir -p "%s/rc5/dist"; echo late >"%s/rc5/dist/late.txt"\n' "$WTS" "$WTS" >"$ghd/hook.$(keyof feat-race5).2"
+wr --repo "$REPO" --apply
+t "race, no flag: a late ignored file is SKIPPED as ignored files present" hasre "^SKIPPED $WTS/rc5 feat-race5: changed since the re-check: ignored files present \(1\): dist/late.txt"
+t "race, no flag: ...it survives" test -f "$WTS/rc5/dist/late.txt"
+
+# 8c. a failing worktree listing during the re-check: nothing is removed, exit 10, the message says so
+newfx; mkwt wl1 feat-wl1; ghset feat-wl1 96; mkwt wl2 feat-wl2; ghset feat-wl2 97
+shimwl="$tmp/shimwl"; mkdir -p "$shimwl"; rm -f "$tmp/wl.count"
+cat >"$shimwl/git" <<SH
+#!/usr/bin/env bash
+prev=""
+for a in "\$@"; do
+  if [ "\$prev" = worktree ] && [ "\$a" = list ]; then
+    n=\$(( \$(cat "$tmp/wl.count" 2>/dev/null || echo 0) + 1 )); echo "\$n" >"$tmp/wl.count"
+    [ "\$n" -gt 1 ] && { echo "fake git: worktree list failed" >&2; exit 1; }
+  fi
+  prev="\$a"
+done
+exec "$shim/git" "\$@"
+SH
+chmod +x "$shimwl/git"
+out="$(cd "$cwd0" && env PATH="$shimwl:$shim:$PATH" WT_REAP_TEST=1 WT_REAP_GH_PATH="$fakebin" bash "$script" --repo "$REPO" --apply 2>"$tmp/err")"; rc=$?; err="$(cat "$tmp/err")"
+t "listing fails in the re-check: both were judged REMOVABLE first" test "$(grep -c '^REMOVABLE' <<<"$out")" -eq 2
+t "listing fails in the re-check: exit 10" test "$rc" -eq 10
+t "listing fails in the re-check: the message says the listing failed" grep -q 'wt-reap: git worktree list failed' <<<"$err"
+t "listing fails in the re-check: each is SKIPPED with the reason" hasre "^SKIPPED $WTS/wl1 feat-wl1: git worktree list failed during the re-check"
+t "listing fails in the re-check: ...also the later one" hasre "^SKIPPED $WTS/wl2 feat-wl2: git worktree list failed during the re-check"
+t "listing fails in the re-check: nothing removed (directories)" test -d "$WTS/wl1" -a -d "$WTS/wl2"
+t "listing fails in the re-check: nothing removed (branches)" bash -c 'git -C "$1" show-ref --verify -q refs/heads/feat-wl1 && git -C "$1" show-ref --verify -q refs/heads/feat-wl2' _ "$REPO"
+t "listing fails in the re-check: summary counts them as skipped" has "wt-reap: removed 0, failed 0, skipped 2, kept 1"
 
 # 9. a later gh failure during the re-check: earlier removals are reported, the rest SKIPPED, exit 10
 newfx

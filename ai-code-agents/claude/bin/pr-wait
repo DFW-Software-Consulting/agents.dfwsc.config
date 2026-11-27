@@ -1,23 +1,60 @@
 #!/usr/bin/env bash
 # pr-wait: wait in the background for a pull request's checks, then exit once.
-# Read-only: only calls `gh pr view`; writes no files; never merges, comments,
-# pushes or re-runs checks.
+# Read-only: calls only `gh pr view` and, with --review, plain `gh api` GETs
+# (issue comments with since/page, commit check suites); writes no files; never merges, comments,
+# approves, edits, pushes or re-runs checks.
 #
 # Usage: pr-wait <owner/repo> <pr> [--sha <head>] [--timeout 90m] [--interval 30s]
+#                [--review coderabbit]
 # Durations take s, m or h (a bare number is seconds).
 # A zero --interval or --timeout is a usage error (a zero interval would poll without pause).
-# Env: PR_WAIT_GRACE_SECS  seconds to tolerate an empty check list (default 120).
-#      PR_WAIT_ALLOW_ZERO_INTERVAL  set to any value to allow --interval 0 (test suites only).
+#
+# Green means: no check failed, none is pending, and that held on two consecutive polls
+# with the same number of checks (a workflow that registers late is not missed). Checks
+# that finished SUCCESS, NEUTRAL or SKIPPED all count as green by design; skipped and
+# neutral checks are not reported separately, so a caller that must tell "passed" from
+# "not run" has to read the checks itself. An empty check list is tolerated for the grace
+# period, then the result is no-checks.
+#
+# --review coderabbit (off by default; without it behaviour and output are unchanged):
+# green also needs the CodeRabbit review bot to be done for the CURRENT head, meaning any
+# one of: a submitted review (COMMENTED, APPROVED or CHANGES_REQUESTED; never DISMISSED or
+# PENDING) by the bot on the head (review=reviewed); the bot's own check row, named exactly
+# CodeRabbit and outside any workflow, no longer pending, which includes "skipped" (review=check);
+# or a bot summary comment that holds the skip marker AND names the head's first 7 characters
+# (review=skipped). CodeRabbit edits one summary comment in place on every push and keeps the
+# skip marker in it, so the marker or an edit time alone never counts. A review of an older head
+# never counts. Issue comments are read only once the checks have settled and the review is
+# still undecided, only those updated since the last read, at most PR_WAIT_COMMENT_PAGES pages
+# (the output says when capped). If, PR_WAIT_REVIEW_GRACE_SECS after the head was pushed (the
+# earliest check-suite created_at for the head; the time this run first read it while that
+# lookup fails, retried every poll), there is no review, skip or check row for the head, the
+# wait stops: review=absent when the bot never reviewed or commented on the PR, review=absent-for-head
+# when it did on an earlier head. With the flag on, the last line carries a trailing
+# review=<reviewed|check|skipped|absent|absent-for-head|pending>.
+#
+# gh failures: each gh call is bounded (the shorter of PR_WAIT_CALL_SECS and the time left).
+# Transient errors (rate limits, 5xx, network) are retried with doubling backoff (interval, 2x,
+# 4x, ... up to PR_WAIT_BACKOFF_MAX_SECS, or the Retry-After seconds when gh prints them) and
+# given up on only when at least three in a row have lasted PR_WAIT_OUTAGE_SECS. Auth (HTTP 401,
+# a 403 that is not a rate limit, gh auth login), not-found (HTTP 404) and malformed responses
+# stop after three in a row. Status codes match only as a whole "HTTP nnn".
+#
+# Env (seconds): PR_WAIT_GRACE_SECS 120 (empty check list), PR_WAIT_REVIEW_GRACE_SECS 300
+#   (bot presence), PR_WAIT_CALL_SECS 60, PR_WAIT_OUTAGE_SECS 600, PR_WAIT_BACKOFF_MAX_SECS 300,
+#   PR_WAIT_COMMENT_PAGES 5.
+#   PR_WAIT_ALLOW_ZERO_INTERVAL (any value) allows --interval 0, PR_WAIT_NO_TIMEOUT_CMD
+#   (any value) forces the no-`timeout` fallback; both are for test suites only.
 #
 # stdout: one line per state change; the last line is always
-#   PR-WAIT <repo>#<n> <result> sha=<sha> mins=<n>
+#   PR-WAIT <repo>#<n> <result> sha=<sha> mins=<n> [review=<state>]
 # result: green | failed:<check> | timeout | head-changed | closed | no-checks | error:<class>
 # exit:   0 green, 1 failed, 2 timeout, 3 head-changed, 4 closed or merged,
-#         5 no-checks, 10 usage error or three consecutive gh errors.
+#         5 no-checks, 10 usage error or gh unavailable (see gh failures).
 set -uo pipefail
 
 usage() {
-  echo "usage: pr-wait <owner/repo> <pr> [--sha <head>] [--timeout 90m] [--interval 30s]" >&2
+  echo "usage: pr-wait <owner/repo> <pr> [--sha <head>] [--timeout 90m] [--interval 30s] [--review coderabbit]" >&2
 }
 
 repo="${1:-?}"; pr="${2:-?}"; sha_seen="-"
@@ -35,7 +72,7 @@ to_secs() {  # 90m -> 5400 ; empty output on a bad value
   case "$u" in m) echo $((n * 60)) ;; h) echo $((n * 3600)) ;; *) echo "$n" ;; esac
 }
 
-pin=""; timeout_s=5400; interval_s=30
+pin=""; timeout_s=5400; interval_s=30; review_on=0
 args=("$@")
 [ "${#args[@]}" -ge 2 ] || usage_fail "need <owner/repo> and <pr>"
 [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || usage_fail "bad repo: $repo"
@@ -44,7 +81,7 @@ i=2
 while [ "$i" -lt "${#args[@]}" ]; do
   flag="${args[$i]}"
   case "$flag" in
-    --sha|--timeout|--interval)
+    --sha|--timeout|--interval|--review)
       [ $((i + 1)) -lt "${#args[@]}" ] || usage_fail "$flag needs a value"
       val="${args[$((i + 1))]}"
       case "$flag" in
@@ -54,6 +91,8 @@ while [ "$i" -lt "${#args[@]}" ]; do
         --interval) interval_s="$(to_secs "$val")" || usage_fail "bad duration: $val"
           [ "$interval_s" -gt 0 ] || [ -n "${PR_WAIT_ALLOW_ZERO_INTERVAL:-}" ] \
             || usage_fail "--interval must be greater than zero" ;;
+        --review) [ "$val" = coderabbit ] || usage_fail "unknown review bot: $val (only coderabbit)"
+          review_on=1 ;;
       esac
       i=$((i + 2)) ;;
     *) usage_fail "unexpected argument: $flag" ;;
@@ -61,12 +100,21 @@ while [ "$i" -lt "${#args[@]}" ]; do
 done
 grace_s="${PR_WAIT_GRACE_SECS:-120}"
 [[ "$grace_s" =~ ^[0-9]+$ ]] || usage_fail "bad PR_WAIT_GRACE_SECS: $grace_s"
+review_grace_s="${PR_WAIT_REVIEW_GRACE_SECS:-300}"; call_s="${PR_WAIT_CALL_SECS:-60}"
+outage_s="${PR_WAIT_OUTAGE_SECS:-600}"; backoff_max_s="${PR_WAIT_BACKOFF_MAX_SECS:-300}"
+for v in "$review_grace_s" "$call_s" "$outage_s" "$backoff_max_s"; do
+  [[ "$v" =~ ^[0-9]+$ ]] || usage_fail "bad numeric environment value: $v"
+done
+[ "$call_s" -gt 0 ] || usage_fail "PR_WAIT_CALL_SECS must be greater than zero"
 command -v gh >/dev/null 2>&1 || usage_fail "gh not found"
 command -v jq >/dev/null 2>&1 || usage_fail "jq not found"
 
 start=$SECONDS
+review_state="pending"
 finish() {  # RESULT EXIT
-  echo "PR-WAIT ${repo}#${pr} $1 sha=${sha_seen} mins=$(( (SECONDS - start) / 60 ))"
+  local tail_=""
+  [ "$review_on" -eq 1 ] && tail_=" review=${review_state}"
+  echo "PR-WAIT ${repo}#${pr} $1 sha=${sha_seen} mins=$(( (SECONDS - start) / 60 ))${tail_}"
   exit "$2"
 }
 mask() {  # strip token-shaped strings from text we echo
@@ -76,80 +124,246 @@ mask() {  # strip token-shaped strings from text we echo
     -e 's/([Bb]earer|[Tt]oken|[Bb]asic)[ :=]+[A-Za-z0-9._~+\/=-]{12,}/\1 [masked]/g' \
     -e 's/[A-Za-z0-9_-]{40,}/[masked]/g'
 }
+# Classify a gh failure by its message, matching status codes only as a whole "HTTP nnn".
+# ratelimit (primary or secondary) and gh (anything else) are transient; auth, notfound and
+# malformed responses are permanent.
 err_class() {
   case "$1" in
-    *401*|*403*|*[Cc]redential*|*[Aa]uth*|*[Tt]oken*|*login*) echo auth ;;
-    *404*|*"Could not resolve"*|*"not found"*) echo notfound ;;
+    *[Rr]ate\ limit*|*[Rr]etry-[Aa]fter*|*[Aa]buse\ detection*) echo ratelimit ;;
+    *"HTTP 401"*|*"Bad credentials"*|*[Aa]uthentication\ required*|*"gh auth login"*|*"not logged in"*|*"HTTP 403"*) echo auth ;;
+    *"HTTP 404"*|*"Could not resolve to"*) echo notfound ;;
     *) echo gh ;;
   esac
+}
+retry_after() {  # seconds from "Retry-After: N" in an error text, else 0
+  local t
+  if [[ "$1" =~ [Rr]etry-[Aa]fter[:=\ ]+([0-9]+) ]]; then t="${BASH_REMATCH[1]}"; echo "${t:0:6}"; else echo 0; fi
+}
+
+# Run gh with a time limit: the shorter of PR_WAIT_CALL_SECS and the time left overall, so the
+# overall --timeout holds even when gh hangs. Output (stdout+stderr) goes to stdout. A hung
+# call returns 124 and says so. Uses coreutils timeout; without it, a background watcher.
+ghcall() {
+  local left lim rc g w
+  left=$((timeout_s - (SECONDS - start))); [ "$left" -ge 1 ] || left=1
+  lim="$call_s"; [ "$left" -lt "$lim" ] && lim="$left"
+  if [ -z "${PR_WAIT_NO_TIMEOUT_CMD:-}" ] && command -v timeout >/dev/null 2>&1; then
+    timeout -k 2 "$lim" gh "$@" 2>&1; rc=$?
+    { [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; } && rc=124
+  else
+    gh "$@" 2>&1 & g=$!
+    ( sleep "$lim"; command -v pkill >/dev/null 2>&1 && pkill -P "$g" 2>/dev/null; kill "$g" 2>/dev/null ) >/dev/null 2>&1 & w=$!
+    wait "$g"; rc=$?
+    command -v pkill >/dev/null 2>&1 && pkill -P "$w" 2>/dev/null; kill "$w" 2>/dev/null
+    { [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; } && rc=124
+  fi
+  [ "$rc" -eq 124 ] && echo "gh call timed out after ${lim}s"
+  return "$rc"
 }
 
 # jq: classify the rollup -> "<n_total> <n_pending> <n_failed> <first_failed_name>"
 # A check is green only when positively recognised as passed; anything else is failed
 # (or pending). The verdict is decided from the counts, never from the names. The name is
 # only for display: control bytes removed, capped, "unknown" when nothing is left.
-# shellcheck disable=SC2016  # jq program, not shell
-classify='
+# shellcheck disable=SC2016  # jq programs, not shell
+cls='
+  def cls:
+    if has("state") and (has("status")|not) then
+      (if .state=="SUCCESS" then "g" elif (.state=="PENDING" or .state=="EXPECTED") then "p" else "f" end)
+    elif .status != "COMPLETED" then "p"
+    elif (.conclusion=="SUCCESS" or .conclusion=="NEUTRAL" or .conclusion=="SKIPPED") then "g"
+    else "f" end;'
+classify="$cls"'
   (.statusCheckRollup // []) as $r
   | [$r[] | {n: ((.name // .context // "") | tostring
                  | gsub("[\u0000-\u001f\u007f-\u009f]"; "") | .[0:100]
                  | if . == "" then "unknown" else . end),
-      c: (if has("state") and (has("status")|not) then
-            (if .state=="SUCCESS" then "g" elif (.state=="PENDING" or .state=="EXPECTED") then "p" else "f" end)
-          elif .status != "COMPLETED" then "p"
-          elif (.conclusion=="SUCCESS" or .conclusion=="NEUTRAL" or .conclusion=="SKIPPED") then "g"
-          else "f" end)}] as $c
+      c: cls}] as $c
   | [$c[]|select(.c=="f")] as $f
   | "\($c|length) \([$c[]|select(.c=="p")]|length) \($f|length) \($f|first // {n:""}|.n)"'
+# jq: CodeRabbit facts from the pr view JSON -> "<reviews_of_head> <reviews_any> <rows> <rows_not_pending>"
+# Only the bot's own login (not a name that merely contains it) and only submitted reviews
+# (COMMENTED, APPROVED, CHANGES_REQUESTED) count; DISMISSED and PENDING never do. The bot's
+# check row is the exact name "CodeRabbit" outside any workflow (an Actions job or a check
+# named e.g. coderabbit-lint is not it).
+# shellcheck disable=SC2016
+rv_pr="$cls"'
+  def bot: (. // "") | test("^coderabbitai(\\[bot\\])?$");
+  ((.reviews // []) | map(select(.author.login | bot))) as $rv
+  | ((.statusCheckRollup // []) | map(select(
+      ((.name // .context // "") == "CodeRabbit") and ((.workflowName // "") == "")))) as $ck
+  | [$rv[] | select((.state // "") | IN("COMMENTED", "APPROVED", "CHANGES_REQUESTED"))
+           | select((.commit.oid // "") == $h)] as $ok
+  | "\($ok | length) \($rv | length) \($ck | length) \([$ck[] | select(cls != "p")] | length)"'
+# jq: one page of issue comments -> "<bot_comments> <skip_summaries_naming_the_head> <max_updated_at> <count>"
+# The summary comment is edited in place on every push and keeps its skip marker, so the marker
+# alone says nothing about the current head; it counts only when it also names the head's sha.
+# shellcheck disable=SC2016
+rv_cm='
+  def bot: (. // "") | test("^coderabbitai(\\[bot\\])?$");
+  map(select(.user.login | bot)) as $c
+  | "\($c | length) \([$c[] | select((.body // "") | (contains($m) and contains($h7)))] | length) \(map(.updated_at // "") | max // "-") \(length)"'
+skip_marker='<!-- This is an auto-generated comment: skip review by coderabbit.ai -->'
+comment_pages="${PR_WAIT_COMMENT_PAGES:-5}"
 
-errs=0; last_status=""; first_head=""
+errs=0; err_first=0; permanent=0; last_status=""; first_head=""
+streak=0; prev_total=-1; review_done=0; t0=""; first_seen=""
+bot_seen=0; skip_seen=0; since=""
 emit() { if [ "$1" != "$last_status" ]; then echo "$1"; last_status="$1"; fi; }
 
+# Seconds since the head was pushed: the earliest check-suite created_at for the head. While that
+# lookup fails it is retried on every poll and the time this run first read the head stands in
+# (later than the truth, so it only lengthens waits); the stand-in is never cached.
+push_age() {
+  local ts base now
+  if [ -z "$t0" ]; then
+    ts="$(ghcall api "repos/${repo}/commits/${head}/check-suites?per_page=100" --paginate 2>/dev/null \
+          | jq -s -r '[.[]?.check_suites[]?.created_at] | min // empty' 2>/dev/null)"
+    [ -z "$ts" ] || t0="$ts"
+  fi
+  base="${t0:-$first_seen}"
+  now="$(date -u +%s)"
+  if ! base="$(date -u -d "$base" +%s 2>/dev/null)"; then echo $((SECONDS - start)); return; fi
+  echo $((now - base))
+}
+
+# Fetch the bot's comments (only those updated since the last fetch, at most comment_pages pages)
+# and fold them into bot_seen / skip_seen. Returns 1 with resp set on a failure.
+fetch_comments() {
+  local page=1 url out line nb ns mx n capped=0
+  next_since=""
+  while :; do
+    url="repos/${repo}/issues/${pr}/comments?per_page=100&page=${page}"
+    [ -z "$since" ] || url="${url}&since=${since}"
+    if ! out="$(ghcall api "$url")"; then resp="$out"; return 1; fi
+    if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$out"; then
+      resp="malformed comments response"; permanent=1; return 1
+    fi
+    line="$(jq -r --arg m "$skip_marker" --arg h7 "${head:0:7}" "$rv_cm" <<<"$out")"
+    read -r nb ns mx n <<<"$line"
+    [ "${nb:-0}" -gt 0 ] && bot_seen=1
+    [ "${ns:-0}" -gt 0 ] && skip_seen=1
+    [ "$mx" = "-" ] || [ -z "$mx" ] || [[ "$mx" < "${next_since:-}" ]] || next_since="$mx"
+    [ "${n:-0}" -ge 100 ] || break
+    page=$((page + 1))
+    if [ "$page" -gt "$comment_pages" ]; then capped=1; break; fi
+  done
+  if [ "$capped" -eq 1 ]; then
+    emit "comments capped at ${comment_pages} pages; later comments not read"
+    last_status=""
+  elif [ -n "${next_since:-}" ]; then
+    since="$next_since"
+  fi
+  return 0
+}
+
+# Review facts for the current head. Free facts first (reviews and check row from the pr view
+# JSON), then, only when asked (checks settled, review undecided), the comments. Sets
+# review_state/review_done; returns 1 with resp set on a gh failure.
+review_check() {  # $1 = 1 when the checks are settled
+  local rvh rva rows rown age
+  read -r rvh rva rows rown <<<"$(jq -r --arg h "$head" "$rv_pr" <<<"$resp")"
+  if [ "${rvh:-0}" -gt 0 ]; then review_state=reviewed; review_done=1; return 0; fi
+  if [ "${rows:-0}" -gt 0 ] && [ "${rows:-0}" -eq "${rown:-0}" ]; then review_state=check; review_done=1; return 0; fi
+  review_state=pending
+  [ "$1" -eq 1 ] || return 0
+  fetch_comments || return 1
+  if [ "$skip_seen" -eq 1 ]; then review_state=skipped; review_done=1; return 0; fi
+  [ "${rows:-0}" -eq 0 ] || return 0   # a pending CodeRabbit row: it is working on this head
+  age="$(push_age)"
+  if [ "$age" -ge "$review_grace_s" ]; then
+    if [ "${rva:-0}" -eq 0 ] && [ "$bot_seen" -eq 0 ]; then
+      emit "review bot absent (no review, comment or check row ${age}s after the push)"
+      review_state=absent
+    else
+      emit "review bot silent on this head (no review, skip or check row ${age}s after the push)"
+      review_state=absent-for-head
+    fi
+    review_done=1
+  fi
+  return 0
+}
+
+fields="state,headRefOid,statusCheckRollup"; [ "$review_on" -eq 1 ] && fields="$fields,reviews"
 while :; do
   elapsed=$((SECONDS - start))
-  ok=0
-  if resp="$(gh pr view "$pr" -R "$repo" --json state,headRefOid,statusCheckRollup 2>&1)" \
+  ok=0; permanent=0
+  if resp="$(ghcall pr view "$pr" -R "$repo" --json "$fields")" \
      && jq -e . >/dev/null 2>&1 <<<"$resp"; then
     # fail closed: without a head commit id the pin cannot be checked
     if jq -e '(.headRefOid | type) == "string" and .headRefOid != ""' >/dev/null 2>&1 <<<"$resp"; then ok=1
-    else resp="response has no head commit id"; fi
+    else resp="response has no head commit id"; permanent=1; fi
   fi
   if [ "$ok" -eq 1 ]; then
-    errs=0
     state="$(jq -r '.state // ""' <<<"$resp")"
     head="$(jq -r '.headRefOid // ""' <<<"$resp")"
     sha_seen="$head"
     [ -n "$first_head" ] || first_head="$head"
+    [ -n "$first_seen" ] || first_seen="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     if [ "$state" != "OPEN" ]; then
-      emit "state=$state"; finish closed 4
+      errs=0; emit "state=$state"; finish closed 4
     fi
     ref="${pin:-$first_head}"
     if [ -n "$ref" ] && [[ "$head" != "$ref"* && "$ref" != "$head"* ]]; then
-      emit "head changed: ${ref:0:7} -> ${head:0:7}"; finish head-changed 3
-    fi
-
-    read -r total pending nfailed failed <<<"$(jq -r "$classify" <<<"$resp")"
-    if [ "${nfailed:-0}" -gt 0 ]; then
-      emit "failed: $failed"; finish "failed:$failed" 1
-    fi
-    if [ "${total:-0}" -eq 0 ]; then
-      emit "head=${head:0:7} checks=0"
-      if [ "$elapsed" -ge "$grace_s" ]; then finish no-checks 5; fi
-    else
-      emit "head=${head:0:7} checks=$total pending=$pending"
-      if [ "$pending" -eq 0 ]; then finish green 0; fi
-    fi
-  else
-    errs=$((errs + 1))
-    text="$(mask <<<"$resp" | head -n1 | cut -c1-200)"
-    emit "gh error ($errs): $text"
-    last_status=""
-    if [ "$errs" -ge 3 ]; then
-      finish "error:$(err_class "$resp")" 10
+      errs=0; emit "head changed: ${ref:0:7} -> ${head:0:7}"; finish head-changed 3
     fi
   fi
+  if [ "$ok" -eq 1 ]; then
+    read -r total pending nfailed failed <<<"$(jq -r "$classify" <<<"$resp")"
+    if [ "${nfailed:-0}" -gt 0 ]; then
+      errs=0; [ "$review_on" -eq 0 ] || review_check 0 || true
+      emit "failed: $failed"; finish "failed:$failed" 1
+    fi
+    # settle: no pending on two consecutive polls with an unchanged number of checks
+    if [ "${total:-0}" -gt 0 ] && [ "$pending" -eq 0 ]; then
+      if [ "$total" -eq "$prev_total" ]; then streak=$((streak + 1)); else streak=1; fi
+    else streak=0; fi
+    prev_total="${total:-0}"
+    if [ "$review_on" -eq 1 ] && [ "$review_done" -eq 0 ]; then
+      settled=0; [ "$streak" -ge 2 ] && settled=1
+      if ! review_check "$settled"; then ok=0; fi
+    fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    errs=0
+    rtxt=""; [ "$review_on" -eq 1 ] && rtxt=" review=$review_state"
+    if [ "${total:-0}" -eq 0 ]; then
+      emit "head=${head:0:7} checks=0$rtxt"
+      if [ "$elapsed" -ge "$grace_s" ]; then finish no-checks 5; fi
+    else
+      emit "head=${head:0:7} checks=$total pending=$pending$rtxt"
+      if [ "$streak" -ge 2 ] && { [ "$review_on" -eq 0 ] || [ "$review_done" -eq 1 ]; }; then
+        finish green 0
+      fi
+    fi
+    delay="$interval_s"
+  else
+    errs=$((errs + 1))
+    [ "$errs" -ge 2 ] || err_first=$SECONDS
+    text="$(mask <<<"$resp" | grep -m1 . | cut -c1-200)"
+    [ -n "$text" ] || text="no error text printed"
+    emit "gh error ($errs): $text"
+    last_status=""
+    class="$(err_class "$resp")"
+    down=$((SECONDS - err_first))
+    if [ "$errs" -ge 3 ]; then
+      if [ "$class" = auth ] || [ "$class" = notfound ] || [ "$permanent" -eq 1 ]; then
+        finish "error:$class" 10
+      elif [ "$down" -ge "$outage_s" ]; then
+        echo "gh unavailable for ${down}s (tolerance ${outage_s}s), giving up; last error: $text"
+        finish "error:$class" 10
+      fi
+    fi
+    # doubling backoff from the interval, capped
+    delay="$interval_s"; k=1
+    while [ "$k" -lt "$errs" ] && [ "$delay" -lt "$backoff_max_s" ]; do delay=$((delay * 2)); k=$((k + 1)); done
+    [ "$delay" -le "$backoff_max_s" ] || delay="$backoff_max_s"
+    ra="$(retry_after "$resp")"; [ "$ra" -le "$delay" ] || delay="$ra"   # respect Retry-After
+  fi
 
-  if [ $((SECONDS - start)) -ge "$timeout_s" ]; then finish timeout 2; fi
-  sleep "$interval_s"
+  left=$((timeout_s - (SECONDS - start)))
+  if [ "$left" -le 0 ]; then finish timeout 2; fi
+  [ "$delay" -le "$left" ] || delay="$left"
+  sleep "$delay"
 done

@@ -50,6 +50,7 @@ def load(name, fn):
 
 sys.path.insert(0, _here)
 import _cmd_dirs as cd  # noqa: E402  shared directory walker (an import failure disables the gate)
+import _gh_repo as ghr  # noqa: E402  repository a branch's PRs belong to (same failure rule)
 gg = load("_git_guard_check", "_git-guard-check.py")   # git(), stamp_info(), push_parts(), default_branch()
 scan = gg.scan
 pt = load("_public_text_check", "_public-text-check.py")  # find_hits() locates gh commands
@@ -159,9 +160,85 @@ def text_exempt(longs, shorts, refspecs):
             or (gg.has_long("push", longs, "--tags") and not refspecs))
 
 
-def pr_repo_flag(args):
-    # Another repository (--repo / -R) cannot be mapped to this stamp.
-    return any(a in ("-R", "--repo") or a.startswith(("--repo=", "-R")) for a in args[2:])
+# gh pr create flags that take a value (long names, then the short ones); every
+# other flag is a switch. A flag outside these two sets makes the command
+# unparsable, which is treated as the current repository.
+PR_VALUE_LONG = {"--assignee", "--base", "--body", "--body-file", "--head", "--label", "--milestone",
+                 "--project", "--reviewer", "--template", "--title", "--recover"}
+PR_SWITCH_LONG = {"--draft", "--dry-run", "--fill", "--fill-first", "--fill-verbose",
+                  "--no-maintainer-edit", "--web", "--help"}
+PR_VALUE_SHORT = set("abBFHlmprtT")
+PR_SWITCH_SHORT = set("dfwh")
+LITERAL_REPO = re.compile(r"[A-Za-z0-9._/:@+-]+")
+
+
+def pr_repo_values(args):
+    """The values of every --repo / -R in gh pr create args (list), or None when
+    the flags cannot be read with certainty. Values of other flags are skipped,
+    so `--title "-R x/y"` is not a repo flag."""
+    a = args[2:]
+    out, i = [], 0
+    while i < len(a):
+        t = a[i]
+        i += 1
+        if t == "--" or not t.startswith("-") or t == "-":
+            return None
+        if t.startswith("--"):
+            name, eq, val = t.partition("=")
+            if name == "--repo":
+                if not eq:
+                    if i >= len(a):
+                        return None
+                    val, i = a[i], i + 1
+                out.append(val)
+            elif name in PR_VALUE_LONG:
+                if not eq:
+                    if i >= len(a):
+                        return None
+                    i += 1
+            elif name in PR_SWITCH_LONG:
+                pass
+            else:
+                return None
+            continue
+        j = 1
+        while j < len(t):
+            c = t[j]
+            if c == "R" or c in PR_VALUE_SHORT:
+                rest = t[j + 1:]
+                if rest.startswith("="):
+                    rest = rest[1:]
+                elif not rest:
+                    if i >= len(a):
+                        return None
+                    rest, i = a[i], i + 1
+                if c == "R":
+                    out.append(rest)
+                break
+            if c not in PR_SWITCH_SHORT:
+                return None
+            j += 1
+    return out
+
+
+def pr_repo_flag(args, d=None):
+    """True (the stamp does not apply) ONLY when the gate knows directory d,
+    resolves that checkout's push remote to OWNER/REPO, and the command has
+    exactly one --repo / -R whose value is a literal that normalises to a
+    different OWNER/REPO. Every other case (no flag, a variable or
+    substitution, an unresolvable push remote, an unknown directory, an
+    unparsable command or value, duplicate flags) is the current repository."""
+    vals = pr_repo_values(args)
+    if not vals or len(vals) != 1:
+        return False
+    v = vals[0]
+    if not d or not os.path.isdir(d) or not LITERAL_REPO.fullmatch(v):
+        return False
+    res, _err = ghr.resolve(d)
+    if not res:
+        return False
+    own, other = ghr.norm(res["repo"]), ghr.norm(v)
+    return bool(own and other and own != other)
 
 
 def targets(cmd, cwd):
@@ -179,7 +256,7 @@ def targets(cmd, cwd):
     except Exception:
         hits = []
     for kind, d, args in hits:
-        if kind != "gh" or args[:2] != ["pr", "create"] or pr_repo_flag(args):
+        if kind != "gh" or args[:2] != ["pr", "create"] or pr_repo_flag(args, d):
             continue
         if d and os.path.isdir(d):
             out.append((d, "origin"))
@@ -208,7 +285,7 @@ def analyze(cmd, cwd):
             if m:
                 out.append(("pr" if m.group(0).startswith("gh") else "push", None, None, c["why"]))
         elif c["kind"] == "gh":
-            if c["args"][:2] == ["pr", "create"] and not pr_repo_flag(c["args"]):
+            if c["args"][:2] == ["pr", "create"] and not pr_repo_flag(c["args"], c["dir"]):
                 out.append(("pr", c["dir"], None, c["why"]))
         elif c["sub"] == "push":
             _state, d, w = cd.effective(c)

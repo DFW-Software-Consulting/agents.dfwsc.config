@@ -181,25 +181,21 @@ wt-status.sh --offline # Offline mode (cached)
 - Uncommitted changes
 - Push status
 
-### `wt-cleanup.sh` - Remove Finished Worktrees
+### `wt-reap` - Report and Remove Finished Worktrees
 
-Cleans up worktrees after their PRs are merged.
+Reports which worktrees are safe to remove and why the rest are kept. `wt-cleanup` was retired because it forced removals.
 
 ```bash
-wt-cleanup.sh           # Actually removes
-wt-cleanup.sh --dry-run # Preview only
-wt-cleanup.sh -n        # Short form for --dry-run
-wt-cleanup.sh -o        # Offline mode
+wt-reap                    # Report only, changes nothing
+wt-reap --apply            # Remove only what the report lists as REMOVABLE
 ```
 
-**Options:**
-- `--dry-run, -n` - Preview only, don't remove
-- `--offline, -o` - Skip git fetch
-- `--help, -h` - Show help
+- Run `wt-reap` (report mode) first to see what is removable and why the rest is kept.
+- Run `wt-reap --apply` only when the owner has asked for removal.
+- Never pass `--include-ignored` unless the owner asks, and only after reading the listed ignored files; it never overrides the secret-looking rule.
+- Never use `git worktree remove --force` or `git branch -D` as a substitute.
 
-**Removes:**
-- Worktrees whose branches were deleted from remote
-- Worktrees whose branches were merged to main
+A worktree is removable only when it is clean, its branch tip equals its upstream (or the upstream is gone) and the tip is the head of a pull request merged into the default branch. A branch may be kept when its upstream is gone, because git does not see it as merged; that is reported as success. Worktrees with assume-unchanged or skip-worktree index flags are always kept, since those flags hide edits. Ignored files are deleted with the worktree, so they are checked. Only dependency and tool caches are dropped without reading their files: `node_modules`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.gradle`, `venv` and `.venv` (only when the folder holds `pyvenv.cfg`), `*.pyc`, `.DS_Store`. Every other ignored file, including everything inside build outputs such as `dist`, `build`, `.next`, `out`, `.cache` and `coverage`, and inside a folder that is merely called `venv`, keeps the worktree ("ignored files present") unless `--include-ignored` is passed; then the report lists the count and the first paths before anything is removed. Names that look like secrets keep the worktree even with `--include-ignored`, and are named: `.env`, `.env.*`, `*.env`, `.envrc`, `secrets.*`, `*secret*.json`, `*.tfstate`, `*.tfstate.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `*.pem`, `*.key`, `id_*`, `*.p12`, `*.keystore`, `credentials*` (case-insensitive, on the file name or any directory above it; inside the caches a name match only, no file is read). An unreadable directory anywhere keeps the worktree ("cannot read an ignored directory"). With `--apply` the ignored files are judged again right before each removal, and a worktree whose ignored files changed is skipped. A nested repository inside an ignored path (searched to depth 6, `node_modules` excluded) always keeps the worktree. `wt-reap` lives in the repo's `claude/bin/` and is not installed by this skill; see the repo docs for linking it onto your PATH.
 
 ### `wt-install.sh` - Installation Helper
 
@@ -247,11 +243,11 @@ git commit -m "your message"
 ### After PR Merges
 
 ```bash
-# See what can be cleaned up
-wt-cleanup.sh --dry-run
+# See what can be cleaned up (report only)
+wt-reap
 
-# Actually clean up
-wt-cleanup.sh
+# Only when the owner has asked for removal
+wt-reap --apply
 ```
 
 ### Daily Check
@@ -271,7 +267,6 @@ wt-new.sh 123 --offline
 wt-check.sh --offline
 wt-precommit.sh --offline
 wt-status.sh --offline
-wt-cleanup.sh --offline
 ```
 
 ## Red Flags - STOP If You See These

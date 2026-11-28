@@ -371,6 +371,11 @@ cg_out="$(bash "$here/run-completion-gate-tests.sh" 2>&1)"; cg_rc=$?
 if [ "$cg_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - completion-gate suite: $(grep '^passed:' <<<"$cg_out")"
 else fail=$((fail + 1)); echo "FAIL - completion-gate suite"; grep -E '^FAIL|^passed' <<<"$cg_out" | sed 's/^/       /'; fi
 
+# the gh-repo helper suite (its own script; counted here as one result)
+gr_out="$(bash "$here/run-gh-repo-tests.sh" 2>&1)"; gr_rc=$?
+if [ "$gr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - gh-repo suite: $(tail -1 <<<"$gr_out")"
+else fail=$((fail + 1)); echo "FAIL - gh-repo suite"; grep -E '^FAIL|passed' <<<"$gr_out" | sed 's/^/       /'; fi
+
 # the brain-task-sync evidence script suite (its own script; counted here as one result)
 bt_out="$(bash "$here/run-brain-task-sync-tests.sh" 2>&1)"; bt_rc=$?
 if [ "$bt_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-sync suite: $(tail -1 <<<"$bt_out")"
@@ -410,6 +415,16 @@ else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL
 pw_out="$(bash "$here/run-pr-wait-tests.sh" 2>&1)"; pw_rc=$?
 if [ "$pw_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - pr-wait suite: $(tail -1 <<<"$pw_out")"
 else fail=$((fail + 1)); echo "FAIL - pr-wait suite"; grep -E '^FAIL|passed' <<<"$pw_out" | sed 's/^/       /'; fi
+
+# the wt-reap script suite (its own script; counted here as one result)
+wr_out="$(bash "$here/run-wt-reap-tests.sh" 2>&1)"; wr_rc=$?
+if [ "$wr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - wt-reap suite: $(tail -1 <<<"$wr_out")"
+else fail=$((fail + 1)); echo "FAIL - wt-reap suite"; grep -E '^FAIL|passed' <<<"$wr_out" | sed 's/^/       /'; fi
+
+# the worktree-hygiene skill text suite (its own script; counted here as one result)
+ws_out="$(bash "$here/run-worktree-skill-tests.sh" 2>&1)"; ws_rc=$?
+if [ "$ws_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - worktree skill suite: $(tail -1 <<<"$ws_out")"
+else fail=$((fail + 1)); echo "FAIL - worktree skill suite"; grep -E '^FAIL|passed' <<<"$ws_out" | sed 's/^/       /'; fi
 
 echo
 echo "passed: $pass  failed: $fail"

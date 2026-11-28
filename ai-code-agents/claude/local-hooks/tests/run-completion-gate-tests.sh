@@ -127,7 +127,7 @@ s="s$((++sid_n))"; bash "$gate" <<<"$(ups "$s" "$wt")"; sleep_tick
 git -C "$wt" worktree add -q -b feat/new2 "$T/wt-new2" origin/main; echo code2 >> "$T/wt-new2/a.txt"; commit_all "$T/wt-new2" newcode2; stamp "$T/wt-new2"
 check "worktree created in the turn, committed and stamped: passes" silent "$(stop "$s" "$wt" "$silent_reply")"
 s="s$((++sid_n))"; bash "$gate" <<<"$(ups "$s" "$T/wt-pre")"; sleep_tick
-echo x >> "$wt/a.txt"
+echo x >> "$wt/a.txt"; sleep_tick   # leave more than the hook's 50 ms mtime slack before the next baseline, or this dirty file counts as touched in the next turn
 check "cwd is itself a linked worktree, change in the main one: block" block "$(stop "$s" "$T/wt-pre" "$silent_reply")"
 s="s$((++sid_n))"; bash "$gate" <<<"$(ups "$s" "$wt")"; sleep_tick
 git -C "$wt" worktree add -q -b feat/new3 "$T/wt-new3" origin/main

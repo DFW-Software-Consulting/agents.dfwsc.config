@@ -411,6 +411,11 @@ btr_out="$(bash "$here/run-brain-task-reminder-tests.sh" 2>&1)"; btr_rc=$?
 if [ "$btr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - brain-task-reminder suite: $(tail -1 <<<"$btr_out")"
 else fail=$((fail + 1)); echo "FAIL - brain-task-reminder suite"; grep -E '^FAIL|passed' <<<"$btr_out" | sed 's/^/       /'; fi
 
+# the pr-wait script suite (its own script; counted here as one result)
+pw_out="$(bash "$here/run-pr-wait-tests.sh" 2>&1)"; pw_rc=$?
+if [ "$pw_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - pr-wait suite: $(tail -1 <<<"$pw_out")"
+else fail=$((fail + 1)); echo "FAIL - pr-wait suite"; grep -E '^FAIL|passed' <<<"$pw_out" | sed 's/^/       /'; fi
+
 # the wt-reap script suite (its own script; counted here as one result)
 wr_out="$(bash "$here/run-wt-reap-tests.sh" 2>&1)"; wr_rc=$?
 if [ "$wr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - wt-reap suite: $(tail -1 <<<"$wr_out")"

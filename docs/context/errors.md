@@ -2,6 +2,14 @@
 
 Newest first. Before proposing a fix, search here for the failure's signature; an entry whose Status is not fixed, or with a `Tried and failed` line, changes the theory before another attempt. Entry fields: Signature (optional, the stable searchable part of the message or symptom), Cause, Fix, Tried and failed (optional, what was attempted that did not work and why), Guard (optional, the test, check or hook that now prevents a repeat), Status (optional: open, fixed or worked around; none means fixed), Date.
 
+## Merge gate bypass via indirection (merge-gate.sh)
+- Signature: `merge gate bypass via indirection`: a merge with no typed approval got through through `x=merge; gh pr $x`, a shell alias in gh's config, a redirected `GH_CONFIG_DIR`, `eval "$CMD"`, `find -exec`/`xargs`/`ssh` wrappers, `git -c alias.X`, or an edit of `_gate-common.sh`.
+- Cause: a PreToolUse hook sees only the text of one command line, not what it will execute.
+- Tried and failed: round one matched merge text literally on the line (bypassed by dynamic words, aliases, config redirection, GraphQL variables, and it blocked ordinary work such as commit messages); round two narrowed the rule to executed text (bypassed by variables later passed to `eval`, wrappers the walker does not unwrap, git aliases, the unprotected shared helper). Both rounds shared one assumption: that a text-matching hook can see what a command will execute.
+- Fix: stop chasing obfuscation. Treat the gate as a guard for honest direct calls and casual self-approval, not a barrier. Round three closed the visible indirections (see hooks-overview.md) and documented the rest as limits; everything else is out of scope. GitHub branch protection is the backstop.
+- Guard: `tests/run-merge-gate-tests.sh` (round-3 cases).
+- Date: 2026-11-27
+
 ## Completion-gate suite failed about 1 run in 4 (`worktree created in the turn, no change: passes`)
 - Signature: `FAIL - worktree created in the turn, no change: passes (expected silent, got block)` in `run-completion-gate-tests.sh`, intermittent (5 of 20 idle runs).
 - Cause: the preceding case wrote `echo x >> $wt/a.txt` and ran a Stop check, then the next case took its UserPromptSubmit baseline with no pause. The hook counts a path as touched this turn when its mtime is at or after the baseline time minus a 50 ms slack (`SLACK` in `_completion-gate-check.py`, deliberate), so when the Stop run took under about 50 ms the earlier write counted and the hook blocked. A zero-gap run fails every time; gaps of 45 ms and more pass.

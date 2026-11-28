@@ -1470,7 +1470,7 @@ def _body(body, parent, cwd, why, temp, env, temps, is_eval, inherit, depth, leg
 
 def body_guarded(e, which):
     """True when an unparseable-body entry's text holds a command the gate
-    `which` ("worktree" or "guard") judges."""
+    `which` ("worktree", "guard", "merge", ...) judges."""
     return bool(BODY_GUARDS[which].search(e.get("text", "")))
 
 
@@ -1562,6 +1562,13 @@ BODY_GUARDS.update({
     "pr_create": re.compile(r"\bgh\b\s+pr\s+create\b(?![^;&|]*(?:--web|--fill|--template))"),
     "text": re.compile(r"\bgit\b[^;&|]*\b(?:commit|tag)\b|\bgh\b\s+(?:pr|issue)\b"),
 })
+# merge-gate.sh: any text that can merge a pull request (gh pr merge, the GraphQL merge
+# mutations, the merge endpoints, gh alias set/import). Used for unparseable bodies and
+# by _merge-gate-check.py for script files and the text of the line.
+BODY_GUARDS["merge"] = re.compile(
+    r"\bgh\W{1,6}(?:\S+\W{1,6}){0,4}?pr\W{1,6}merge\b"
+    r"|\b(?:mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch)\b"
+    r"|/pulls/[^\s/'\"]+/merge\b|\brepos/[^\s/]+/[^\s/]+/merges\b|\bgh\W+alias\W+(?:set|import)\b")
 BUDGET_WHY = "the line has too many commands to analyse"
 
 

@@ -371,6 +371,11 @@ cg_out="$(bash "$here/run-completion-gate-tests.sh" 2>&1)"; cg_rc=$?
 if [ "$cg_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - completion-gate suite: $(grep '^passed:' <<<"$cg_out")"
 else fail=$((fail + 1)); echo "FAIL - completion-gate suite"; grep -E '^FAIL|^passed' <<<"$cg_out" | sed 's/^/       /'; fi
 
+# the merge gate suite (its own script; counted here as one result)
+mg_out="$(bash "$here/run-merge-gate-tests.sh" 2>&1)"; mg_rc=$?
+if [ "$mg_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - merge-gate suite: $(grep '^passed:' <<<"$mg_out")"
+else fail=$((fail + 1)); echo "FAIL - merge-gate suite"; grep -E '^FAIL|^passed' <<<"$mg_out" | sed 's/^/       /'; fi
+
 # the gh-repo helper suite (its own script; counted here as one result)
 gr_out="$(bash "$here/run-gh-repo-tests.sh" 2>&1)"; gr_rc=$?
 if [ "$gr_rc" -eq 0 ]; then pass=$((pass + 1)); echo "ok   - gh-repo suite: $(tail -1 <<<"$gr_out")"

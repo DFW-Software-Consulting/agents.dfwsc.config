@@ -2,6 +2,13 @@
 
 Newest first. Before proposing a fix, search here for the failure's signature; an entry whose Status is not fixed, or with a `Tried and failed` line, changes the theory before another attempt. Entry fields: Signature (optional, the stable searchable part of the message or symptom), Cause, Fix, Tried and failed (optional, what was attempted that did not work and why), Guard (optional, the test, check or hook that now prevents a repeat), Status (optional: open, fixed or worked around; none means fixed), Date.
 
+## Completion-gate suite failed about 1 run in 4 (`worktree created in the turn, no change: passes`)
+- Signature: `FAIL - worktree created in the turn, no change: passes (expected silent, got block)` in `run-completion-gate-tests.sh`, intermittent (5 of 20 idle runs).
+- Cause: the preceding case wrote `echo x >> $wt/a.txt` and ran a Stop check, then the next case took its UserPromptSubmit baseline with no pause. The hook counts a path as touched this turn when its mtime is at or after the baseline time minus a 50 ms slack (`SLACK` in `_completion-gate-check.py`, deliberate), so when the Stop run took under about 50 ms the earlier write counted and the hook blocked. A zero-gap run fails every time; gaps of 45 ms and more pass.
+- Fix: `sleep_tick` right after that write. The hook is unchanged.
+- Guard: rule for tests: leave more than the hook's mtime slack between a write that stays dirty and the next baseline (`sleep_tick`, or backdate the file with `touch -d`).
+- Date: 2026-11-27
+
 ## Differential suite failed only on some machines (`4:r1:c-cd`); checks gate recorded none_detected for this repo
 - Signature: `FAIL - 4:r1:c-cd [credit]: baseline denies, current allows (not a listed exception)` on `cd /tmp; git commit -F c.txt;`, 2 failed of 1964.
 - Cause: the case read `c.txt` in the shared `/tmp`; a stray `/tmp/c.txt` on the machine was found by the current hook (which resolves the message file) but not by the baseline, so the result depended on the machine. Separately, the repo had no `.claude/git-checks`, so `run-checks.sh` detected nothing and the checks gate passed any commit.
